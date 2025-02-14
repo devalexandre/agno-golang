@@ -204,7 +204,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			Choices: []Choices{
 				{
 					Message: models.Message{
-						Role:    "assistant",
+						Role:    models.TypeAssistantRole,
 						Content: completeMessage.String(),
 					},
 					Index:        0,

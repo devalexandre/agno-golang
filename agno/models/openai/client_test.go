@@ -27,7 +27,7 @@ func TestCreateChatCompletion(t *testing.T) {
 	}
 
 	message := models.Message{
-		Role:    "user",
+		Role:    models.TypeUserRole,
 		Content: "Hello, OpenAI!",
 	}
 
@@ -57,7 +57,7 @@ func TestCreateChatCompletionStream(t *testing.T) {
 	}
 
 	message := models.Message{
-		Role:    "user",
+		Role:    models.TypeUserRole,
 		Content: "What's the capital of Brazil?",
 	}
 

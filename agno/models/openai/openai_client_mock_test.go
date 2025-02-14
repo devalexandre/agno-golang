@@ -19,7 +19,7 @@ func TestOpenAI_Invoke_WithMock_Success(t *testing.T) {
 		opts:   opts,
 	}
 	messages := []models.Message{
-		{Role: "user", Content: "Test message"},
+		{Role: models.TypeUserRole, Content: "Test message"},
 	}
 	msg, err := instance.Invoke(context.Background(), messages)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestOpenAI_Invoke_WithMock_Error(t *testing.T) {
 		opts:   opts,
 	}
 	messages := []models.Message{
-		{Role: "user", Content: "Test message"},
+		{Role: models.TypeUserRole, Content: "Test message"},
 	}
 	msg, err := instance.Invoke(context.Background(), messages)
 	if err == nil {

@@ -24,7 +24,7 @@ func TestIntegration_OpenAI_Invoke(t *testing.T) {
 
 	// Prepare the test message.
 	msg := models.Message{
-		Role:    "user",
+		Role:    models.TypeUserRole,
 		Content: "What is the capital of France?",
 	}
 
@@ -58,7 +58,7 @@ func TestIntegration_OpenAI_InvokeStream(t *testing.T) {
 
 	// Prepare the test message.
 	msg := models.Message{
-		Role:    "user",
+		Role:    models.TypeUserRole,
 		Content: "Tell me a joke.",
 	}
 
