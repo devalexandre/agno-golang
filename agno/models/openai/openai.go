@@ -45,7 +45,7 @@ func (o *OpenAI) ChatCompletion(ctx context.Context, messages []models.Message, 
 }
 
 // Invoke sends a chat completion request and parses the response into a Message.
-func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message) (*models.Message, error) {
+func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message) (*models.MessageResponse, error) {
 	resp, err := o.ChatCompletion(ctx, messages)
 	if err != nil {
 		return nil, err
@@ -53,14 +53,14 @@ func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message) (*models
 	if len(resp.Choices) == 0 {
 		return nil, errors.New("no choices in response")
 	}
-	return &models.Message{
+	return &models.MessageResponse{
 		Role:    resp.Choices[0].Message.Role,
 		Content: resp.Choices[0].Message.Content,
 	}, nil
 }
 
 // AInvoke is the asynchronous version of Invoke. It delegates to Invoke.
-func (o *OpenAI) AInvoke(ctx context.Context, messages []models.Message) (*models.Message, error) {
+func (o *OpenAI) AInvoke(ctx context.Context, messages []models.Message) (*models.MessageResponse, error) {
 	return o.Invoke(ctx, messages)
 }
 
@@ -112,19 +112,20 @@ func (o *OpenAI) StreamChatCompletion(ctx context.Context, messages []models.Mes
 }
 
 // InvokeStream sends a streaming chat completion request and converts each chunk into a Message.
-func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message) (<-chan models.Message, error) {
+func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message) (<-chan models.MessageResponse, error) {
 	chunkStream, err := o.StreamChatCompletion(ctx, messages)
 	if err != nil {
 		return nil, err
 	}
-	respStream := make(chan models.Message)
+	respStream := make(chan models.MessageResponse)
 	go func() {
 		defer close(respStream)
 		for chunk := range chunkStream {
 			if len(chunk.Choices) > 0 {
-				respStream <- models.Message{
-					Role:    chunk.Choices[0].Message.Role,
-					Content: chunk.Choices[0].Message.Content,
+				respStream <- models.MessageResponse{
+					Role:      chunk.Choices[0].Message.Role,
+					Content:   chunk.Choices[0].Message.Content,
+					ToolCalls: chunk.Choices[0].Message.ToolCalls,
 				}
 			}
 		}
@@ -133,6 +134,6 @@ func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message) (<
 }
 
 // AInvokeStream is the asynchronous version of InvokeStream. It delegates to InvokeStream.
-func (o *OpenAI) AInvokeStream(ctx context.Context, messages []models.Message) (<-chan models.Message, error) {
+func (o *OpenAI) AInvokeStream(ctx context.Context, messages []models.Message) (<-chan models.MessageResponse, error) {
 	return o.InvokeStream(ctx, messages)
 }

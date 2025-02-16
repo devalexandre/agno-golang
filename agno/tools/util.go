@@ -1,15 +1,25 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
-
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/shared"
 )
 
-// ConvertToOpenAITool converte uma ferramenta Tool para o formato esperado pelo OpenAI.
+func mapToParameters(m map[string]interface{}) Parameters {
+	b, err := json.Marshal(m)
+	if err != nil {
+		panic(fmt.Errorf("failed to marshal schema: %w", err))
+	}
+	var p Parameters
+	err = json.Unmarshal(b, &p)
+	if err != nil {
+		panic(fmt.Errorf("failed to unmarshal schema into Parameters: %w", err))
+	}
+	return p
+}
+
 func ConvertToToos(tool Tool) Tools {
 	// Gera o esquema JSONSchema dos parâmetros.
 	paramsSchema, err := GenerateJSONSchema(tool.GetParameterStruct())
@@ -17,16 +27,41 @@ func ConvertToToos(tool Tool) Tools {
 		panic(fmt.Errorf("failed to generate JSONSchema: %w", err))
 	}
 
-	functionParameters := shared.FunctionParameters(paramsSchema)
-
 	return Tools{
 		Type: "function",
 		Function: &FunctionDefinition{
 			Name:        tool.Name(),
 			Description: tool.Description(),
-			Parameters:  functionParameters,
+			Parameters:  mapToParameters(paramsSchema),
 		},
 	}
+}
+
+// ConvertToolsToToolChoice converte uma struct Tools para ToolChoice.
+func ConvertToolsToToolChoice(tools Tools) (ToolCall, error) {
+	var toolChoice ToolCall
+
+	// Define o tipo.
+	toolChoice.Type = ToolType(tools.Type)
+
+	// Verifica se o campo Function está definido.
+	if tools.Function != nil {
+		// Cria uma instância de ToolFunction.
+		toolChoice.Function = FunctionCall{
+			Name: tools.Function.Name,
+		}
+
+		// Serializa os parâmetros para uma string JSON.
+
+		parametersJSON, err := json.Marshal(tools.Function.Parameters)
+		if err != nil {
+			return ToolCall{}, fmt.Errorf("failed to serialize parameters: %w", err)
+		}
+		toolChoice.Function.Arguments = string(parametersJSON)
+
+	}
+
+	return toolChoice, nil
 }
 
 func ConvertToTool(tool Tool) (map[string]interface{}, error) {
@@ -37,7 +72,7 @@ func ConvertToTool(tool Tool) (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"type": openai.ChatCompletionToolTypeFunction,
+		"type": "function",
 		"function": map[string]interface{}{
 			"name":        tool.Name(),
 			"description": tool.Description(),
@@ -49,6 +84,23 @@ func ConvertToTool(tool Tool) (map[string]interface{}, error) {
 // GenerateJSONSchema gera um esquema JSONSchema a partir de uma estrutura Go.
 func GenerateJSONSchema(paramStruct interface{}) (map[string]interface{}, error) {
 	t := reflect.TypeOf(paramStruct)
+	if t.Kind() == reflect.Map {
+		if t.Key().Kind() == reflect.String {
+			m, ok := paramStruct.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("failed to convert map to map[string]interface{}")
+			}
+			props := make(map[string]interface{})
+			for k, v := range m {
+				props[k] = v
+			}
+			return map[string]interface{}{
+				"type":       "object",
+				"properties": props,
+			}, nil
+		}
+		return nil, fmt.Errorf("unsupported map key type: %v", t.Key().Kind())
+	}
 	if t.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("expected a struct, got %v", t.Kind())
 	}

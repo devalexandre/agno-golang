@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/tools"
 )
 
 var baseUrl string = "https://api.openai.com/v1"
@@ -85,10 +86,10 @@ func (c *Client) Do(ctx context.Context, method, path string, body interface{}, 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		errorResponse := struct {
 			Error struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-				Param   string `json:"param,omitempty"`
-				Code    string `json:"code,omitempty"`
+				Message string      `json:"message"`
+				Type    string      `json:"type"`
+				Param   string      `json:"param,omitempty"`
+				Code    interface{} `json:"code,omitempty"`
 			} `json:"error"`
 		}{}
 		if err := json.NewDecoder(resp.Body).Decode(&errorResponse); err != nil {
@@ -98,7 +99,14 @@ func (c *Client) Do(ctx context.Context, method, path string, body interface{}, 
 	}
 
 	if v != nil {
-		return json.NewDecoder(resp.Body).Decode(v)
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		if len(bodyBytes) == 0 {
+			return nil
+		}
+		return json.Unmarshal(bodyBytes, v)
 	}
 	return nil
 }
@@ -134,6 +142,15 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		Stream:              callOptions.Stream,
 	}
 
+	//create map for tools
+	maptools := make(map[string]tools.Tool)
+	if len(callOptions.ToolCall) > 0 {
+		req.ToolChoice = "auto"
+		for _, t := range callOptions.ToolCall {
+			maptools[t.Name()] = t
+		}
+	}
+
 	if callOptions.Stream != nil && *callOptions.Stream {
 		// Set Stream flag as pointer value.
 		boolTrue := true
@@ -155,6 +172,13 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		httpResp, err := c.client.Do(httpReq)
 		if err != nil {
 			return nil, err
+		}
+		// Initialize tool mapping for streamed tool calls.
+		maptools := make(map[string]tools.Tool)
+		if len(callOptions.ToolCall) > 0 {
+			for _, t := range callOptions.ToolCall {
+				maptools[t.Name()] = t
+			}
 		}
 		defer httpResp.Body.Close()
 
@@ -189,6 +213,22 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 						}
 					}
 				}
+				if len(delta.ToolCalls) > 0 {
+					for _, tc := range delta.ToolCalls {
+						if tool, ok := maptools[tc.Function.Name]; ok {
+							resTool, err := tool.Execute([]byte(tc.Function.Arguments))
+							if err == nil {
+								toolResult := resTool.(string)
+								completeMessage.WriteString(toolResult)
+								if callOptions.StreamingFunc != nil {
+									if err := callOptions.StreamingFunc(ctx, []byte(toolResult)); err != nil {
+										return nil, err
+									}
+								}
+							}
+						}
+					}
+				}
 				if chunk.Choices[0].FinishReason == "stop" {
 					break
 				}
@@ -203,7 +243,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			Model:   req.Model,
 			Choices: []Choices{
 				{
-					Message: models.Message{
+					Message: models.MessageResponse{
 						Role:    models.TypeAssistantRole,
 						Content: completeMessage.String(),
 					},
@@ -215,9 +255,52 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	}
 
 	// If not streaming.
-	resp := &CompletionResponse{}
+	resp := new(CompletionResponse)
 	if err := c.Do(ctx, http.MethodPost, "/chat/completions", req, resp); err != nil {
 		return nil, err
 	}
+
+	if resp.Choices != nil && len(resp.Choices) > 0 {
+		req = parserResponseTool(req, resp, maptools)
+		if len(maptools) > 0 {
+			if err := c.Do(ctx, http.MethodPost, "/chat/completions", req, resp); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return resp, nil
+}
+
+func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, maptools map[string]tools.Tool) *ChatCompletionRequest {
+	for _, choice := range resp.Choices {
+		if choice.Message.Role == models.TypeAssistantRole {
+			//add message assistente
+			req.Messages = append(req.Messages, models.Message{
+				Role:      models.TypeAssistantRole,
+				Content:   choice.Message.Content,
+				ToolCalls: choice.Message.ToolCalls,
+			})
+			if len(choice.Message.ToolCalls) > 0 {
+				for _, tc := range choice.Message.ToolCalls {
+					//verifica se a função existe no map
+					if tcm, ok := maptools[tc.Function.Name]; ok {
+						//executa a tool
+						resTool, err := tcm.Execute([]byte(tc.Function.Arguments))
+						if err != nil {
+							return nil
+						}
+						//atualiza o content da resposta
+						req.Messages = append(req.Messages, models.Message{
+							ToolCallID: &tc.ID,
+							Role:       models.TypeToolRole,
+							Content:    resTool.(string),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return req
 }

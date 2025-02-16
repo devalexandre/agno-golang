@@ -8,16 +8,17 @@ type Tool interface {
 	Execute(params json.RawMessage) (interface{}, error) // Executa a ferramenta com os parâmetros fornecidos.
 	GetParameterStruct() interface{}                     // Retorna a estrutura que define os parâmetros.
 }
-type ToolCall = Tool
+
 type ToolType string
 
-type ToolChoice struct {
+type ToolCall struct {
+	ID       string       `json:"id,omitempty"`
 	Type     ToolType     `json:"type"`
-	Function ToolFunction `json:"function,omitempty"`
+	Function FunctionCall `json:"function,omitempty"`
 }
 
 // ToolFunction is a function to be called in a tool choice.
-type ToolFunction struct {
+type FunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
@@ -30,6 +31,14 @@ type Tools struct {
 	Function *FunctionDefinition `json:"function,omitempty"`
 }
 
+type Parameters struct {
+	// Type is the type of the parameters.
+	Type string `json:"type"`
+	// Properties is a map of properties for the parameters.
+	Properties Properties `json:"properties,omitempty"`
+}
+type Properties map[string]interface{}
+
 // FunctionDefinition is a definition of a function that can be called by the model.
 type FunctionDefinition struct {
 	// Name is the name of the function.
@@ -37,7 +46,7 @@ type FunctionDefinition struct {
 	// Description is a description of the function.
 	Description string `json:"description"`
 	// Parameters is a list of parameters for the function.
-	Parameters any `json:"parameters,omitempty"`
+	Parameters Parameters `json:"parameters,omitempty"`
 	// Strict is a flag to indicate if the function should be called strictly. Only used for openai llm structured output.
 	Strict bool `json:"strict,omitempty"`
 }

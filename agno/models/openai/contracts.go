@@ -5,19 +5,14 @@ import (
 	"net/http"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/tools"
 )
-
-// ToolCall representa uma chamada de ferramenta externa.
-type ToolCall struct {
-	Type      string `json:"type"`      // Tipo da ferramenta.
-	Function  string `json:"function"`  // Nome da função da ferramenta.
-	Arguments string `json:"arguments"` // Argumentos da função.
-}
 
 type OpenAIRequest struct {
 	Model               string                 `json:"model"`                           // Modelo a ser usado.
 	Messages            []models.Message       `json:"messages"`                        // Histórico da conversa.
-	Tools               []ToolCall             `json:"tool_calls,omitempty"`            // Chamadas de ferramentas externas.
+	Tools               []tools.Tools          `json:"tools,omitempty"`                 // Chamadas de ferramentas externas.
+	ToolChoice          string                 `json:"tool_choice,omitempty"`           // Chamada de ferramenta externa.
 	Store               *bool                  `json:"store,omitempty"`                 // Armazenamento da saída.
 	ReasoningEffort     *string                `json:"reasoning_effort,omitempty"`      // Esforço de raciocínio.
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`              // Metadados adicionais.
@@ -43,11 +38,11 @@ type OpenAIRequest struct {
 
 // New type definitions for chat completion.
 type Choices struct {
-	Index        int            `json:"index"`
-	Message      models.Message `json:"message"`
-	Logprobs     interface{}    `json:"logprobs"`
-	FinishReason string         `json:"finish_reason"`
-	Delta        models.Message `json:"delta"`
+	Index        int                    `json:"index"`
+	Message      models.MessageResponse `json:"message"`
+	Logprobs     interface{}            `json:"logprobs"`
+	FinishReason string                 `json:"finish_reason"`
+	Delta        models.MessageResponse `json:"delta"`
 }
 type CompletionChunk struct {
 	ID                string    `json:"id"`
@@ -82,4 +77,5 @@ type ChatCompletionMessage = models.Message
 type ChatCompletionResponse = CompletionResponse
 type ChatCompletionChunk = CompletionChunk
 type ChatCompletionRequest = OpenAIRequest
+
 type ChatCompletionChoice = Choices

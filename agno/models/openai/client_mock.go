@@ -59,7 +59,7 @@ func SimulateChatCompletionResponse(content string) func(ctx context.Context, me
 					{
 						Index:        0,
 						FinishReason: "stop",
-						Message: models.Message{
+						Message: models.MessageResponse{
 							Role:    models.TypeAssistantRole,
 							Content: content,
 						},

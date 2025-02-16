@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+
+	"github.com/devalexandre/agno-golang/agno/tools"
 )
 
 // CallOptions represents the options for making a request to the OpenAI API.
@@ -30,11 +32,25 @@ type CallOptions struct {
 	ExtraQuery          map[string]string                   `json:"-"`                               // Additional query parameters.
 	RequestParams       map[string]interface{}              `json:"request_params,omitempty"`        // Additional request parameters.
 	StreamingFunc       func(context.Context, []byte) error `json:"-"`                               // Callback function for streaming.
-	Tools               []ToolCall                          `json:"tools,omitempty"`                 // Tools for function calls.
+	Tools               []tools.Tools                       `json:"tools,omitempty"`                 // Tools for function calls.
+	ToolCall            []tools.Tool                        `json:"-"`                               // Tools for function calls.
 }
 
- // WithStreamingFunc adds a callback function for processing streaming chunks.
- // Setting this option will make the request be performed in streaming mode.
+func WithTools(tool []tools.Tool) Option {
+	var _tools []tools.Tools
+	for _, t := range tool {
+		toolConverted := tools.ConvertToToos(t)
+		_tools = append(_tools, toolConverted)
+	}
+
+	return func(o *CallOptions) {
+		o.ToolCall = tool
+		o.Tools = _tools
+	}
+}
+
+// WithStreamingFunc adds a callback function for processing streaming chunks.
+// Setting this option will make the request be performed in streaming mode.
 func WithStreamingFunc(f func(context.Context, []byte) error) Option {
 	return func(o *CallOptions) {
 		o.StreamingFunc = f
@@ -42,7 +58,7 @@ func WithStreamingFunc(f func(context.Context, []byte) error) Option {
 	}
 }
 
- // ClientOptions represents the options for the OpenAI API client.
+// ClientOptions represents the options for the OpenAI API client.
 type ClientOptions struct {
 	APIKey         string                 `json:"-"`                       // API key.
 	Organization   string                 `json:"-"`                       // Associated organization.
@@ -62,7 +78,7 @@ type ClientOptions struct {
 	PresencePenalty  *float32 // Penalidade de presença.
 }
 
- // DefaultCallOptions returns the default options for the request.
+// DefaultCallOptions returns the default options for the request.
 func DefaultCallOptions() *CallOptions {
 	return &CallOptions{
 		Temperature:      floatPtr(0.7),
@@ -73,7 +89,7 @@ func DefaultCallOptions() *CallOptions {
 	}
 }
 
- // DefaultOptions returns the default options for the OpenAI API client.
+// DefaultOptions returns the default options for the OpenAI API client.
 func DefaultOptions() *ClientOptions {
 	return &ClientOptions{
 		Model:            "gpt-3.5-turbo",
@@ -85,170 +101,170 @@ func DefaultOptions() *ClientOptions {
 	}
 }
 
- // WithModel sets the model to be used.
+// WithModel sets the model to be used.
 func WithModel(model string) func(*ClientOptions) {
 	return func(o *ClientOptions) {
 		o.Model = model
 	}
 }
 
- // WithAPIKey sets the API key for the client.
+// WithAPIKey sets the API key for the client.
 func WithAPIKey(key string) func(*ClientOptions) {
 	return func(o *ClientOptions) {
 		o.APIKey = key
 	}
 }
 
- // Option is a function that modifies the options.
+// Option is a function that modifies the options.
 type Option func(*CallOptions)
 
- // WithStore specifies if the output should be stored.
+// WithStore specifies if the output should be stored.
 func WithStore(store bool) Option {
 	return func(o *CallOptions) {
 		o.Store = boolPtr(store)
 	}
 }
 
- // WithReasoningEffort sets the reasoning effort.
+// WithReasoningEffort sets the reasoning effort.
 func WithReasoningEffort(reasoningEffort string) Option {
 	return func(o *CallOptions) {
 		o.ReasoningEffort = strPtr(reasoningEffort)
 	}
 }
 
- // WithMetadata sets the additional metadata.
+// WithMetadata sets the additional metadata.
 func WithMetadata(metadata map[string]interface{}) Option {
 	return func(o *CallOptions) {
 		o.Metadata = metadata
 	}
 }
 
- // WithFrequencyPenalty sets the frequency penalty.
+// WithFrequencyPenalty sets the frequency penalty.
 func WithFrequencyPenalty(penalty float32) Option {
 	return func(o *CallOptions) {
 		o.FrequencyPenalty = floatPtr(penalty)
 	}
 }
 
- // WithLogitBias sets the token logit bias.
+// WithLogitBias sets the token logit bias.
 func WithLogitBias(logitBias map[string]float32) Option {
 	return func(o *CallOptions) {
 		o.LogitBias = logitBias
 	}
 }
 
- // WithLogprobs sets the maximum number of logprobs per token.
+// WithLogprobs sets the maximum number of logprobs per token.
 func WithLogprobs(logprobs int) Option {
 	return func(o *CallOptions) {
 		o.Logprobs = intPtr(logprobs)
 	}
 }
 
- // WithTopLogprobs sets the maximum number of top logprobs per token.
+// WithTopLogprobs sets the maximum number of top logprobs per token.
 func WithTopLogprobs(topLogprobs int) Option {
 	return func(o *CallOptions) {
 		o.TopLogprobs = intPtr(topLogprobs)
 	}
 }
 
- // WithMaxTokens sets the maximum number of tokens in the response.
+// WithMaxTokens sets the maximum number of tokens in the response.
 func WithMaxTokens(tokens int) Option {
 	return func(o *CallOptions) {
 		o.MaxTokens = intPtr(tokens)
 	}
 }
 
- // WithMaxCompletionTokens sets the maximum number of tokens in the completion.
+// WithMaxCompletionTokens sets the maximum number of tokens in the completion.
 func WithMaxCompletionTokens(tokens int) Option {
 	return func(o *CallOptions) {
 		o.MaxCompletionTokens = intPtr(tokens)
 	}
 }
 
- // WithModalities sets the supported modalities.
+// WithModalities sets the supported modalities.
 func WithModalities(modalities []string) Option {
 	return func(o *CallOptions) {
 		o.Modalities = modalities
 	}
 }
 
- // WithAudio sets the audio data.
+// WithAudio sets the audio data.
 func WithAudio(audio map[string]interface{}) Option {
 	return func(o *CallOptions) {
 		o.Audio = audio
 	}
 }
 
- // WithPresencePenalty sets the presence penalty.
+// WithPresencePenalty sets the presence penalty.
 func WithPresencePenalty(penalty float32) Option {
 	return func(o *CallOptions) {
 		o.PresencePenalty = floatPtr(penalty)
 	}
 }
 
- // WithResponseFormat sets the response format.
+// WithResponseFormat sets the response format.
 func WithResponseFormat(format interface{}) Option {
 	return func(o *CallOptions) {
 		o.ResponseFormat = format
 	}
 }
 
- // WithSeed sets the seed for reproducibility.
+// WithSeed sets the seed for reproducibility.
 func WithSeed(seed int) Option {
 	return func(o *CallOptions) {
 		o.Seed = intPtr(seed)
 	}
 }
 
- // WithStop sets the stop sequences.
+// WithStop sets the stop sequences.
 func WithStop(stop interface{}) Option {
 	return func(o *CallOptions) {
 		o.Stop = stop
 	}
 }
 
- // WithTemperature sets the response temperature.
+// WithTemperature sets the response temperature.
 func WithTemperature(temp float32) Option {
 	return func(o *CallOptions) {
 		o.Temperature = floatPtr(temp)
 	}
 }
 
- // WithTopP sets the Top-P parameter.
+// WithTopP sets the Top-P parameter.
 func WithTopP(topP float32) Option {
 	return func(o *CallOptions) {
 		o.TopP = floatPtr(topP)
 	}
 }
 
- // WithExtraHeaders sets additional headers.
+// WithExtraHeaders sets additional headers.
 func WithExtraHeaders(headers http.Header) Option {
 	return func(o *CallOptions) {
 		o.ExtraHeaders = headers
 	}
 }
 
- // WithExtraQuery sets additional query parameters.
+// WithExtraQuery sets additional query parameters.
 func WithExtraQuery(query map[string]string) Option {
 	return func(o *CallOptions) {
 		o.ExtraQuery = query
 	}
 }
 
- // WithRequestParams sets additional request parameters.
+// WithRequestParams sets additional request parameters.
 func WithRequestParams(params map[string]interface{}) Option {
 	return func(o *CallOptions) {
 		o.RequestParams = params
 	}
 }
 
- // Helper functions to create pointers for optional fields.
+// Helper functions to create pointers for optional fields.
 func boolPtr(b bool) *bool        { return &b }
 func floatPtr(f float32) *float32 { return &f }
 func intPtr(i int) *int           { return &i }
 func strPtr(s string) *string     { return &s }
-	
- // MarshalJSON implements custom serialization for CallOptions.
+
+// MarshalJSON implements custom serialization for CallOptions.
 func (o *CallOptions) MarshalJSON() ([]byte, error) {
 	type Alias CallOptions
 	return json.Marshal(&struct {
