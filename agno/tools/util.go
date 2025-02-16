@@ -20,7 +20,7 @@ func mapToParameters(m map[string]interface{}) Parameters {
 	return p
 }
 
-func ConvertToToos(tool Tool) Tools {
+func ConvertToTools(tool Tool) Tools {
 	// Gera o esquema JSONSchema dos parâmetros.
 	paramsSchema, err := GenerateJSONSchema(tool.GetParameterStruct())
 	if err != nil {

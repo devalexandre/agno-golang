@@ -39,7 +39,7 @@ type CallOptions struct {
 func WithTools(tool []tools.Tool) Option {
 	var _tools []tools.Tools
 	for _, t := range tool {
-		toolConverted := tools.ConvertToToos(t)
+		toolConverted := tools.ConvertToTools(t)
 		_tools = append(_tools, toolConverted)
 	}
 

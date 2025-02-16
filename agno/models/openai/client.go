@@ -58,24 +58,30 @@ func NewClient(options ...OptionClient) (*Client, error) {
 	}, nil
 }
 
-// Do performs an HTTP request to the OpenAI API.
-func (c *Client) Do(ctx context.Context, method, path string, body interface{}, v interface{}) error {
+func (c *Client) newRequest(ctx context.Context, method, url string, body interface{}) (*http.Request, error) {
 	var buf io.Reader
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		buf = bytes.NewBuffer(jsonBody)
 	}
+	req, err := http.NewRequestWithContext(ctx, method, url, buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, buf)
+// Do performs an HTTP request to the OpenAI API.
+func (c *Client) Do(ctx context.Context, method, path string, body interface{}, v interface{}) error {
+	req, err := c.newRequest(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return err
 	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -156,31 +162,17 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		boolTrue := true
 		req.Stream = &boolTrue
 
-		// Marshal the request body.
-		jsonBody, err := json.Marshal(req)
+		// Use newRequest helper to create the HTTP request.
+		httpReq, err := c.newRequest(ctx, http.MethodPost, c.baseURL+"/chat/completions", req)
 		if err != nil {
 			return nil, err
 		}
-		// Create a new HTTP request.
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
-		if err != nil {
-			return nil, err
-		}
-		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-		httpReq.Header.Set("Content-Type", "application/json")
 
-		httpResp, err := c.client.Do(httpReq)
-		if err != nil {
-			return nil, err
-		}
-		// Initialize tool mapping for streamed tool calls.
-		maptools := make(map[string]tools.Tool)
-		if len(callOptions.ToolCall) > 0 {
-			for _, t := range callOptions.ToolCall {
-				maptools[t.Name()] = t
-			}
-		}
-		defer httpResp.Body.Close()
+	httpResp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer httpResp.Body.Close()
 
 		var completeMessage bytes.Buffer
 		scanner := bufio.NewScanner(httpResp.Body)
