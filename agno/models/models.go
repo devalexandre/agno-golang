@@ -9,6 +9,7 @@ import (
 type Role string
 
 const (
+	TypeSystemRole    = "system"
 	TypeUserRole      = "user"
 	TypeAssistantRole = "assistant"
 	TypeToolRole      = "tool"

@@ -69,7 +69,7 @@ func TestCreateChatCompletionWithTool(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "What is the temperature in Pocos de Caldas?",
+		Content: "Qual a temperatura de poços de caldas?",
 	}
 
 	callOPtions := []models.Option{
@@ -158,7 +158,7 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "Please use the WeatherTool to tell me the current temperature in Pocos de Caldas - MG. The tool needs latitude and longitude, which are -21.7872 and -46.5614 respectively.",
+		Content: "Por favor, use a ferramenta WeatherTool para me dizer qual é a temperatura atual em Poços de Caldas - MG. A ferramenta precisa de latitude e longitude, que são -21.7872 e -46.5614 respectivamente.",
 	}
 
 	callOPtions := []models.Option{
@@ -201,7 +201,7 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "Please use the WeatherTool to tell me the current temperature in Pocos de Caldas - MG. The tool needs latitude and longitude, which are -21.7872 and -46.5614 respectively.",
+		Content: "Por favor, use a ferramenta WeatherTool para me dizer qual é a temperatura atual em Poços de Caldas - MG. A ferramenta precisa de latitude e longitude, que são -21.7872 e -46.5614 respectivamente.",
 	}
 
 	var response string

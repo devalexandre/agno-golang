@@ -22,6 +22,7 @@ type ClientOptions struct {
 	TopP             *float32 // Top-P parameter
 	FrequencyPenalty *float32 // Frequency penalty
 	PresencePenalty  *float32 // Presence penalty
+	Debug            bool     `json:"-"`
 }
 
 // DefaultOptions returns the default options for the Gemini API client

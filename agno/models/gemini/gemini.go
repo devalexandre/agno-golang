@@ -83,6 +83,7 @@ func (g *Gemini) InvokeStream(ctx context.Context, messages []models.Message, op
 	}()
 
 	return responseChannel, nil
+
 }
 
 // AInvokeStream is the asynchronous version of StreamChatCompletion.

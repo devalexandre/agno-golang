@@ -73,14 +73,51 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 		Time          string  `json:"time"`
 	}
 
+	// Safely extract location or use default
+	location := "the specified location"
+	if locValue, ok := queryParams["location"]; ok && locValue != nil {
+		if locStr, ok := locValue.(string); ok {
+			location = locStr
+		}
+	}
+
+	// Safely extract latitude and longitude
+	latitude := 0.0
+	if latValue, ok := queryParams["latitude"]; ok && latValue != nil {
+		switch v := latValue.(type) {
+		case float64:
+			latitude = v
+		case float32:
+			latitude = float64(v)
+		case int:
+			latitude = float64(v)
+		case string:
+			fmt.Sscanf(v, "%f", &latitude)
+		}
+	}
+
+	longitude := 0.0
+	if longValue, ok := queryParams["longitude"]; ok && longValue != nil {
+		switch v := longValue.(type) {
+		case float64:
+			longitude = v
+		case float32:
+			longitude = float64(v)
+		case int:
+			longitude = float64(v)
+		case string:
+			fmt.Sscanf(v, "%f", &longitude)
+		}
+	}
+
 	responseWeather := CurrentWeather{
-		Location:      queryParams["location"].(string),
+		Location:      location,
 		Time:          forecast.Current.Time,
 		Temperature2m: forecast.Current.Temperature2m,
 		WindSpeed10m:  forecast.Current.WindSpeed10m,
-		Latitude:      queryParams["latitude"].(float64),
-		Longitude:     queryParams["longitude"].(float64),
-		Response:      fmt.Sprintf("The temperature in %v is %v degrees Celsius and the wind speed is %v m/s.", queryParams["location"].(string), forecast.Current.Temperature2m, forecast.Current.WindSpeed10m),
+		Latitude:      latitude,
+		Longitude:     longitude,
+		Response:      fmt.Sprintf("The temperature in %v is %v degrees Celsius and the wind speed is %v m/s.", location, forecast.Current.Temperature2m, forecast.Current.WindSpeed10m),
 	}
 
 	output, err := json.Marshal(responseWeather)

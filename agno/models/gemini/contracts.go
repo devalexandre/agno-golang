@@ -76,6 +76,7 @@ type CompletionResponse struct {
 // ClientInterface defines the interface for communication with the Gemini API
 type ClientInterface interface {
 	CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error)
+	StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan ChatCompletionChunk, error)
 }
 
 // Aliases for compatibility
