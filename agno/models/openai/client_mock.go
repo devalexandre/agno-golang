@@ -26,13 +26,25 @@ func (cm *ClientMock) Do(ctx context.Context, method, path string, body interfac
 
 // CreateChatCompletion simulates a chat completion request by invoking Do.
 // It uses a dummy HTTP method and path. The DoFunc should simulate the response.
-func (cm *ClientMock) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...Option) (*CompletionResponse, error) {
+func (cm *ClientMock) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error) {
 	var resp CompletionResponse
 	err := cm.Do(ctx, httpMethodChatCompletion, "/chat/completions", nil, &resp)
 	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (cm *ClientMock) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan ChatCompletionChunk, error) {
+	var resp ChatCompletionChunk
+	err := cm.Do(ctx, httpMethodChatCompletion, "/chat/completions", nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan ChatCompletionChunk, 1)
+	ch <- resp
+	close(ch)
+	return ch, nil
 }
 
 // httpMethodChatCompletion is a constant representing the HTTP method used for chat completion requests.

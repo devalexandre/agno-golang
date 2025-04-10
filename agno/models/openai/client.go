@@ -118,8 +118,8 @@ func (c *Client) Do(ctx context.Context, method, path string, body interface{}, 
 }
 
 // CreateChatCompletion creates a chat completion request.
-func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...Option) (*CompletionResponse, error) {
-	callOptions := DefaultCallOptions()
+func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error) {
+	callOptions := models.DefaultCallOptions()
 	for _, option := range options {
 		option(callOptions)
 	}
@@ -168,11 +168,11 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			return nil, err
 		}
 
-	httpResp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer httpResp.Body.Close()
+		httpResp, err := c.client.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
+		defer httpResp.Body.Close()
 
 		var completeMessage bytes.Buffer
 		scanner := bufio.NewScanner(httpResp.Body)
@@ -262,6 +262,70 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	}
 
 	return resp, nil
+}
+
+// StreamChatCompletion performs a streaming chat completion request.
+func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan ChatCompletionChunk, error) {
+
+	callOptions := DefaultCallOptions()
+	for _, option := range options {
+		option(callOptions)
+	}
+
+	req := &ChatCompletionRequest{
+		Model:               c.model,
+		Messages:            messages,
+		Store:               callOptions.Store,
+		ReasoningEffort:     callOptions.ReasoningEffort,
+		Metadata:            callOptions.Metadata,
+		FrequencyPenalty:    callOptions.FrequencyPenalty,
+		LogitBias:           callOptions.LogitBias,
+		Logprobs:            callOptions.Logprobs,
+		TopLogprobs:         callOptions.TopLogprobs,
+		MaxTokens:           callOptions.MaxTokens,
+		MaxCompletionTokens: callOptions.MaxCompletionTokens,
+		Modalities:          callOptions.Modalities,
+		Audio:               callOptions.Audio,
+		PresencePenalty:     callOptions.PresencePenalty,
+		ResponseFormat:      callOptions.ResponseFormat,
+		Seed:                callOptions.Seed,
+		Stop:                callOptions.Stop,
+		Temperature:         callOptions.Temperature,
+		TopP:                callOptions.TopP,
+		Tools:               callOptions.Tools,
+		Stream:              callOptions.Stream,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+	httpReq.Header.Set("Content-Type", "application/json")
+	chunks := make(chan ChatCompletionChunk)
+	go func() {
+		defer close(chunks)
+		resp, err := c.client.Do(httpReq)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		decoder := json.NewDecoder(resp.Body)
+		for {
+			var chunk ChatCompletionChunk
+			if err := decoder.Decode(&chunk); err == io.EOF {
+				break
+			} else if err != nil {
+				break
+			}
+			chunks <- chunk
+		}
+	}()
+	return chunks, nil
 }
 
 func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, maptools map[string]tools.Tool) *ChatCompletionRequest {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/tools"
 )
 
@@ -79,8 +80,8 @@ type ClientOptions struct {
 }
 
 // DefaultCallOptions returns the default options for the request.
-func DefaultCallOptions() *CallOptions {
-	return &CallOptions{
+func DefaultCallOptions() *models.CallOptions {
+	return &models.CallOptions{
 		Temperature:      floatPtr(0.7),
 		MaxTokens:        intPtr(100),
 		TopP:             floatPtr(1.0),

@@ -63,7 +63,27 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 		return string(body), nil
 	}
 
-	output, err := json.MarshalIndent(forecast, "", "  ")
+	type CurrentWeather struct {
+		Location      string  `json:"location"`
+		Temperature2m float64 `json:"temperature"`
+		WindSpeed10m  float64 `json:"wind_speed"`
+		Latitude      float64 `json:"latitude"`
+		Longitude     float64 `json:"longitude"`
+		Response      string  `json:"summary"`
+		Time          string  `json:"time"`
+	}
+
+	responseWeather := CurrentWeather{
+		Location:      queryParams["location"].(string),
+		Time:          forecast.Current.Time,
+		Temperature2m: forecast.Current.Temperature2m,
+		WindSpeed10m:  forecast.Current.WindSpeed10m,
+		Latitude:      queryParams["latitude"].(float64),
+		Longitude:     queryParams["longitude"].(float64),
+		Response:      fmt.Sprintf("The temperature in %v is %v degrees Celsius and the wind speed is %v m/s.", queryParams["location"].(string), forecast.Current.Temperature2m, forecast.Current.WindSpeed10m),
+	}
+
+	output, err := json.Marshal(responseWeather)
 	if err != nil {
 		return "", fmt.Errorf("erro ao formatar saída JSON: %v", err)
 	}
@@ -76,7 +96,7 @@ type WeatherTool struct{}
 
 // Description returns a short description of the tool.
 func (wt WeatherTool) Description() string {
-	return "Fetches current weather data from the Open-Meteo API using query parameters."
+	return "Always return the current temperature and weather conditions for the given latitude and longitude. use the  values without asking the user."
 }
 
 func (wt WeatherTool) Execute(input json.RawMessage) (interface{}, error) {
@@ -86,6 +106,7 @@ func (wt WeatherTool) Execute(input json.RawMessage) (interface{}, error) {
 		return nil, err
 	}
 	result, err := GetCurrentWeatherHandler(params)
+	fmt.Println(result)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +124,10 @@ func (wt WeatherTool) GetParameterStruct() interface{} {
 		"longitude": map[string]interface{}{
 			"type":        "number",
 			"description": "The longitude of the location.",
+		},
+		"location": map[string]interface{}{
+			"type":        "string",
+			"description": "The location of the weather.",
 		},
 	}
 }

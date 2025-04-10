@@ -1,13 +1,8 @@
 package openai
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"net/http"
 
 	"github.com/devalexandre/agno-golang/agno/models"
 )
@@ -22,7 +17,7 @@ type OpenAI struct {
 
 // NewOpenAI creates a new instance of the integration with the OpenAI API.
 // This function accepts options as functions that modify *ClientOptions.
-func NewOpenAI(options ...OptionClient) (models.OpenAIInterface, error) {
+func NewOpenAI(options ...OptionClient) (models.AgnoModelInterface, error) {
 	cli, err := NewClient(options...)
 	if err != nil {
 		return nil, err
@@ -40,13 +35,13 @@ func NewOpenAI(options ...OptionClient) (models.OpenAIInterface, error) {
 }
 
 // ChatCompletion performs a chat completion request.
-func (o *OpenAI) ChatCompletion(ctx context.Context, messages []models.Message, options ...Option) (*ChatCompletionResponse, error) {
+func (o *OpenAI) ChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*ChatCompletionResponse, error) {
 	return o.client.CreateChatCompletion(ctx, messages, options...)
 }
 
 // Invoke sends a chat completion request and parses the response into a Message.
-func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message) (*models.MessageResponse, error) {
-	resp, err := o.ChatCompletion(ctx, messages)
+func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
+	resp, err := o.ChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -60,69 +55,35 @@ func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message) (*models
 }
 
 // AInvoke is the asynchronous version of Invoke. It delegates to Invoke.
-func (o *OpenAI) AInvoke(ctx context.Context, messages []models.Message) (*models.MessageResponse, error) {
-	return o.Invoke(ctx, messages)
-}
-
-// StreamChatCompletion performs a streaming chat completion request.
-func (o *OpenAI) StreamChatCompletion(ctx context.Context, messages []models.Message) (<-chan ChatCompletionChunk, error) {
-	req := ChatCompletionRequest{
-		Model:            o.opts.Model,
-		Messages:         messages,
-		Temperature:      o.opts.Temperature,
-		MaxTokens:        o.opts.MaxTokens,
-		TopP:             o.opts.TopP,
-		FrequencyPenalty: o.opts.FrequencyPenalty,
-		PresencePenalty:  o.opts.PresencePenalty,
-	}
-	clientReal, ok := o.client.(*Client)
-	if !ok {
-		return nil, errors.New("client does not support streaming")
-	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, clientReal.baseURL+"/chat/completions", bytes.NewBuffer(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", o.opts.APIKey))
-	httpReq.Header.Set("Content-Type", "application/json")
-	chunks := make(chan ChatCompletionChunk)
+func (o *OpenAI) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+	ch := make(chan *models.MessageResponse, 1)
+	errChan := make(chan error)
 	go func() {
-		defer close(chunks)
-		resp, err := clientReal.client.Do(httpReq)
+		defer close(ch)
+		defer close(errChan)
+		resp, err := o.Invoke(ctx, messages, options...)
 		if err != nil {
-			return
-		}
-		defer resp.Body.Close()
-		decoder := json.NewDecoder(resp.Body)
-		for {
-			var chunk ChatCompletionChunk
-			if err := decoder.Decode(&chunk); err == io.EOF {
-				break
-			} else if err != nil {
-				break
-			}
-			chunks <- chunk
+			ch <- &models.MessageResponse{}
+			errChan <- err
+		} else {
+			ch <- resp
 		}
 	}()
-	return chunks, nil
+	return ch, errChan
 }
 
 // InvokeStream sends a streaming chat completion request and converts each chunk into a Message.
-func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message) (<-chan models.MessageResponse, error) {
-	chunkStream, err := o.StreamChatCompletion(ctx, messages)
+func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, error) {
+	chunkStream, err := o.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
 	}
-	respStream := make(chan models.MessageResponse)
+	respStream := make(chan *models.MessageResponse)
 	go func() {
 		defer close(respStream)
 		for chunk := range chunkStream {
 			if len(chunk.Choices) > 0 {
-				respStream <- models.MessageResponse{
+				respStream <- &models.MessageResponse{
 					Role:      chunk.Choices[0].Message.Role,
 					Content:   chunk.Choices[0].Message.Content,
 					ToolCalls: chunk.Choices[0].Message.ToolCalls,
@@ -134,6 +95,20 @@ func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message) (<
 }
 
 // AInvokeStream is the asynchronous version of InvokeStream. It delegates to InvokeStream.
-func (o *OpenAI) AInvokeStream(ctx context.Context, messages []models.Message) (<-chan models.MessageResponse, error) {
-	return o.InvokeStream(ctx, messages)
+func (o *OpenAI) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+	respChan := make(chan *models.MessageResponse)
+	errChan := make(chan error)
+	go func() {
+		defer close(respChan)
+		defer close(errChan)
+		resp, err := o.InvokeStream(ctx, messages, options...)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		for msg := range resp {
+			respChan <- msg
+		}
+	}()
+	return respChan, errChan
 }

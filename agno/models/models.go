@@ -37,9 +37,10 @@ func (r Role) IsValid() bool {
 	}
 }
 
-type OpenAIInterface interface {
-	Invoke(ctx context.Context, messages []Message) (*MessageResponse, error)
-	AInvoke(ctx context.Context, messages []Message) (*MessageResponse, error)
-	InvokeStream(ctx context.Context, messages []Message) (<-chan MessageResponse, error)
-	AInvokeStream(ctx context.Context, messages []Message) (<-chan MessageResponse, error)
+// AgnoModelInterface representa a interface para integração com modelos de linguagem.
+type AgnoModelInterface interface {
+	Invoke(ctx context.Context, messages []Message, options ...Option) (*MessageResponse, error)
+	AInvoke(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, <-chan error)
+	InvokeStream(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, error)
+	AInvokeStream(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, <-chan error)
 }

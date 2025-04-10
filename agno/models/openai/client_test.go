@@ -32,7 +32,7 @@ func TestCreateChatCompletion(t *testing.T) {
 		Content: "Hello, OpenAI!",
 	}
 
-	chatCompletion, err := client.CreateChatCompletion(context.Background(), []models.Message{message}, openai.WithTemperature(0.5))
+	chatCompletion, err := client.CreateChatCompletion(context.Background(), []models.Message{message}, models.WithTemperature(0.5))
 	if err != nil {
 		t.Fatalf("Failed to create chat completion: %v", err)
 	}
@@ -62,9 +62,9 @@ func TestCreateChatCompletionStream(t *testing.T) {
 		Content: "What's the capital of Brazil?",
 	}
 
-	optCall := []openai.Option{
-		openai.WithTemperature(0.8),
-		openai.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+	optCall := []models.Option{
+		models.WithTemperature(0.8),
+		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			t.Logf("Streaming chunk:: %+v", string(chunk))
 			return nil
 		}),
@@ -101,12 +101,12 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 		Content: "Qual é a temperatura atual de poços de caldas - MG?",
 	}
 
-	callOPtions := []openai.Option{
-		openai.WithTemperature(0.5),
-		openai.WithTools([]tools.Tool{
+	callOPtions := []models.Option{
+		models.WithTemperature(0.5),
+		models.WithTools([]tools.Tool{
 			tools.WeatherTool{},
 		}),
-		openai.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			t.Logf("Streaming chunk:: %+v", string(chunk))
 			return nil
 		}),
@@ -143,9 +143,9 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 		Content: "Qual é a temperatura atual de poços de caldas - MG?",
 	}
 
-	callOPtions := []openai.Option{
-		openai.WithTemperature(0.5),
-		openai.WithTools([]tools.Tool{
+	callOPtions := []models.Option{
+		models.WithTemperature(0.5),
+		models.WithTools([]tools.Tool{
 			tools.WeatherTool{},
 		}),
 	}
