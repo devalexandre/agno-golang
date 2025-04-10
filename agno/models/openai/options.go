@@ -71,12 +71,12 @@ type ClientOptions struct {
 	HTTPClient     *http.Client           `json:"-"`                       // Custom HTTP client.
 	ClientParams   map[string]interface{} `json:"client_params,omitempty"` // Additional client parameters.
 	// Additional fields for chat requests.
-	Model            string   // Modelo a ser usado.
-	Temperature      *float32 // Temperatura da resposta.
-	MaxTokens        *int     // Número máximo de tokens.
-	TopP             *float32 // Parâmetro Top-P.
-	FrequencyPenalty *float32 // Penalidade de frequência.
-	PresencePenalty  *float32 // Penalidade de presença.
+	Model            string   // Model to be used.
+	Temperature      *float32 // Response temperature.
+	MaxTokens        *int     // Maximum number of tokens.
+	TopP             *float32 // Top-P parameter.
+	FrequencyPenalty *float32 // Frequency penalty.
+	PresencePenalty  *float32 // Presence penalty.
 }
 
 // DefaultCallOptions returns the default options for the request.

@@ -4,27 +4,27 @@ import (
 	"net/http"
 )
 
-// ClientOptions representa as opções para o cliente da API do Gemini
+// ClientOptions represents the options for the Gemini API client
 type ClientOptions struct {
-	APIKey         string                 `json:"-"`                       // Chave da API
-	Organization   string                 `json:"-"`                       // Organização associada
-	BaseURL        string                 `json:"-"`                       // URL base da API
-	Timeout        int                    `json:"-"`                       // Tempo limite da solicitação
-	MaxRetries     int                    `json:"-"`                       // Número máximo de tentativas
-	DefaultHeaders http.Header            `json:"-"`                       // Cabeçalhos padrão
-	DefaultQuery   map[string]string      `json:"-"`                       // Parâmetros de consulta padrão
-	HTTPClient     *http.Client           `json:"-"`                       // Cliente HTTP personalizado
-	ClientParams   map[string]interface{} `json:"client_params,omitempty"` // Parâmetros adicionais do cliente
-	// Campos adicionais para solicitações de chat
-	Model            string   // Modelo a ser usado
-	Temperature      *float32 // Temperatura da resposta
-	MaxTokens        *int     // Número máximo de tokens
-	TopP             *float32 // Parâmetro Top-P
-	FrequencyPenalty *float32 // Penalidade de frequência
-	PresencePenalty  *float32 // Penalidade de presença
+	APIKey         string                 `json:"-"`                       // API key
+	Organization   string                 `json:"-"`                       // Associated organization
+	BaseURL        string                 `json:"-"`                       // Base API URL
+	Timeout        int                    `json:"-"`                       // Request timeout
+	MaxRetries     int                    `json:"-"`                       // Maximum number of retries
+	DefaultHeaders http.Header            `json:"-"`                       // Default headers
+	DefaultQuery   map[string]string      `json:"-"`                       // Default query parameters
+	HTTPClient     *http.Client           `json:"-"`                       // Custom HTTP client
+	ClientParams   map[string]interface{} `json:"client_params,omitempty"` // Additional client parameters
+	// Additional fields for chat requests
+	Model            string   // Model to be used
+	Temperature      *float32 // Response temperature
+	MaxTokens        *int     // Maximum number of tokens
+	TopP             *float32 // Top-P parameter
+	FrequencyPenalty *float32 // Frequency penalty
+	PresencePenalty  *float32 // Presence penalty
 }
 
-// DefaultOptions retorna as opções padrão para o cliente da API do Gemini
+// DefaultOptions returns the default options for the Gemini API client
 func DefaultOptions() *ClientOptions {
 	return &ClientOptions{
 		Model:            "gemini-2.0-flash-lite",
@@ -36,21 +36,21 @@ func DefaultOptions() *ClientOptions {
 	}
 }
 
-// WithModel define o modelo a ser usado
+// WithModel sets the model to be used
 func WithModel(model string) func(*ClientOptions) {
 	return func(o *ClientOptions) {
 		o.Model = model
 	}
 }
 
-// WithAPIKey define a chave da API para o cliente
+// WithAPIKey sets the API key for the client
 func WithAPIKey(key string) func(*ClientOptions) {
 	return func(o *ClientOptions) {
 		o.APIKey = key
 	}
 }
 
-// Funções auxiliares para criar ponteiros para campos opcionais
+// Helper functions to create pointers for optional fields
 func boolPtr(b bool) *bool        { return &b }
 func floatPtr(f float32) *float32 { return &f }
 func intPtr(i int) *int           { return &i }

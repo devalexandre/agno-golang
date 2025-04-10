@@ -40,10 +40,10 @@ func (et EchoTool) Execute(input json.RawMessage) (interface{}, error) {
 		return nil, err
 	}
 
-	// Verificar se temos o parâmetro message
+	// Check if we have the message parameter
 	message, ok := params["message"].(string)
 	if !ok {
-		// Verificar se temos o parâmetro properties (formato alternativo usado pelo Gemini)
+		// Check if we have the properties parameter (alternative format used by Gemini)
 		message, ok = params["properties"].(string)
 		if !ok {
 			return nil, fmt.Errorf("message parameter is required")

@@ -8,7 +8,7 @@ import (
 	"github.com/devalexandre/agno-golang/agno/tools"
 )
 
-// CallOptions define as opções comuns que podem ser aplicadas para ambos os modelos (OpenAI e Gemini).
+// CallOptions defines common options that can be applied to both models (OpenAI and Gemini).
 type CallOptions struct {
 	Store               *bool                               `json:"store,omitempty"`
 	ReasoningEffort     *string                             `json:"reasoning_effort,omitempty"`
@@ -31,15 +31,15 @@ type CallOptions struct {
 	ExtraHeaders        map[string]string                   `json:"-"`
 	ExtraQuery          map[string]string                   `json:"-"`
 	RequestParams       map[string]interface{}              `json:"request_params,omitempty"`
-	StreamingFunc       func(context.Context, []byte) error `json:"-"` // Função de callback para streaming
-	ToolCall            []tools.Tool                        `json:"-"` // Ferramentas para chamadas de função
+	StreamingFunc       func(context.Context, []byte) error `json:"-"` // Callback function for streaming
+	ToolCall            []tools.Tool                        `json:"-"` // Tools for function calls
 	Tools               []tools.Tools                       `json:"tools,omitempty"`
 }
 
-// Option é uma função que modifica CallOptions.
+// Option is a function that modifies CallOptions.
 type Option func(*CallOptions)
 
-// DefaultCallOptions retorna as opções padrão para a solicitação.
+// DefaultCallOptions returns the default options for the request.
 func DefaultCallOptions() *CallOptions {
 	return &CallOptions{
 		Temperature:      floatPtr(0.7),
@@ -50,14 +50,14 @@ func DefaultCallOptions() *CallOptions {
 	}
 }
 
-// WithStore especifica se a saída deve ser armazenada.
+// WithStore specifies if the output should be stored.
 func WithStore(store bool) Option {
 	return func(o *CallOptions) {
 		o.Store = boolPtr(store)
 	}
 }
 
-// WithStreamingFunc adiciona uma função de callback para processar fragmentos de streaming.
+// WithStreamingFunc adds a callback function for processing streaming chunks.
 func WithStreamingFunc(f func(context.Context, []byte) error) Option {
 	return func(o *CallOptions) {
 		o.StreamingFunc = f
@@ -65,7 +65,7 @@ func WithStreamingFunc(f func(context.Context, []byte) error) Option {
 	}
 }
 
-// WithTools adiciona ferramentas à solicitação
+// WithTools adds tools to the request
 func WithTools(tool []tools.Tool) Option {
 	return func(o *CallOptions) {
 		o.ToolCall = tool
@@ -78,119 +78,119 @@ func floatPtr(f float32) *float32 { return &f }
 func intPtr(i int) *int           { return &i }
 func strPtr(s string) *string     { return &s }
 
-// WithReasoningEffort define o esforço de raciocínio
+// WithReasoningEffort sets the reasoning effort
 func WithReasoningEffort(reasoningEffort string) Option {
 	return func(o *CallOptions) {
 		o.ReasoningEffort = strPtr(reasoningEffort)
 	}
 }
 
-// WithMetadata define os metadados adicionais
+// WithMetadata sets the additional metadata
 func WithMetadata(metadata map[string]interface{}) Option {
 	return func(o *CallOptions) {
 		o.Metadata = metadata
 	}
 }
 
-// WithFrequencyPenalty define a penalidade de frequência
+// WithFrequencyPenalty sets the frequency penalty
 func WithFrequencyPenalty(penalty float32) Option {
 	return func(o *CallOptions) {
 		o.FrequencyPenalty = floatPtr(penalty)
 	}
 }
 
-// WithLogitBias define o viés nos logits dos tokens
+// WithLogitBias sets the token logit bias
 func WithLogitBias(logitBias map[string]float32) Option {
 	return func(o *CallOptions) {
 		o.LogitBias = logitBias
 	}
 }
 
-// WithLogprobs define o número máximo de logprobs por token
+// WithLogprobs sets the maximum number of logprobs per token
 func WithLogprobs(logprobs int) Option {
 	return func(o *CallOptions) {
 		o.Logprobs = intPtr(logprobs)
 	}
 }
 
-// WithTopLogprobs define o número máximo de top logprobs por token
+// WithTopLogprobs sets the maximum number of top logprobs per token
 func WithTopLogprobs(topLogprobs int) Option {
 	return func(o *CallOptions) {
 		o.TopLogprobs = intPtr(topLogprobs)
 	}
 }
 
-// WithMaxTokens define o número máximo de tokens na resposta
+// WithMaxTokens sets the maximum number of tokens in the response
 func WithMaxTokens(tokens int) Option {
 	return func(o *CallOptions) {
 		o.MaxTokens = intPtr(tokens)
 	}
 }
 
-// WithMaxCompletionTokens define o número máximo de tokens na conclusão
+// WithMaxCompletionTokens sets the maximum number of tokens in the completion
 func WithMaxCompletionTokens(tokens int) Option {
 	return func(o *CallOptions) {
 		o.MaxCompletionTokens = intPtr(tokens)
 	}
 }
 
-// WithModalities define as modalidades suportadas
+// WithModalities sets the supported modalities
 func WithModalities(modalities []string) Option {
 	return func(o *CallOptions) {
 		o.Modalities = modalities
 	}
 }
 
-// WithAudio define os dados de áudio
+// WithAudio sets the audio data
 func WithAudio(audio map[string]interface{}) Option {
 	return func(o *CallOptions) {
 		o.Audio = audio
 	}
 }
 
-// WithPresencePenalty define a penalidade de presença
+// WithPresencePenalty sets the presence penalty
 func WithPresencePenalty(penalty float32) Option {
 	return func(o *CallOptions) {
 		o.PresencePenalty = floatPtr(penalty)
 	}
 }
 
-// WithResponseFormat define o formato da resposta
+// WithResponseFormat sets the response format
 func WithResponseFormat(format interface{}) Option {
 	return func(o *CallOptions) {
 		o.ResponseFormat = format
 	}
 }
 
-// WithSeed define a semente para reproduzibilidade
+// WithSeed sets the seed for reproducibility
 func WithSeed(seed int) Option {
 	return func(o *CallOptions) {
 		o.Seed = intPtr(seed)
 	}
 }
 
-// WithStop define as sequências de parada
+// WithStop sets the stop sequences
 func WithStop(stop interface{}) Option {
 	return func(o *CallOptions) {
 		o.Stop = stop
 	}
 }
 
-// WithTemperature define a temperatura da resposta
+// WithTemperature sets the response temperature
 func WithTemperature(temp float32) Option {
 	return func(o *CallOptions) {
 		o.Temperature = floatPtr(temp)
 	}
 }
 
-// WithTopP define o parâmetro Top-P
+// WithTopP sets the Top-P parameter
 func WithTopP(topP float32) Option {
 	return func(o *CallOptions) {
 		o.TopP = floatPtr(topP)
 	}
 }
 
-// WithExtraHeaders define cabeçalhos adicionais
+// WithExtraHeaders sets additional headers
 func WithExtraHeaders(headers http.Header) Option {
 	return func(o *CallOptions) {
 		o.ExtraHeaders = make(map[string]string)
@@ -202,14 +202,14 @@ func WithExtraHeaders(headers http.Header) Option {
 	}
 }
 
-// WithExtraQuery define parâmetros de consulta adicionais
+// WithExtraQuery sets additional query parameters
 func WithExtraQuery(query map[string]string) Option {
 	return func(o *CallOptions) {
 		o.ExtraQuery = query
 	}
 }
 
-// WithRequestParams define parâmetros adicionais da solicitação
+// WithRequestParams sets additional request parameters
 func WithRequestParams(params map[string]interface{}) Option {
 	return func(o *CallOptions) {
 		o.RequestParams = params

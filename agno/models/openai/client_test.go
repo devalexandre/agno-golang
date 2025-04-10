@@ -98,7 +98,7 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "Qual é a temperatura atual de poços de caldas - MG?",
+		Content: "What is the current temperature in Pocos de Caldas - MG?",
 	}
 
 	callOPtions := []models.Option{
@@ -140,7 +140,7 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "Qual é a temperatura atual de poços de caldas - MG?",
+		Content: "What is the current temperature in Pocos de Caldas - MG?",
 	}
 
 	callOPtions := []models.Option{

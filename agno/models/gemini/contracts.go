@@ -8,36 +8,36 @@ import (
 	"github.com/devalexandre/agno-golang/agno/tools"
 )
 
-// GeminiRequest representa uma solicitação para a API do Gemini
+// GeminiRequest represents a request to the Gemini API
 type GeminiRequest struct {
-	Model               string                 `json:"model"`                           // Modelo a ser usado
-	Messages            []models.Message       `json:"messages"`                        // Histórico da conversa
-	Tools               []tools.Tools          `json:"tools,omitempty"`                 // Chamadas de ferramentas externas
-	ToolChoice          string                 `json:"tool_choice,omitempty"`           // Chamada de ferramenta externa
-	Store               *bool                  `json:"store,omitempty"`                 // Armazenamento da saída
-	ReasoningEffort     *string                `json:"reasoning_effort,omitempty"`      // Esforço de raciocínio
-	Metadata            map[string]interface{} `json:"metadata,omitempty"`              // Metadados adicionais
-	FrequencyPenalty    *float32               `json:"frequency_penalty,omitempty"`     // Penalidade de frequência
-	LogitBias           map[string]float32     `json:"logit_bias,omitempty"`            // Viés nos logits dos tokens
-	Logprobs            *int                   `json:"logprobs,omitempty"`              // Número máximo de logprobs por token
-	TopLogprobs         *int                   `json:"top_logprobs,omitempty"`          // Número máximo de logprobs por token
-	MaxTokens           *int                   `json:"max_tokens,omitempty"`            // Número máximo de tokens na resposta
-	MaxCompletionTokens *int                   `json:"max_completion_tokens,omitempty"` // Número máximo de tokens na conclusão
-	Modalities          []string               `json:"modalities,omitempty"`            // Modalidades suportadas
-	Audio               map[string]interface{} `json:"audio,omitempty"`                 // Dados de áudio
-	PresencePenalty     *float32               `json:"presence_penalty,omitempty"`      // Penalidade de presença
-	ResponseFormat      interface{}            `json:"response_format,omitempty"`       // Formato da resposta
-	Seed                *int                   `json:"seed,omitempty"`                  // Semente para reproduzibilidade
-	Stop                interface{}            `json:"stop,omitempty"`                  // Sequências de parada
-	Temperature         *float32               `json:"temperature,omitempty"`           // Temperatura da resposta
-	TopP                *float32               `json:"top_p,omitempty"`                 // Parâmetro Top-P
-	ExtraHeaders        http.Header            `json:"-"`                               // Cabeçalhos adicionais
-	ExtraQuery          map[string]string      `json:"-"`                               // Parâmetros de consulta adicionais
-	RequestParams       map[string]interface{} `json:"request_params,omitempty"`        // Parâmetros adicionais da solicitação
-	Stream              *bool                  `json:"stream,omitempty"`                // Se a solicitação é de streaming
+	Model               string                 `json:"model"`                           // Model to be used
+	Messages            []models.Message       `json:"messages"`                        // Conversation history
+	Tools               []tools.Tools          `json:"tools,omitempty"`                 // External tool calls
+	ToolChoice          string                 `json:"tool_choice,omitempty"`           // External tool call
+	Store               *bool                  `json:"store,omitempty"`                 // Store the output
+	ReasoningEffort     *string                `json:"reasoning_effort,omitempty"`      // Reasoning effort
+	Metadata            map[string]interface{} `json:"metadata,omitempty"`              // Additional metadata
+	FrequencyPenalty    *float32               `json:"frequency_penalty,omitempty"`     // Frequency penalty
+	LogitBias           map[string]float32     `json:"logit_bias,omitempty"`            // Token logits bias
+	Logprobs            *int                   `json:"logprobs,omitempty"`              // Maximum number of logprobs per token
+	TopLogprobs         *int                   `json:"top_logprobs,omitempty"`          // Maximum number of top logprobs per token
+	MaxTokens           *int                   `json:"max_tokens,omitempty"`            // Maximum number of tokens in the response
+	MaxCompletionTokens *int                   `json:"max_completion_tokens,omitempty"` // Maximum number of tokens in the completion
+	Modalities          []string               `json:"modalities,omitempty"`            // Supported modalities
+	Audio               map[string]interface{} `json:"audio,omitempty"`                 // Audio data
+	PresencePenalty     *float32               `json:"presence_penalty,omitempty"`      // Presence penalty
+	ResponseFormat      interface{}            `json:"response_format,omitempty"`       // Response format
+	Seed                *int                   `json:"seed,omitempty"`                  // Seed for reproducibility
+	Stop                interface{}            `json:"stop,omitempty"`                  // Stop sequences
+	Temperature         *float32               `json:"temperature,omitempty"`           // Response temperature
+	TopP                *float32               `json:"top_p,omitempty"`                 // Top-P parameter
+	ExtraHeaders        http.Header            `json:"-"`                               // Additional headers
+	ExtraQuery          map[string]string      `json:"-"`                               // Additional query parameters
+	RequestParams       map[string]interface{} `json:"request_params,omitempty"`        // Additional request parameters
+	Stream              *bool                  `json:"stream,omitempty"`                // Whether the request is streaming
 }
 
-// Choices representa uma escolha na resposta de completação
+// Choices represents a choice in the completion response
 type Choices struct {
 	Index        int                    `json:"index"`
 	Message      models.MessageResponse `json:"message"`
@@ -46,7 +46,7 @@ type Choices struct {
 	Delta        models.MessageResponse `json:"delta"`
 }
 
-// CompletionChunk representa um fragmento de resposta de completação
+// CompletionChunk represents a fragment of a completion response
 type CompletionChunk struct {
 	ID                string    `json:"id"`
 	Object            string    `json:"object"`
@@ -56,14 +56,14 @@ type CompletionChunk struct {
 	Choices           []Choices `json:"choices"`
 }
 
-// Usage representa informações de uso de tokens
+// Usage represents token usage information
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 }
 
-// CompletionResponse representa a resposta de uma solicitação de completação
+// CompletionResponse represents the response to a completion request
 type CompletionResponse struct {
 	ID      string    `json:"id"`
 	Object  string    `json:"object"`
@@ -73,12 +73,12 @@ type CompletionResponse struct {
 	Usage   Usage     `json:"usage"`
 }
 
-// ClientInterface define a interface para a comunicação com a API do Gemini
+// ClientInterface defines the interface for communication with the Gemini API
 type ClientInterface interface {
 	CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error)
 }
 
-// Aliases para compatibilidade
+// Aliases for compatibility
 type ChatCompletionMessage = models.Message
 type ChatCompletionResponse = CompletionResponse
 type ChatCompletionChunk = CompletionChunk

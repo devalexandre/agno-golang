@@ -141,7 +141,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 		opt(callOptions)
 	}
 
-	// Prepara ferramentas e declarações
+	// Prepare tools and declarations
 	functionDeclarations, maptools := c.prepareTools(callOptions.ToolCall)
 
 	model := c.genaiClient.GenerativeModel(c.model)
@@ -151,7 +151,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 
 	session := model.StartChat()
 
-	// Instrução inicial para orientar o modelo
+	// Initial instruction to guide the model
 	session.History = append(session.History, &genai.Content{
 		Role: models.TypeAssistantRole,
 		Parts: []genai.Part{
@@ -161,13 +161,13 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 
 	userMessage := messages[len(messages)-1].Content
 
-	// Cria canal para enviar mensagens streamadas
+	// Create channel to send streamed messages
 	responseChannel := make(chan models.MessageResponse)
 
 	go func() {
 		defer close(responseChannel)
 
-		// Inicia o streaming da mensagem inicial
+		// Start streaming the initial message
 		iter := session.SendMessageStream(ctx, genai.Text(userMessage))
 
 		for {
@@ -194,7 +194,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 								Content: text,
 							}
 						case genai.FunctionCall:
-							// Tratamento de chamada da tool
+							// Handle tool call
 							tool, ok := maptools[p.Name]
 							if !ok {
 								fmt.Printf("Tool %q not found\n", p.Name)
@@ -219,7 +219,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 								return
 							}
 
-							// Agora, mandamos a resposta da tool no fluxo normal (não streaming interno!)
+							// Now, send the tool response in the normal flow (not internal streaming!)
 							finalResp, err := session.SendMessage(ctx, genai.FunctionResponse{
 								Name:     p.Name,
 								Response: resultMap,
@@ -229,7 +229,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 								return
 							}
 
-							// Processa resposta final da tool manualmente no stream externo
+							// Process the final tool response manually in the external stream
 							for _, candidate := range finalResp.Candidates {
 								if candidate.Content != nil {
 									for _, part := range candidate.Content.Parts {
@@ -246,7 +246,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 									}
 								}
 							}
-							return // Finaliza a goroutine após a resposta final
+							return // End the goroutine after the final response
 						}
 					}
 				}

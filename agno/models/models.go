@@ -37,7 +37,7 @@ func (r Role) IsValid() bool {
 	}
 }
 
-// AgnoModelInterface representa a interface para integração com modelos de linguagem.
+// AgnoModelInterface represents the interface for integration with language models.
 type AgnoModelInterface interface {
 	Invoke(ctx context.Context, messages []Message, options ...Option) (*MessageResponse, error)
 	AInvoke(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, <-chan error)

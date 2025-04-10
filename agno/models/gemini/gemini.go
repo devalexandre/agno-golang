@@ -8,13 +8,13 @@ import (
 	"github.com/devalexandre/agno-golang/agno/models"
 )
 
-// Gemini é a implementação para o modelo Gemini da API Agno
+// Gemini is the implementation for the Gemini model of the Agno API
 type Gemini struct {
 	client *Client
 	opts   *ClientOptions
 }
 
-// NewGemini cria uma nova instância da integração com Gemini.
+// NewGemini creates a new instance of the Gemini integration.
 func NewGemini(options ...OptionClient) (models.AgnoModelInterface, error) {
 	cli, err := NewClient(options...)
 	if err != nil {
@@ -32,7 +32,7 @@ func NewGemini(options ...OptionClient) (models.AgnoModelInterface, error) {
 	}, nil
 }
 
-// Invoke envia uma solicitação de completamento de chat e analisa a resposta para um MessageResponse.
+// Invoke sends a chat completion request and parses the response into a MessageResponse.
 func (g *Gemini) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
 
 	resp, err := g.client.CreateChatCompletion(ctx, messages, options...)
@@ -49,7 +49,7 @@ func (g *Gemini) Invoke(ctx context.Context, messages []models.Message, options 
 	}, nil
 }
 
-// AInvoke é a versão assíncrona de Invoke que usa goroutines e retorna um canal de ponteiros.
+// AInvoke is the asynchronous version of Invoke that uses goroutines and returns a channel of pointers.
 func (g *Gemini) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
 	ch := make(chan *models.MessageResponse)
 	errChan := make(chan error)
@@ -65,7 +65,7 @@ func (g *Gemini) AInvoke(ctx context.Context, messages []models.Message, options
 	return ch, errChan
 }
 
-// InvokeStream implementa o método de streaming para respostas contínuas.
+// InvokeStream implements the streaming method for continuous responses.
 func (g *Gemini) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, error) {
 	responseChannel := make(chan *models.MessageResponse)
 
@@ -85,7 +85,7 @@ func (g *Gemini) InvokeStream(ctx context.Context, messages []models.Message, op
 	return responseChannel, nil
 }
 
-// AInvokeStream é a versão assíncrona de StreamChatCompletion.
+// AInvokeStream is the asynchronous version of StreamChatCompletion.
 func (g *Gemini) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
 	ch := make(chan *models.MessageResponse)
 	errChan := make(chan error)

@@ -29,7 +29,7 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 	baseURL := "https://api.open-meteo.com/v1/forecast"
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		return "", fmt.Errorf("erro ao parsear URL base: %v", err)
+		return "", fmt.Errorf("error parsing base URL: %v", err)
 	}
 	q := u.Query()
 	for key, value := range queryParams {
@@ -42,24 +42,24 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 
 	resp, err := http.Get(u.String())
 	if err != nil {
-		return "", fmt.Errorf("erro ao buscar dados: %v", err)
+		return "", fmt.Errorf("error fetching data: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := ioutil.ReadAll(resp.Body)
-		return "", fmt.Errorf("status HTTP inválido: %d. Resposta: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("invalid HTTP status: %d. Response: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("erro ao ler resposta: %v", err)
+		return "", fmt.Errorf("error reading response: %v", err)
 	}
 
 	var forecast ForecastResponse
 	err = json.Unmarshal(body, &forecast)
 	if err != nil {
-		// Se houver erro na conversão JSON, retorna a resposta bruta.
+		// If there is an error unmarshaling JSON, return the raw response.
 		return string(body), nil
 	}
 
@@ -85,7 +85,7 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 
 	output, err := json.Marshal(responseWeather)
 	if err != nil {
-		return "", fmt.Errorf("erro ao formatar saída JSON: %v", err)
+		return "", fmt.Errorf("error formatting output JSON: %v", err)
 	}
 
 	return string(output), nil

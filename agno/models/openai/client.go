@@ -339,14 +339,14 @@ func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, ma
 			})
 			if len(choice.Message.ToolCalls) > 0 {
 				for _, tc := range choice.Message.ToolCalls {
-					//verifica se a função existe no map
+					//check if the function exists in the map
 					if tcm, ok := maptools[tc.Function.Name]; ok {
-						//executa a tool
+						//execute the tool
 						resTool, err := tcm.Execute([]byte(tc.Function.Arguments))
 						if err != nil {
 							return nil
 						}
-						//atualiza o content da resposta
+						//update the response content
 						req.Messages = append(req.Messages, models.Message{
 							ToolCallID: &tc.ID,
 							Role:       models.TypeToolRole,

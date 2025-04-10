@@ -21,7 +21,7 @@ func mapToParameters(m map[string]interface{}) Parameters {
 }
 
 func ConvertToTools(tool Tool) Tools {
-	// Gera o esquema JSONSchema dos parâmetros.
+	// Generates the JSONSchema for the parameters.
 	paramsSchema, err := GenerateJSONSchema(tool.GetParameterStruct())
 	if err != nil {
 		panic(fmt.Errorf("failed to generate JSONSchema: %w", err))
@@ -37,21 +37,21 @@ func ConvertToTools(tool Tool) Tools {
 	}
 }
 
-// ConvertToolsToToolChoice converte uma struct Tools para ToolChoice.
+// ConvertToolsToToolChoice converts a Tools struct to ToolChoice.
 func ConvertToolsToToolChoice(tools Tools) (ToolCall, error) {
 	var toolChoice ToolCall
 
-	// Define o tipo.
+	// Define the type.
 	toolChoice.Type = ToolType(tools.Type)
 
-	// Verifica se o campo Function está definido.
+	// Check if the Function field is defined.
 	if tools.Function != nil {
-		// Cria uma instância de ToolFunction.
+		// Create an instance of ToolFunction.
 		toolChoice.Function = FunctionCall{
 			Name: tools.Function.Name,
 		}
 
-		// Serializa os parâmetros para uma string JSON.
+		// Serialize the parameters to a JSON string.
 
 		parametersJSON, err := json.Marshal(tools.Function.Parameters)
 		if err != nil {
@@ -65,7 +65,7 @@ func ConvertToolsToToolChoice(tools Tools) (ToolCall, error) {
 }
 
 func ConvertToTool(tool Tool) (map[string]interface{}, error) {
-	// Gera o esquema JSONSchema dos parâmetros.
+	// Generate the JSONSchema for the parameters.
 	paramsSchema, err := GenerateJSONSchema(tool.GetParameterStruct())
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate JSONSchema: %w", err)
@@ -81,7 +81,7 @@ func ConvertToTool(tool Tool) (map[string]interface{}, error) {
 	}, nil
 }
 
-// GenerateJSONSchema gera um esquema JSONSchema a partir de uma estrutura Go.
+// GenerateJSONSchema generates a JSONSchema from a Go structure.
 func GenerateJSONSchema(paramStruct interface{}) (map[string]interface{}, error) {
 	t := reflect.TypeOf(paramStruct)
 	if t.Kind() == reflect.Map {
@@ -113,7 +113,7 @@ func GenerateJSONSchema(paramStruct interface{}) (map[string]interface{}, error)
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		if field.PkgPath != "" && !field.Anonymous { // Ignora campos não exportados.
+		if field.PkgPath != "" && !field.Anonymous { // Ignore unexported fields.
 			continue
 		}
 
@@ -178,7 +178,7 @@ func GenerateJSONSchema(paramStruct interface{}) (map[string]interface{}, error)
 			return nil, fmt.Errorf("unsupported type: %v", fieldType.Kind())
 		}
 
-		// Adiciona o campo como obrigatório se ele não tiver a tag `omitempty`.
+		// Add the field as required if it doesn't have the `omitempty` tag.
 		if !strings.Contains(tag, "omitempty") {
 			schema["required"] = append(schema["required"].([]string), name)
 		}
