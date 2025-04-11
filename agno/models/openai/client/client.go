@@ -1,4 +1,4 @@
-package openai
+package client
 
 import (
 	"bufio"
@@ -17,7 +17,7 @@ import (
 
 var baseUrl string = "https://api.openai.com/v1"
 
-// Option defines a function that modifies the client options.
+// OptionClient defines a function that modifies the client options.
 type OptionClient func(*ClientOptions)
 
 // Client represents a customized HTTP client for interacting with the OpenAI API.
@@ -51,7 +51,7 @@ func NewClient(options ...OptionClient) (*Client, error) {
 
 	return &Client{
 		baseURL: opts.BaseURL,
-		model:   opts.Model,
+		model:   opts.ID,
 		apiKey:  apiKey,
 		client:  http.DefaultClient,
 		options: opts,
@@ -252,7 +252,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		return nil, err
 	}
 
-	if resp.Choices != nil && len(resp.Choices) > 0 {
+	if len(resp.Choices) > 0 {
 		req = parserResponseTool(req, resp, maptools)
 		if len(maptools) > 0 {
 			if err := c.Do(ctx, http.MethodPost, "/chat/completions", req, resp); err != nil {

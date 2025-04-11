@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/tools"
@@ -38,8 +39,8 @@ func NewClient(options ...OptionClient) (*Client, error) {
 		}
 	}
 
-	if opts.Model == "" {
-		opts.Model = "gemini-2.0-flash"
+	if opts.ID == "" {
+		opts.ID = "gemini-2.0-flash"
 	}
 
 	ctx := context.Background()
@@ -52,7 +53,7 @@ func NewClient(options ...OptionClient) (*Client, error) {
 	}
 
 	return &Client{
-		model:       opts.Model,
+		model:       opts.ID,
 		apiKey:      apiKey,
 		genaiClient: client,
 		options:     opts,
@@ -61,6 +62,9 @@ func NewClient(options ...OptionClient) (*Client, error) {
 
 // CreateChatCompletion implements simple chat completion (non-streaming)
 func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error) {
+	//debug system instruction
+	debugmod := ctx.Value("debug")
+
 	callOptions := models.DefaultCallOptions()
 	for _, opt := range options {
 		opt(callOptions)
@@ -69,15 +73,28 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	// Prepare tools if any
 	functionDeclarations, maptools, names := c.prepareTools(callOptions.ToolCall)
 
+	// Initial system prompt (se existir)
+	var systemInstruction *genai.Content
+	// get system instruction in messages (se existir)
+	for _, msg := range messages {
+		if msg.Role == models.TypeSystemRole {
+			systemInstruction = &genai.Content{
+				Parts: []*genai.Part{
+					{Text: msg.Content},
+				},
+			}
+		}
+	}
+
+	if debugmod != nil && debugmod.(bool) {
+		utils.CreateDebugPanel(systemInstruction.Parts[0].Text, 0)
+	}
+
+	//remove system message from the message list
+	messages = removeSystemMessage(messages)
+
 	// Prepare content (messages)
 	contents := toContents(messages)
-
-	// Initial system prompt
-	systemInstruction := &genai.Content{
-		Parts: []*genai.Part{
-			{Text: "You're a helpful assistant. When you receive a tool response, always use the tool result to answer the user's original question."},
-		},
-	}
 
 	// Prepare configuration
 	config := &genai.GenerateContentConfig{
@@ -99,6 +116,11 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		}
 	}
 
+	//shwo debug prompt
+	if debugmod != nil && debugmod.(bool) {
+		utils.CreateSystemPanel(systemInstruction.Parts[0].Text, 0)
+	}
+
 	// Execute request
 	resp, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, config)
 	if err != nil {
@@ -118,14 +140,16 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			return nil, err
 		}
 
+		startTime := time.Now()
+
 		toolResult, err := tool.Execute(args)
 		if err != nil {
 			return nil, fmt.Errorf("tool execution failed: %w", err)
 		}
 
-		if c.options.Debug {
-			utils.CreateToolCallPanel(toolResult.(string), 0)
-		}
+		// Show tool result
+		toolexec := fmt.Sprintf("Tool %s \n result: %v", toolCall.Name, toolResult)
+		utils.CreateToolCallPanel(toolexec, time.Since(startTime).Seconds())
 
 		// Final answer with tool result
 		resultContents := []*genai.Content{
@@ -151,6 +175,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 // StreamChatCompletion streams responses
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan models.MessageResponse, error) {
+	debugmod := ctx.Value("debug")
+
 	callOptions := models.DefaultCallOptions()
 	for _, opt := range options {
 		opt(callOptions)
@@ -158,10 +184,20 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 
 	functionDeclarations, maptools, names := c.prepareTools(callOptions.ToolCall)
 
-	systemInstruction := &genai.Content{
-		Parts: []*genai.Part{
-			{Text: "You're a helpful assistant. When you receive a tool response, always use the tool result to answer the user's original question."},
-		},
+	var systemInstruction *genai.Content
+	for _, msg := range messages {
+		if msg.Role == models.TypeSystemRole {
+			systemInstruction = &genai.Content{
+				Parts: []*genai.Part{
+					{Text: msg.Content},
+				},
+			}
+		}
+	}
+	messages = removeSystemMessage(messages)
+
+	if debugmod != nil && debugmod.(bool) {
+		utils.CreateDebugPanel(systemInstruction.Parts[0].Text, 0)
 	}
 
 	config := &genai.GenerateContentConfig{
@@ -218,16 +254,16 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 					fmt.Printf("Failed to marshal tool args: %v\n", err)
 					continue
 				}
-
+				startTime := time.Now()
 				toolResult, err := tool.Execute(args)
 				if err != nil {
 					fmt.Printf("Tool execution failed: %v\n", err)
 					continue
 				}
 
-				if c.options.Debug {
-					utils.CreateToolCallPanel(toolResult.(string), 0)
-				}
+				// Show tool result
+				toolexec := fmt.Sprintf("Tool %s \n result: %v", toolCall.Name, toolResult)
+				utils.CreateToolCallPanel(toolexec, time.Since(startTime).Seconds())
 
 				// Send tool result to the channel
 				toolResultMsg := fmt.Sprintf("Tool %s result: %v", toolCall.Name, toolResult)
@@ -409,4 +445,14 @@ func buildCompletionResponse(model string, resp *genai.GenerateContentResponse) 
 			FinishReason: "stop",
 		}},
 	}
+}
+
+func removeSystemMessage(messages []models.Message) []models.Message {
+	var filteredMessages []models.Message
+	for _, msg := range messages {
+		if msg.Role != models.TypeSystemRole {
+			filteredMessages = append(filteredMessages, msg)
+		}
+	}
+	return filteredMessages
 }

@@ -71,7 +71,7 @@ type ClientOptions struct {
 	HTTPClient     *http.Client           `json:"-"`                       // Custom HTTP client.
 	ClientParams   map[string]interface{} `json:"client_params,omitempty"` // Additional client parameters.
 	// Additional fields for chat requests.
-	Model            string   // Model to be used.
+	ID               string   // Model to be used.
 	Temperature      *float32 // Response temperature.
 	MaxTokens        *int     // Maximum number of tokens.
 	TopP             *float32 // Top-P parameter.
@@ -93,7 +93,7 @@ func DefaultCallOptions() *models.CallOptions {
 // DefaultOptions returns the default options for the OpenAI API client.
 func DefaultOptions() *ClientOptions {
 	return &ClientOptions{
-		Model:            "gpt-3.5-turbo",
+		ID:               "gpt-3.5-turbo",
 		Temperature:      floatPtr(0.7),
 		MaxTokens:        intPtr(100),
 		TopP:             floatPtr(1.0),
@@ -102,10 +102,10 @@ func DefaultOptions() *ClientOptions {
 	}
 }
 
-// WithModel sets the model to be used.
-func WithModel(model string) func(*ClientOptions) {
+// WithID sets the model to be used.
+func WithID(id string) func(*ClientOptions) {
 	return func(o *ClientOptions) {
-		o.Model = model
+		o.ID = id
 	}
 }
 

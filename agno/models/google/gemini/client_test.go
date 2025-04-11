@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/gemini"
+	"github.com/devalexandre/agno-golang/agno/models/google/gemini"
 	"github.com/devalexandre/agno-golang/agno/tools"
 )
 
@@ -18,7 +18,7 @@ func TestCreateChatCompletion(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithModel("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.0-flash-lite"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -56,7 +56,7 @@ func TestCreateChatCompletionWithTool(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithModel("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.0-flash-lite"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -69,7 +69,7 @@ func TestCreateChatCompletionWithTool(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "Qual a temperatura de poços de caldas?",
+		Content: "What is the temperature in Pocos de Caldas?",
 	}
 
 	callOPtions := []models.Option{
@@ -100,7 +100,7 @@ func TestCreateChatCompletionStream(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithModel("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.0-flash-lite"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -146,7 +146,7 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithModel("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.0-flash-lite"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -189,7 +189,7 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithModel("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.0-flash-lite"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -201,7 +201,7 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "Por favor, use a ferramenta WeatherTool para me dizer qual é a temperatura atual em Poços de Caldas - MG. A ferramenta precisa de latitude e longitude, que são -21.7872 e -46.5614 respectivamente.",
+		Content: "Please use the WeatherTool to tell me the current temperature in Pocos de Caldas - MG. The tool needs latitude and longitude, which are -21.7872 and -46.5614 respectively.",
 	}
 
 	var response string

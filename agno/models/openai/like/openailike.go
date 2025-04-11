@@ -1,46 +1,56 @@
-package openai
+package like
 
 import (
 	"context"
 	"errors"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/models/openai/client"
 )
 
-// OpenAIInterface replicates the base interface from Agno (Python version).
-
-// OpenAI represents the integration with the OpenAI API.
-type OpenAI struct {
-	client ClientInterface
-	opts   *ClientOptions
+// OpenAILike represents the integration with the OpenAILike API.
+type OpenAILike struct {
+	client client.ClientInterface
+	opts   *client.ClientOptions
 }
 
-// NewOpenAI creates a new instance of the integration with the OpenAI API.
+// NewOpenAILike creates a new instance of the integration with the OpenAILike API.
 // This function accepts options as functions that modify *ClientOptions.
-func NewOpenAI(options ...OptionClient) (models.AgnoModelInterface, error) {
-	cli, err := NewClient(options...)
+func NewOpenAILike(options ...client.OptionClient) (models.AgnoModelInterface, error) {
+	cli, err := client.NewClient(options...)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := DefaultOptions()
+	opts := client.DefaultOptions()
 	for _, option := range options {
 		option(opts)
 	}
 
-	return &OpenAI{
+	if opts.BaseURL == "" {
+		return nil, errors.New("base URL not set")
+	}
+
+	if opts.APIKey == "" {
+		return nil, errors.New("API key not set")
+	}
+	if opts.ID == "" {
+		return nil, errors.New("model not set")
+	}
+
+	return &OpenAILike{
 		client: cli,
 		opts:   opts,
 	}, nil
 }
 
 // ChatCompletion performs a chat completion request.
-func (o *OpenAI) ChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*ChatCompletionResponse, error) {
+func (o *OpenAILike) ChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*client.ChatCompletionResponse, error) {
 	return o.client.CreateChatCompletion(ctx, messages, options...)
 }
 
 // Invoke sends a chat completion request and parses the response into a Message.
-func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
+func (o *OpenAILike) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
 	resp, err := o.ChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
@@ -55,7 +65,7 @@ func (o *OpenAI) Invoke(ctx context.Context, messages []models.Message, options 
 }
 
 // AInvoke is the asynchronous version of Invoke. It delegates to Invoke.
-func (o *OpenAI) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+func (o *OpenAILike) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
 	ch := make(chan *models.MessageResponse, 1)
 	errChan := make(chan error)
 	go func() {
@@ -73,7 +83,7 @@ func (o *OpenAI) AInvoke(ctx context.Context, messages []models.Message, options
 }
 
 // InvokeStream sends a streaming chat completion request and converts each chunk into a Message.
-func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, error) {
+func (o *OpenAILike) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, error) {
 	chunkStream, err := o.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
@@ -95,7 +105,7 @@ func (o *OpenAI) InvokeStream(ctx context.Context, messages []models.Message, op
 }
 
 // AInvokeStream is the asynchronous version of InvokeStream. It delegates to InvokeStream.
-func (o *OpenAI) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+func (o *OpenAILike) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
 	respChan := make(chan *models.MessageResponse)
 	errChan := make(chan error)
 	go func() {

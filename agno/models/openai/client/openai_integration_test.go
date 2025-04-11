@@ -1,4 +1,4 @@
-package openai_test
+package client_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/models/openai"
+	"github.com/devalexandre/agno-golang/agno/models/openai/chat"
 )
 
 func TestIntegration_OpenAI_Invoke(t *testing.T) {
@@ -17,7 +18,7 @@ func TestIntegration_OpenAI_Invoke(t *testing.T) {
 	}
 
 	// Create a new OpenAI integration instance without using a mock.
-	instance, err := openai.NewOpenAI(openai.WithAPIKey(apiKey), openai.WithModel("gpt-3.5-turbo"))
+	instance, err := chat.NewOpenAIChat(openai.WithAPIKey(apiKey), openai.WithID("gpt-3.5-turbo"))
 	if err != nil {
 		t.Fatalf("Failed to create OpenAI instance: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestIntegration_OpenAI_InvokeStream(t *testing.T) {
 	}
 
 	// Create a new OpenAI integration instance without using a mock.
-	instance, err := openai.NewOpenAI(openai.WithAPIKey(apiKey), openai.WithModel("gpt-3.5-turbo"))
+	instance, err := chat.NewOpenAIChat(openai.WithAPIKey(apiKey), openai.WithID("gpt-3.5-turbo"))
 	if err != nil {
 		t.Fatalf("Failed to create OpenAI instance: %v", err)
 	}

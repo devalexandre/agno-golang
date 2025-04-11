@@ -3,70 +3,166 @@ package utils
 import (
 	"fmt"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Enum de cores
-type Color string
+type Color lipgloss.Color
 
 const (
-	ColorBlue    Color = "blue"
-	ColorMagenta Color = "magenta"
-	ColorRed     Color = "red"
-	ColorGreen   Color = "green"
-	ColorYellow  Color = "yellow"
+	ColorCyan    Color = "12"
+	ColorMagenta Color = "13"
+	ColorRed     Color = "9"
+	ColorGreen   Color = "10"
+	ColorYellow  Color = "11"
 )
 
-// Estilo base do painel
-var panelStyle = lipgloss.NewStyle().
-	Padding(1, 2).
-	Border(lipgloss.NormalBorder()).
-	Align(lipgloss.Left).
-	Width(80)
+// Original fixed panel
+func createPanel(content, title string, color Color, totalWidth int) string {
+	// External panel occupies 99% of terminal width
+	panelWidth := int(float64(totalWidth) * 0.99)
 
-// Cria o painel base genérico
-func createPanel(content, title string, color Color) string {
-	style := panelStyle.Copy().BorderForeground(lipgloss.Color(string(color)))
-	return style.Render(fmt.Sprintf("%s\n\n%s", title, content))
+	// Internal content occupies 98% of the external panel
+	contentWidth := int(float64(panelWidth) * 0.98)
+
+	// External panel
+	style := lipgloss.NewStyle().
+		Width(panelWidth).
+		Padding(1, 1).
+		Align(lipgloss.Left).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color(color))
+
+	// Internal content, not centered
+	contentStyle := lipgloss.NewStyle().
+		Width(contentWidth). // Define desired internal width
+		Align(lipgloss.Left) // Align to the left
+
+	return style.Render(
+		contentStyle.Render(fmt.Sprintf("%s\n\n%s", title, content)),
+	)
 }
 
-// PrintPanel imprime diretamente o painel no console
-func printPanel(content, title string, color Color) {
-	panel := createPanel(content, title, color)
+func printPanel(content, title string, color Color, width int) {
+	panel := createPanel(content, title, color, width)
 	fmt.Println(panel)
 }
 
-// Painel de resposta ✅
 func CreateResponsePanel(content string, elapsedSeconds float64) {
 	title := fmt.Sprintf("Response (%.1fs)", elapsedSeconds)
-	printPanel(content, title, ColorBlue)
+	width, _, _ := termSize()
+	printPanel(content, title, ColorCyan, width)
 }
 
-// Painel de chamada de ferramenta ✅
-func CreateToolCallPanel(content string, elapsedSeconds float64) {
-	title := fmt.Sprintf("Tool Call (%.1fs)", elapsedSeconds)
-	printPanel(content, title, ColorMagenta)
-}
-
-// Painel de erro ✅
 func CreateErrorPanel(content string, elapsedSeconds float64) {
 	title := fmt.Sprintf("Error (%.1fs)", elapsedSeconds)
-	printPanel(content, title, ColorRed)
+	width, _, _ := termSize()
+	printPanel(content, title, ColorRed, width)
 }
 
-// Painel do sistema (opcional) ✅
+func CreateThinkingPanel(question string) {
+	width, _, _ := termSize()
+	printPanel(question, "Thinking...", ColorGreen, width)
+}
+
+func CreateDebugPanel(content string, elapsedSeconds float64) {
+	title := fmt.Sprintf("DEBUG (%.1fs)", elapsedSeconds)
+	width, _, _ := termSize()
+	printPanel(content, title, ColorYellow, width)
+}
+
 func CreateSystemPanel(content string, elapsedSeconds float64) {
 	title := fmt.Sprintf("System (%.1fs)", elapsedSeconds)
-	printPanel(content, title, ColorGreen)
+	width, _, _ := termSize()
+	printPanel(content, title, ColorGreen, width)
 }
 
-// Painel de aviso (opcional) ✅
+func CreateToolCallPanel(content string, elapsedSeconds float64) {
+	title := fmt.Sprintf("Tool Call (%.1fs)", elapsedSeconds)
+	width, _, _ := termSize()
+	printPanel(content, title, ColorMagenta, width)
+}
+
 func CreateWarningPanel(content string, elapsedSeconds float64) {
 	title := fmt.Sprintf("Warning (%.1fs)", elapsedSeconds)
-	printPanel(content, title, ColorYellow)
+	width, _, _ := termSize()
+	printPanel(content, title, ColorYellow, width)
 }
 
-// Painel "Thinking..." padrão ✅
-func CreateThinkingPanel(question string) {
-	printPanel(question, "Thinking...", ColorYellow)
+// Support for dual dynamic panel
+type ContentUpdateMsg struct {
+	TopPanel    string
+	BottomPanel string
+}
+
+type model struct {
+	topPanel    string
+	bottomPanel string
+	topColor    Color
+	bottomColor Color
+	width       int
+}
+
+func newModel(initialTop, initialBottom string, topColor, bottomColor Color) model {
+	width, _, _ := termSize()
+	return model{
+		topPanel:    initialTop,
+		bottomPanel: initialBottom,
+		topColor:    topColor,
+		bottomColor: bottomColor,
+		width:       width,
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return nil
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+	case ContentUpdateMsg:
+		if msg.TopPanel != "" {
+			m.topPanel = msg.TopPanel
+		}
+		if msg.BottomPanel != "" {
+			m.bottomPanel = msg.BottomPanel
+		}
+	}
+	return m, nil
+}
+
+func (m model) View() string {
+	top := createPanel(m.topPanel, "", m.topColor, m.width)
+	bottom := createPanel(m.bottomPanel, "", m.bottomColor, m.width)
+	return lipgloss.JoinVertical(lipgloss.Left, top, bottom)
+}
+
+func StartDynamicDualPanel(initialTop, initialBottom string, topColor, bottomColor Color) (chan<- ContentUpdateMsg, <-chan struct{}) {
+	contentChan := make(chan ContentUpdateMsg)
+	done := make(chan struct{})
+
+	m := newModel(initialTop, initialBottom, topColor, bottomColor)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	go func() {
+		defer close(done)
+		for update := range contentChan {
+			p.Send(update)
+		}
+		p.Send(tea.Quit())
+	}()
+
+	go func() {
+		_, _ = p.Run()
+	}()
+
+	return contentChan, done
+}
+
+// termSize returns the current terminal size
+func termSize() (int, int, error) {
+	w, h := lipgloss.Size("")
+	return w, h, nil
 }

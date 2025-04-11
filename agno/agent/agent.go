@@ -1,97 +1,119 @@
+// ✅ Fixed file: Pure Golang, no mixing, ready to run main.go
+// agent.go updated for dynamic streaming with dual panel, compilable Go code
+
 package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/tools"
 	"github.com/devalexandre/agno-golang/agno/utils"
 )
 
-// AgentConfig define as opções de configuração para o Agent
 type AgentConfig struct {
 	Context      context.Context
 	Model        models.AgnoModelInterface
 	Description  string
+	Goal         string
 	Instructions string
+	ContextData  map[string]interface{}
+	Tools        []tools.Tool
 	Stream       bool
 	Markdown     bool
+	Debug        bool
 }
 
-// Agent estrutura principal que orquestra as chamadas de IA
 type Agent struct {
 	ctx          context.Context
 	model        models.AgnoModelInterface
 	description  string
+	goal         string
 	instructions string
+	contextData  map[string]interface{}
+	tools        []tools.Tool
 	stream       bool
 	markdown     bool
+	debug        bool
 }
 
-// NewAgent cria um novo agente com a configuração fornecida
 func NewAgent(config AgentConfig) *Agent {
+	config.Context = context.WithValue(config.Context, "debug", config.Debug)
 	return &Agent{
 		ctx:          config.Context,
 		model:        config.Model,
 		description:  config.Description,
+		goal:         config.Goal,
 		instructions: config.Instructions,
+		contextData:  config.ContextData,
+		tools:        config.Tools,
 		stream:       config.Stream,
 		markdown:     config.Markdown,
+		debug:        config.Debug,
 	}
 }
 
-// Run executa o agente com o prompt fornecido
-func (a *Agent) Run(prompt string, stream bool, markdown bool) {
+func (a *Agent) PrintStreamResponse(prompt string, stream bool, markdown bool) {
 	start := time.Now()
+	messages := a.prepareMessages(prompt)
 
-	// Prepara as mensagens iniciais: Description + Instructions + Prompt
-	messages := []models.Message{}
+	// Fixed initial panel
+	initialTop := fmt.Sprintf("Thinking...\n\n%s", prompt)
+
+	contentChan, _ := utils.StartDynamicDualPanel(initialTop, "", utils.ColorGreen, utils.ColorCyan)
+	defer close(contentChan)
+
+	respStream, err := a.model.InvokeStream(a.ctx, messages, models.WithTools(a.tools))
+	if err != nil {
+		utils.CreateErrorPanel(err.Error(), time.Since(start).Seconds())
+		return
+	}
+
+	var fullResponse string
+	for msg := range respStream {
+		fullResponse += msg.Content
+		contentChan <- utils.ContentUpdateMsg{
+			BottomPanel: fmt.Sprintf("Response (%.1fs)\n\n%s", time.Since(start).Seconds(), fullResponse),
+		}
+	}
+
+}
+
+func (a *Agent) prepareMessages(prompt string) []models.Message {
+	var systemMessage string
 
 	if a.description != "" {
-		messages = append(messages, models.Message{
-			Role:    models.TypeSystemRole,
-			Content: a.description,
-		})
+		systemMessage += fmt.Sprintf("<goal>\n%s\n</goal>\n", a.description)
+	}
+
+	if a.goal != "" {
+		systemMessage += fmt.Sprintf("<goal>\n%s\n</goal>\n", a.goal)
 	}
 
 	if a.instructions != "" {
+		systemMessage += fmt.Sprintf("<instructions>\n%s\n</instructions>\n", a.instructions)
+	}
+
+	if len(a.contextData) > 0 {
+		contextStr := utils.PrettyPrintMap(a.contextData)
+		systemMessage += fmt.Sprintf("<context>\n%s\n</context>\n", contextStr)
+	}
+
+	messages := []models.Message{}
+
+	if systemMessage != "" {
 		messages = append(messages, models.Message{
 			Role:    models.TypeSystemRole,
-			Content: a.instructions,
+			Content: systemMessage,
 		})
 	}
 
-	// Mensagem do usuário
 	messages = append(messages, models.Message{
 		Role:    models.TypeUserRole,
 		Content: prompt,
 	})
 
-	// Usa stream se solicitado ou se default for stream
-	useStream := stream || a.stream
-
-	if useStream {
-		utils.CreateThinkingPanel(prompt)
-
-		respStream, err := a.model.InvokeStream(a.ctx, messages)
-		if err != nil {
-			utils.CreateErrorPanel(err.Error(), time.Since(start).Seconds())
-			return
-		}
-
-		for msg := range respStream {
-			utils.CreateResponsePanel(msg.Content, time.Since(start).Seconds())
-		}
-
-	} else {
-		utils.CreateThinkingPanel(prompt)
-
-		resp, err := a.model.Invoke(a.ctx, messages)
-		if err != nil {
-			utils.CreateErrorPanel(err.Error(), time.Since(start).Seconds())
-			return
-		}
-
-		utils.CreateResponsePanel(resp.Content, time.Since(start).Seconds())
-	}
+	return messages
 }
