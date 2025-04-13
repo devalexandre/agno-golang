@@ -47,7 +47,7 @@ func ThinkingPanel(content string) *pterm.SpinnerPrinter {
 		WithTopPadding(1).
 		WithBottomPadding(1)
 
-	// Define o título da caixa
+	// Set the box title
 	title := pterm.LightGreen("Thinking...")
 	paddedBox.
 		WithTitle(title).
@@ -70,7 +70,7 @@ func DebugPanel(content string) {
 		WithTopPadding(1).
 		WithBottomPadding(1)
 
-	// Define o título da caixa
+	// Set the box title
 	title := pterm.LightYellow("Debug...")
 	paddedBox.
 		WithTitle(title).
@@ -85,7 +85,7 @@ func ToolCallPanel(content string) {
 		WithTopPadding(1).
 		WithBottomPadding(1)
 
-	// Define o título da caixa
+	// Set the box title
 	title := pterm.LightCyan("Tool Call...")
 	paddedBox.
 		WithTitle(title).

@@ -5,14 +5,14 @@ import (
 	"reflect"
 )
 
-// Toolkit armazena as informações da ferramenta e seus métodos registrados.
+// Toolkit stores the tool information and its registered methods.
 type Toolkit struct {
 	Name        string
 	Description string
 	methods     map[string]Method
 }
 
-// Method armazena a função de execução e seu schema de parâmetros.
+// Method stores the execution function and its parameter schema.
 type Method struct {
 	Receiver  interface{}
 	Function  interface{}
@@ -20,12 +20,12 @@ type Method struct {
 	ParamType reflect.Type
 }
 
-// Tool é a interface que define as operações básicas para qualquer ferramenta.
+// Tool is the interface that defines the basic operations for any tool.
 type Tool interface {
-	GetName() string                                                       // Retorna o nome da ferramenta
-	GetDescription() string                                                // Retorna a descrição da ferramenta
-	GetParameterStruct(methodName string) map[string]interface{}           // Retorna o schema JSON baseado no método registrado
-	GetMethods() map[string]Method                                         // Retorna os métodos registrados
-	GetFunction(methodName string) interface{}                             // Retorna a função de execução
-	Execute(methodName string, input json.RawMessage) (interface{}, error) // Executa a função
+	GetName() string                                                       // Returns the tool name
+	GetDescription() string                                                // Returns the tool description
+	GetParameterStruct(methodName string) map[string]interface{}           // Returns the JSON schema based on the registered method
+	GetMethods() map[string]Method                                         // Returns the registered methods
+	GetFunction(methodName string) interface{}                             // Returns the execution function
+	Execute(methodName string, input json.RawMessage) (interface{}, error) // Executes the function
 }
