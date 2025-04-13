@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/models/openai"
 	"github.com/devalexandre/agno-golang/agno/tools"
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 func TestCreateChatCompletion(t *testing.T) {
@@ -15,9 +17,9 @@ func TestCreateChatCompletion(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []OptionClient{
-		WithID("gpt-4o"),
-		WithAPIKey(apiKey),
+	optsClient := []openai.OptionClient{
+		openai.WithID("gpt-4o"),
+		openai.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.
@@ -47,9 +49,9 @@ func TestCreateChatCompletionStream(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []OptionClient{
-		WithID("gpt-4o"),
-		WithAPIKey(apiKey),
+	optsClient := []openai.OptionClient{
+		openai.WithID("gpt-4o"),
+		openai.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.
@@ -88,9 +90,9 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []OptionClient{
-		WithID("gpt-4o"),
-		WithAPIKey(apiKey),
+	optsClient := []openai.OptionClient{
+		openai.WithID("gpt-4o"),
+		openai.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.
@@ -106,8 +108,8 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 
 	callOPtions := []models.Option{
 		models.WithTemperature(0.5),
-		models.WithTools([]tools.Tool{
-			tools.WeatherTool{},
+		models.WithTools([]toolkit.Tool{
+			tools.NewWeatherTool(),
 		}),
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			t.Logf("Streaming chunk:: %+v", string(chunk))
@@ -132,9 +134,9 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []OptionClient{
-		WithID("gpt-4o"),
-		WithAPIKey(apiKey),
+	optsClient := []openai.OptionClient{
+		openai.WithID("gpt-4o"),
+		openai.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.
@@ -150,8 +152,8 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 
 	callOPtions := []models.Option{
 		models.WithTemperature(0.5),
-		models.WithTools([]tools.Tool{
-			tools.WeatherTool{},
+		models.WithTools([]toolkit.Tool{
+			tools.NewWeatherTool(),
 		}),
 	}
 

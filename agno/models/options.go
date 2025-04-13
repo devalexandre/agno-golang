@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/devalexandre/agno-golang/agno/tools"
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 // CallOptions defines common options that can be applied to both models (OpenAI and Gemini).
@@ -32,7 +33,7 @@ type CallOptions struct {
 	ExtraQuery          map[string]string                   `json:"-"`
 	RequestParams       map[string]interface{}              `json:"request_params,omitempty"`
 	StreamingFunc       func(context.Context, []byte) error `json:"-"` // Callback function for streaming
-	ToolCall            []tools.Tool                        `json:"-"` // Tools for function calls
+	ToolCall            []toolkit.Tool                      `json:"-"` // Tools for function calls
 	Tools               []tools.Tools                       `json:"tools,omitempty"`
 }
 
@@ -66,7 +67,7 @@ func WithStreamingFunc(f func(context.Context, []byte) error) Option {
 }
 
 // WithTools adds tools to the request
-func WithTools(tool []tools.Tool) Option {
+func WithTools(tool []toolkit.Tool) Option {
 	return func(o *CallOptions) {
 		o.ToolCall = tool
 	}

@@ -43,6 +43,7 @@ func (g *Gemini) Invoke(ctx context.Context, messages []models.Message, options 
 		return nil, errors.New("no choices in response")
 	}
 	return &models.MessageResponse{
+		Model:     resp.Model,
 		Role:      resp.Choices[0].Message.Role,
 		Content:   resp.Choices[0].Message.Content,
 		ToolCalls: resp.Choices[0].Message.ToolCalls,

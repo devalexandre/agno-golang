@@ -5,24 +5,25 @@ import (
 	"errors"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/models/openai"
 	"github.com/devalexandre/agno-golang/agno/models/openai/client"
 )
 
 // OpenAILike represents the integration with the OpenAILike API.
 type OpenAILike struct {
 	client client.ClientInterface
-	opts   *client.ClientOptions
+	opts   *openai.ClientOptions
 }
 
 // NewOpenAILike creates a new instance of the integration with the OpenAILike API.
 // This function accepts options as functions that modify *ClientOptions.
-func NewOpenAILike(options ...client.OptionClient) (models.AgnoModelInterface, error) {
+func NewOpenAILike(options ...openai.OptionClient) (models.AgnoModelInterface, error) {
 	cli, err := client.NewClient(options...)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := client.DefaultOptions()
+	opts := openai.DefaultOptions()
 	for _, option := range options {
 		option(opts)
 	}
