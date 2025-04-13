@@ -62,7 +62,7 @@ func NewClient(options ...OptionClient) (*Client, error) {
 
 // CreateChatCompletion implements simple chat completion (non-streaming)
 func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error) {
-	//debug system instruction
+	// Get debug settings from context
 	debugmod := ctx.Value(models.DebugKey)
 	showToolsCall := ctx.Value(models.ShowToolsCallKey)
 
@@ -74,9 +74,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	// Prepare tools if any
 	functionDeclarations, maptools, names := c.prepareTools(callOptions.ToolCall)
 
-	// Initial system prompt (se existir)
+	// Get system instruction from messages if it exists
 	var systemInstruction *genai.Content
-	// get system instruction in messages (se existir)
 	for _, msg := range messages {
 		if msg.Role == models.TypeSystemRole {
 			systemInstruction = &genai.Content{
@@ -87,7 +86,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		}
 	}
 
-	//remove system message from the message list
+	// Remove system message from the message list
 	messages = removeSystemMessage(messages)
 
 	// Prepare content (messages)
@@ -112,7 +111,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			},
 		}
 	}
-	//shwo debug user instruction
+	// Show debug information if enabled
 	if debugmod != nil && debugmod.(bool) {
 		debug := "[Prompt] \n"
 		debug += contents[len(contents)-1].Parts[0].Text + "\n"
@@ -121,12 +120,6 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		debug += systemInstruction.Parts[0].Text + "\n"
 		utils.DebugPanel(debug)
 	}
-
-	// if showToolsCall != nil && showToolsCall.(bool) {
-	// 	jsonTools, _ := json.MarshalIndent(config.Tools, "", "  ")
-	// 	debug := "\n[Tools]\n" + string(jsonTools) + "\n"
-	// 	utils.ToolCallPanel(debug)
-	// }
 
 	resp, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, config)
 	if err != nil {
@@ -249,7 +242,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 				break
 			}
 
-			// ✅ Processa todas as tools no chunk
+			// Process all tools in the chunk
 			if len(chunk.FunctionCalls()) > 0 {
 				for _, toolCall := range chunk.FunctionCalls() {
 					tool, ok := maptools[toolCall.Name]
@@ -365,7 +358,7 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]*genai.FunctionDeclar
 	for _, tool := range toolsCall {
 		for methodName := range tool.GetMethods() {
 
-			// ✅ Pega o schema da função já gerado no toolkit
+			// Get the function schema already generated in the toolkit
 			params := tool.GetParameterStruct(methodName)
 
 			propsMap, ok := params["properties"].(map[string]interface{})
@@ -386,7 +379,7 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]*genai.FunctionDeclar
 				requiredProps = requiredArr
 			}
 
-			// ✅ Mapeia todas as propriedades
+			// Map all properties
 			for propName, propValue := range propsMap {
 				propObj, ok := propValue.(map[string]interface{})
 				if !ok {
@@ -409,7 +402,7 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]*genai.FunctionDeclar
 					Description: description,
 				}
 
-				// ✅ Tratamento especial para arrays
+				// Special handling for arrays
 				if typeStr == "array" {
 					if itemsValRaw, ok := propObj["items"]; ok {
 						if itemsVal, ok := itemsValRaw.(map[string]interface{}); ok {
@@ -444,114 +437,6 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]*genai.FunctionDeclar
 	}
 
 	return functionDeclarations, maptools, names
-}
-
-func safeConvertMap(input interface{}) map[string]any {
-	result := make(map[string]any)
-
-	switch inputMap := input.(type) {
-
-	case map[string]any:
-		return inputMap
-
-	case map[string]string:
-		for k, v := range inputMap {
-			result[k] = v
-		}
-		return result
-
-	case map[string]float64:
-		for k, v := range inputMap {
-			result[k] = v
-		}
-		return result
-
-	case map[string]bool:
-		for k, v := range inputMap {
-			result[k] = v
-		}
-		return result
-
-	case map[interface{}]interface{}:
-		for k, v := range inputMap {
-			if keyStr, ok := k.(string); ok {
-				result[keyStr] = v
-			}
-		}
-		return result
-
-	case map[interface{}]string:
-		for k, v := range inputMap {
-			if keyStr, ok := k.(string); ok {
-				result[keyStr] = v
-			}
-		}
-		return result
-
-	case map[interface{}]float64:
-		for k, v := range inputMap {
-			if keyStr, ok := k.(string); ok {
-				result[keyStr] = v
-			}
-		}
-		return result
-
-	case map[interface{}]bool:
-		for k, v := range inputMap {
-			if keyStr, ok := k.(string); ok {
-				result[keyStr] = v
-			}
-		}
-		return result
-
-	default:
-		fmt.Printf("⚠️ safeConvertMap: unexpected type %T\n", input)
-	}
-
-	return result
-}
-
-func convertMapInterfaceToString(input interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-
-	switch inputMap := input.(type) {
-	case map[string]any:
-		for k, v := range inputMap {
-			result[k] = normalizeValue(v)
-		}
-	case map[string]string:
-		for k, v := range inputMap {
-			result[k] = v
-		}
-	case map[interface{}]interface{}:
-		for k, v := range inputMap {
-			if keyStr, ok := k.(string); ok {
-				result[keyStr] = normalizeValue(v)
-			}
-		}
-	default:
-		fmt.Printf("⚠️ convertMapInterfaceToString: unexpected type %T\n", input)
-	}
-
-	return result
-}
-
-func normalizeValue(value interface{}) interface{} {
-	switch v := value.(type) {
-	case map[string]interface{}:
-		return convertMapInterfaceToString(v)
-	case map[string]string:
-		return convertMapInterfaceToString(v)
-	case map[interface{}]interface{}:
-		return convertMapInterfaceToString(v)
-	case []interface{}:
-		for i := range v {
-			v[i] = normalizeValue(v[i])
-		}
-		return v
-	default:
-		return v
-	}
 }
 
 // Maps schema types

@@ -1,6 +1,3 @@
-// ✅ Fixed file: Pure Golang, no mixing, ready to run main.go
-// agent.go updated for dynamic streaming with dual panel, compilable Go code
-
 package agent
 
 import (

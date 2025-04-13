@@ -39,7 +39,7 @@ func StartSimplePanel(spinner *pterm.SpinnerPrinter, start time.Time) chan<- Con
 	return contentChan
 }
 
-// thinking
+// ThinkingPanel creates a thinking panel with spinner
 func ThinkingPanel(content string) *pterm.SpinnerPrinter {
 	paddedBox := pterm.DefaultBox.
 		WithLeftPadding(4).
@@ -47,7 +47,6 @@ func ThinkingPanel(content string) *pterm.SpinnerPrinter {
 		WithTopPadding(1).
 		WithBottomPadding(1)
 
-	// Define o título da caixa
 	title := pterm.LightGreen("Thinking...")
 	paddedBox.
 		WithTitle(title).
@@ -59,10 +58,9 @@ func ThinkingPanel(content string) *pterm.SpinnerPrinter {
 		Start("Loading...")
 
 	return spinnerResponse
-
 }
 
-// Debug Panel
+// DebugPanel creates a debug information panel
 func DebugPanel(content string) {
 	paddedBox := pterm.DefaultBox.
 		WithLeftPadding(4).
@@ -70,14 +68,13 @@ func DebugPanel(content string) {
 		WithTopPadding(1).
 		WithBottomPadding(1)
 
-	// Define o título da caixa
 	title := pterm.LightYellow("Debug...")
 	paddedBox.
 		WithTitle(title).
 		Println(content)
 }
 
-// tools Panel
+// ToolCallPanel creates a panel for tool calls
 func ToolCallPanel(content string) {
 	paddedBox := pterm.DefaultBox.
 		WithLeftPadding(4).
@@ -85,16 +82,14 @@ func ToolCallPanel(content string) {
 		WithTopPadding(1).
 		WithBottomPadding(1)
 
-	// Define o título da caixa
 	title := pterm.LightCyan("Tool Call...")
 	paddedBox.
 		WithTitle(title).
 		Println(content)
 }
 
-// response panel
+// ResponsePanel creates a panel for displaying responses
 func ResponsePanel(content string, sp *pterm.SpinnerPrinter, start time.Time, markdown bool) {
-
 	sp.Stop()
 	res := pterm.LightBlue("Response... \n")
 	if markdown {
@@ -102,7 +97,6 @@ func ResponsePanel(content string, sp *pterm.SpinnerPrinter, start time.Time, ma
 	}
 	res += content
 	sp.UpdateText(res)
-
 }
 
 // printPanel prints a panel using pterm

@@ -41,7 +41,7 @@ func GenerateJSONSchema(inputStruct interface{}) map[string]interface{} {
 			requiredFields = append(requiredFields, jsonName)
 		}
 
-		// ✅ Garante que array sempre tem items definidos
+		// Ensure arrays always have items defined
 		if field.Type.Kind() == reflect.Slice {
 			itemType := mapGoTypeToJSONType(field.Type.Elem())
 			property["items"] = map[string]interface{}{
