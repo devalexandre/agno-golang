@@ -193,7 +193,7 @@ func (a *Agent) PrintStreamResponse(prompt string, stream bool, markdown bool) {
 
 		fullResponse += msg.Content
 
-		// Response final
+		// Final response
 		contentChan <- utils.ContentUpdateMsg{
 			PanelName: "Response",
 			Content:   msg.Content,

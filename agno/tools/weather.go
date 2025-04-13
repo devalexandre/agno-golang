@@ -3,7 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -49,11 +49,11 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("invalid HTTP status: %d. Response: %s", resp.StatusCode, string(body))
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("error reading response: %v", err)
 	}
@@ -152,20 +152,20 @@ func NewWeatherTool() *WeatherTool {
 }
 
 func (wt *WeatherTool) GetCurrent(params WeatherParams) (interface{}, error) {
-	// Monta os parâmetros esperados pela função de handler
+	// Build the parameters expected by the handler function
 	queryParams := map[string]interface{}{
 		"latitude":  params.Latitude,
 		"longitude": params.Longitude,
 		"location":  params.Location,
 	}
 
-	// Executa a requisição para obter a previsão do tempo
+	// Execute the request to get the weather forecast
 	result, err := GetCurrentWeatherHandler(queryParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current weather: %w", err)
 	}
 
-	// Opcional: Log para debug
+	// Optional: Debug log
 	fmt.Println("Weather result:", result)
 
 	return result, nil
