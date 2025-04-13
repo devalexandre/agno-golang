@@ -12,13 +12,12 @@ import (
 	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/tools"
+	"github.com/devalexandre/agno-golang/agno/models/openai"
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
+	"github.com/devalexandre/agno-golang/agno/utils"
 )
 
 var baseUrl string = "https://api.openai.com/v1"
-
-// OptionClient defines a function that modifies the client options.
-type OptionClient func(*ClientOptions)
 
 // Client represents a customized HTTP client for interacting with the OpenAI API.
 type Client struct {
@@ -26,12 +25,12 @@ type Client struct {
 	baseURL string
 	apiKey  string
 	client  *http.Client
-	options ClientOptions
+	options openai.ClientOptions
 }
 
 // NewClient creates a new client for the OpenAI API.
-func NewClient(options ...OptionClient) (*Client, error) {
-	opts := ClientOptions{}
+func NewClient(options ...openai.OptionClient) (*Client, error) {
+	opts := openai.ClientOptions{}
 	for _, option := range options {
 		option(&opts)
 	}
@@ -119,7 +118,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body interface{}, 
 
 // CreateChatCompletion creates a chat completion request.
 func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error) {
-	callOptions := models.DefaultCallOptions()
+	callOptions := openai.DefaultCallOptions()
 	for _, option := range options {
 		option(callOptions)
 	}
@@ -149,11 +148,15 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	}
 
 	//create map for tools
-	maptools := make(map[string]tools.Tool)
+	maptools := make(map[string]toolkit.Tool)
 	if len(callOptions.ToolCall) > 0 {
+		// Set ToolChoice flag as pointer value.
 		req.ToolChoice = "auto"
 		for _, t := range callOptions.ToolCall {
-			maptools[t.Name()] = t
+			for methodName := range t.GetMethods() {
+				maptools[methodName] = t
+			}
+
 		}
 	}
 
@@ -208,7 +211,16 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 				if len(delta.ToolCalls) > 0 {
 					for _, tc := range delta.ToolCalls {
 						if tool, ok := maptools[tc.Function.Name]; ok {
-							resTool, err := tool.Execute([]byte(tc.Function.Arguments))
+							args, err := json.Marshal(tc.Function.Arguments)
+							if err != nil {
+								return nil, err
+							}
+
+							debug := fmt.Sprintf("Tool %s \n", tc.Function.Name)
+							debug += fmt.Sprintf("Args: %s \n", string(args))
+							utils.ToolCallPanel(debug)
+
+							resTool, err := tool.Execute(tc.Function.Name, args)
 							if err == nil {
 								toolResult := resTool.(string)
 								completeMessage.WriteString(toolResult)
@@ -267,7 +279,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 // StreamChatCompletion performs a streaming chat completion request.
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan ChatCompletionChunk, error) {
 
-	callOptions := DefaultCallOptions()
+	callOptions := openai.DefaultCallOptions()
 	for _, option := range options {
 		option(callOptions)
 	}
@@ -328,7 +340,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 	return chunks, nil
 }
 
-func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, maptools map[string]tools.Tool) *ChatCompletionRequest {
+func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, maptools map[string]toolkit.Tool) *ChatCompletionRequest {
 	for _, choice := range resp.Choices {
 		if choice.Message.Role == models.TypeAssistantRole {
 			//add message assistente
@@ -341,8 +353,15 @@ func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, ma
 				for _, tc := range choice.Message.ToolCalls {
 					//check if the function exists in the map
 					if tcm, ok := maptools[tc.Function.Name]; ok {
+						args, err := json.Marshal(tc.Function.Arguments)
+						if err != nil {
+							return nil
+						}
+						debug := fmt.Sprintf("Tool %s \n", tc.Function.Name)
+						debug += fmt.Sprintf("Args: %s \n", string(args))
+						utils.ToolCallPanel(debug)
 						//execute the tool
-						resTool, err := tcm.Execute([]byte(tc.Function.Arguments))
+						resTool, err := tcm.Execute(tc.Function.Name, args)
 						if err != nil {
 							return nil
 						}

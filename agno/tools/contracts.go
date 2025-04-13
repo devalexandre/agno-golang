@@ -1,14 +1,5 @@
 package tools
 
-import "encoding/json"
-
-type Tool interface {
-	Name() string                                        // Retorna o nome da ferramenta.
-	Description() string                                 // Retorna a descrição da ferramenta.
-	Execute(params json.RawMessage) (interface{}, error) // Executa a ferramenta com os parâmetros fornecidos.
-	GetParameterStruct() interface{}                     // Retorna a estrutura que define os parâmetros.
-}
-
 type ToolType string
 
 type ToolCall struct {

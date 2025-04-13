@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 func mapToParameters(m map[string]interface{}) Parameters {
@@ -20,19 +22,15 @@ func mapToParameters(m map[string]interface{}) Parameters {
 	return p
 }
 
-func ConvertToTools(tool Tool) Tools {
+func ConvertToTools(tool toolkit.Tool, methodName string) Tools {
 	// Generates the JSONSchema for the parameters.
-	paramsSchema, err := GenerateJSONSchema(tool.GetParameterStruct())
-	if err != nil {
-		panic(fmt.Errorf("failed to generate JSONSchema: %w", err))
-	}
 
 	return Tools{
 		Type: "function",
 		Function: &FunctionDefinition{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			Parameters:  mapToParameters(paramsSchema),
+			Name:        methodName,
+			Description: tool.GetDescription(),
+			Parameters:  mapToParameters(tool.GetParameterStruct(methodName)),
 		},
 	}
 }
@@ -64,9 +62,9 @@ func ConvertToolsToToolChoice(tools Tools) (ToolCall, error) {
 	return toolChoice, nil
 }
 
-func ConvertToTool(tool Tool) (map[string]interface{}, error) {
+func ConvertToTool(tool toolkit.Tool) (map[string]interface{}, error) {
 	// Generate the JSONSchema for the parameters.
-	paramsSchema, err := GenerateJSONSchema(tool.GetParameterStruct())
+	paramsSchema, err := GenerateJSONSchema(tool.GetParameterStruct("Search"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate JSONSchema: %w", err)
 	}
@@ -74,8 +72,8 @@ func ConvertToTool(tool Tool) (map[string]interface{}, error) {
 	return map[string]interface{}{
 		"type": "function",
 		"function": map[string]interface{}{
-			"name":        tool.Name(),
-			"description": tool.Description(),
+			"name":        tool.GetName(),
+			"description": tool.GetDescription(),
 			"parameters":  paramsSchema,
 		},
 	}, nil

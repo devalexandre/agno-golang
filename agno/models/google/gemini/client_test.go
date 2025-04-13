@@ -2,6 +2,7 @@ package gemini_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/models/google/gemini"
 	"github.com/devalexandre/agno-golang/agno/tools"
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 func TestCreateChatCompletion(t *testing.T) {
@@ -18,7 +20,7 @@ func TestCreateChatCompletion(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.5-pro-exp-03-25"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -56,7 +58,7 @@ func TestCreateChatCompletionWithTool(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.0-flash"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -74,7 +76,7 @@ func TestCreateChatCompletionWithTool(t *testing.T) {
 
 	callOPtions := []models.Option{
 		models.WithTemperature(0.5),
-		models.WithTools([]tools.Tool{
+		models.WithTools([]toolkit.Tool{
 			tools.NewWeatherTool(),
 		}),
 	}
@@ -89,6 +91,8 @@ func TestCreateChatCompletionWithTool(t *testing.T) {
 		}
 	}
 
+	fmt.Println(chatCompletion.Choices[0].Message.Content)
+
 	// Check the response
 	t.Logf("Chat completion response: %+v", chatCompletion.Choices[0].Message.Content)
 }
@@ -100,7 +104,7 @@ func TestCreateChatCompletionStream(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.5-pro-exp-03-25"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -146,7 +150,7 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.5-pro-exp-03-25"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -163,7 +167,7 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 
 	callOPtions := []models.Option{
 		models.WithTemperature(0.5),
-		models.WithTools([]tools.Tool{
+		models.WithTools([]toolkit.Tool{
 			tools.NewWeatherTool(),
 		}),
 	}
@@ -189,7 +193,7 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 	}
 
 	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.0-flash-lite"),
+		gemini.WithID("gemini-2.5-pro-exp-03-25"),
 		gemini.WithAPIKey(apiKey),
 	}
 
@@ -207,7 +211,7 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 	var response string
 	callOPtions := []models.Option{
 		models.WithTemperature(0.5),
-		models.WithTools([]tools.Tool{
+		models.WithTools([]toolkit.Tool{
 			tools.NewWeatherTool(),
 		}),
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {

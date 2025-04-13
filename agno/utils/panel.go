@@ -1,168 +1,164 @@
 package utils
 
 import (
-	"fmt"
+	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	mkdown "github.com/MichaelMure/go-term-markdown"
+	"github.com/pterm/pterm"
 )
 
-type Color lipgloss.Color
+// MessageType for dynamic messages
+type MessageType string
 
 const (
-	ColorCyan    Color = "12"
-	ColorMagenta Color = "13"
-	ColorRed     Color = "9"
-	ColorGreen   Color = "10"
-	ColorYellow  Color = "11"
+	MessageThinking MessageType = "Thinking"
+	MessageToolCall MessageType = "Tool Call"
+	MessageResponse MessageType = "Response"
+	MessageError    MessageType = "Error"
+	MessageDebug    MessageType = "Debug"
+	MessageSystem   MessageType = "System"
+	MessageWarning  MessageType = "Warning"
 )
 
-// Original fixed panel
-func createPanel(content, title string, color Color, totalWidth int) string {
-	// External panel occupies 99% of terminal width
-	panelWidth := int(float64(totalWidth) * 0.99)
-
-	// Internal content occupies 98% of the external panel
-	contentWidth := int(float64(panelWidth) * 0.98)
-
-	// External panel
-	style := lipgloss.NewStyle().
-		Width(panelWidth).
-		Padding(1, 1).
-		Align(lipgloss.Left).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(color))
-
-	// Internal content, not centered
-	contentStyle := lipgloss.NewStyle().
-		Width(contentWidth). // Define desired internal width
-		Align(lipgloss.Left) // Align to the left
-
-	return style.Render(
-		contentStyle.Render(fmt.Sprintf("%s\n\n%s", title, content)),
-	)
-}
-
-func printPanel(content, title string, color Color, width int) {
-	panel := createPanel(content, title, color, width)
-	fmt.Println(panel)
-}
-
-func CreateResponsePanel(content string, elapsedSeconds float64) {
-	title := fmt.Sprintf("Response (%.1fs)", elapsedSeconds)
-	width, _, _ := termSize()
-	printPanel(content, title, ColorCyan, width)
-}
-
-func CreateErrorPanel(content string, elapsedSeconds float64) {
-	title := fmt.Sprintf("Error (%.1fs)", elapsedSeconds)
-	width, _, _ := termSize()
-	printPanel(content, title, ColorRed, width)
-}
-
-func CreateThinkingPanel(question string) {
-	width, _, _ := termSize()
-	printPanel(question, "Thinking...", ColorGreen, width)
-}
-
-func CreateDebugPanel(content string, elapsedSeconds float64) {
-	title := fmt.Sprintf("DEBUG (%.1fs)", elapsedSeconds)
-	width, _, _ := termSize()
-	printPanel(content, title, ColorYellow, width)
-}
-
-func CreateSystemPanel(content string, elapsedSeconds float64) {
-	title := fmt.Sprintf("System (%.1fs)", elapsedSeconds)
-	width, _, _ := termSize()
-	printPanel(content, title, ColorGreen, width)
-}
-
-func CreateToolCallPanel(content string, elapsedSeconds float64) {
-	title := fmt.Sprintf("Tool Call (%.1fs)", elapsedSeconds)
-	width, _, _ := termSize()
-	printPanel(content, title, ColorMagenta, width)
-}
-
-func CreateWarningPanel(content string, elapsedSeconds float64) {
-	title := fmt.Sprintf("Warning (%.1fs)", elapsedSeconds)
-	width, _, _ := termSize()
-	printPanel(content, title, ColorYellow, width)
-}
-
-// Support for dual dynamic panel
+// ContentUpdateMsg represents an update to a panel
 type ContentUpdateMsg struct {
-	TopPanel    string
-	BottomPanel string
+	PanelName MessageType
+	Content   string
 }
 
-type model struct {
-	topPanel    string
-	bottomPanel string
-	topColor    Color
-	bottomColor Color
-	width       int
-}
-
-func newModel(initialTop, initialBottom string, topColor, bottomColor Color) model {
-	width, _, _ := termSize()
-	return model{
-		topPanel:    initialTop,
-		bottomPanel: initialBottom,
-		topColor:    topColor,
-		bottomColor: bottomColor,
-		width:       width,
-	}
-}
-
-func (m model) Init() tea.Cmd {
-	return nil
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-	case ContentUpdateMsg:
-		if msg.TopPanel != "" {
-			m.topPanel = msg.TopPanel
-		}
-		if msg.BottomPanel != "" {
-			m.bottomPanel = msg.BottomPanel
-		}
-	}
-	return m, nil
-}
-
-func (m model) View() string {
-	top := createPanel(m.topPanel, "", m.topColor, m.width)
-	bottom := createPanel(m.bottomPanel, "", m.bottomColor, m.width)
-	return lipgloss.JoinVertical(lipgloss.Left, top, bottom)
-}
-
-func StartDynamicDualPanel(initialTop, initialBottom string, topColor, bottomColor Color) (chan<- ContentUpdateMsg, <-chan struct{}) {
+// StartSimplePanel starts the simple printing loop
+func StartSimplePanel(spinner *pterm.SpinnerPrinter, start time.Time) chan<- ContentUpdateMsg {
 	contentChan := make(chan ContentUpdateMsg)
-	done := make(chan struct{})
-
-	m := newModel(initialTop, initialBottom, topColor, bottomColor)
-	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	go func() {
-		defer close(done)
 		for update := range contentChan {
-			p.Send(update)
+			printPanel(update.PanelName, update.Content, spinner, start)
 		}
-		p.Send(tea.Quit())
 	}()
 
-	go func() {
-		_, _ = p.Run()
-	}()
-
-	return contentChan, done
+	return contentChan
 }
 
-// termSize returns the current terminal size
-func termSize() (int, int, error) {
-	w, h := lipgloss.Size("")
-	return w, h, nil
+// thinking
+func ThinkingPanel(content string) *pterm.SpinnerPrinter {
+	paddedBox := pterm.DefaultBox.
+		WithLeftPadding(4).
+		WithRightPadding(4).
+		WithTopPadding(1).
+		WithBottomPadding(1)
+
+	// Define o título da caixa
+	title := pterm.LightGreen("Thinking...")
+	paddedBox.
+		WithTitle(title).
+		WithTextStyle(pterm.NewStyle(pterm.FgGreen)).
+		Println(content)
+
+	spinnerResponse, _ := pterm.DefaultSpinner.
+		WithWriter(paddedBox.Writer).
+		Start("Loading...")
+
+	return spinnerResponse
+
+}
+
+// Debug Panel
+func DebugPanel(content string) {
+	paddedBox := pterm.DefaultBox.
+		WithLeftPadding(4).
+		WithRightPadding(4).
+		WithTopPadding(1).
+		WithBottomPadding(1)
+
+	// Define o título da caixa
+	title := pterm.LightYellow("Debug...")
+	paddedBox.
+		WithTitle(title).
+		Println(content)
+}
+
+// tools Panel
+func ToolCallPanel(content string) {
+	paddedBox := pterm.DefaultBox.
+		WithLeftPadding(4).
+		WithRightPadding(4).
+		WithTopPadding(1).
+		WithBottomPadding(1)
+
+	// Define o título da caixa
+	title := pterm.LightCyan("Tool Call...")
+	paddedBox.
+		WithTitle(title).
+		Println(content)
+}
+
+// response panel
+func ResponsePanel(content string, sp *pterm.SpinnerPrinter, start time.Time, markdown bool) {
+
+	sp.Stop()
+	res := pterm.LightBlue("Response... \n")
+	if markdown {
+		content = string(mkdown.Render(content, 100, 0))
+	}
+	res += content
+	sp.UpdateText(res)
+
+}
+
+// printPanel prints a panel using pterm
+func printPanel(panelName MessageType, content string, spinnerResponse *pterm.SpinnerPrinter, stime time.Time) {
+	paddedBox := pterm.DefaultBox.
+		WithLeftPadding(4).
+		WithRightPadding(4).
+		WithTopPadding(1).
+		WithBottomPadding(1)
+
+	switch panelName {
+	case MessageError:
+		title := pterm.LightRed("Error...")
+		paddedBox.
+			WithTitle(title).
+			WithTextStyle(pterm.NewStyle(pterm.FgRed))
+		spinnerResponse.WithWriter(paddedBox.Writer)
+		spinnerResponse.UpdateText(content)
+
+	case MessageWarning:
+		title := pterm.LightYellow("Warning...")
+		paddedBox.
+			WithTitle(title).
+			WithTextStyle(pterm.NewStyle(pterm.FgYellow))
+		spinnerResponse.WithWriter(paddedBox.Writer)
+		spinnerResponse.UpdateText(content)
+
+	case MessageDebug:
+		title := pterm.LightBlue("Debug...")
+		paddedBox.
+			WithTitle(title).
+			WithBoxStyle(pterm.Debug.MessageStyle)
+		spinnerResponse.WithWriter(paddedBox.Writer)
+		spinnerResponse.UpdateText(content)
+
+	case MessageSystem:
+		title := pterm.LightMagenta("System...")
+		paddedBox.
+			WithTitle(title).
+			WithTextStyle(pterm.NewStyle(pterm.FgMagenta))
+		spinnerResponse.WithWriter(paddedBox.Writer)
+		spinnerResponse.UpdateText(content)
+
+	case MessageToolCall:
+		title := pterm.LightCyan("Tool Call...")
+		paddedBox.
+			WithTitle(title).
+			WithTextStyle(pterm.NewStyle(pterm.FgCyan))
+		spinnerResponse.WithWriter(paddedBox.Writer)
+		spinnerResponse.UpdateText(content)
+	case MessageResponse:
+		spinnerResponse.Stop()
+		paddedBox.
+			WithTextStyle(pterm.NewStyle(pterm.FgLightBlue))
+		spinnerResponse.WithWriter(paddedBox.Writer)
+		spinnerResponse.UpdateText(content)
+
+	}
 }
