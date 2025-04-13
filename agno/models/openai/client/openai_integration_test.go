@@ -18,6 +18,8 @@ func TestIntegration_OpenAI_Invoke(t *testing.T) {
 	}
 
 	// Create a new OpenAI integration instance without using a mock.
+	//instance, err := openai.CreateOpenAIChat(openai.WithAPIKey(apiKey), openai.WithID("gpt-3.5-turbo"))
+	// instance, err := openai.NewOpenAIChat  (openai.WithAPIKey(apiKey), openai.WithID("gpt-3.5-turbo"))
 	instance, err := chat.NewOpenAIChat(openai.WithAPIKey(apiKey), openai.WithID("gpt-3.5-turbo"))
 	if err != nil {
 		t.Fatalf("Failed to create OpenAI instance: %v", err)

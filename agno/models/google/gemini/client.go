@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/tools"
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/devalexandre/agno-golang/agno/utils"
 	"google.golang.org/genai"
 )
@@ -63,7 +63,8 @@ func NewClient(options ...OptionClient) (*Client, error) {
 // CreateChatCompletion implements simple chat completion (non-streaming)
 func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error) {
 	//debug system instruction
-	debugmod := ctx.Value("debug")
+	debugmod := ctx.Value(models.DebugKey)
+	showToolsCall := ctx.Value(models.ShowToolsCallKey)
 
 	callOptions := models.DefaultCallOptions()
 	for _, opt := range options {
@@ -84,10 +85,6 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 				},
 			}
 		}
-	}
-
-	if debugmod != nil && debugmod.(bool) {
-		utils.CreateDebugPanel(systemInstruction.Parts[0].Text, 0)
 	}
 
 	//remove system message from the message list
@@ -115,50 +112,62 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			},
 		}
 	}
-
-	//shwo debug prompt
+	//shwo debug user instruction
 	if debugmod != nil && debugmod.(bool) {
-		utils.CreateSystemPanel(systemInstruction.Parts[0].Text, 0)
+		debug := "[Prompt] \n"
+		debug += contents[len(contents)-1].Parts[0].Text + "\n"
+
+		debug = "\n[System Instruction]\n"
+		debug += systemInstruction.Parts[0].Text + "\n"
+		utils.DebugPanel(debug)
 	}
 
-	// Execute request
+	// if showToolsCall != nil && showToolsCall.(bool) {
+	// 	jsonTools, _ := json.MarshalIndent(config.Tools, "", "  ")
+	// 	debug := "\n[Tools]\n" + string(jsonTools) + "\n"
+	// 	utils.ToolCallPanel(debug)
+	// }
+
 	resp, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, config)
 	if err != nil {
 		return nil, err
 	}
 
+	var resultContents []*genai.Content
+
 	// Check tool call
 	if len(resp.FunctionCalls()) > 0 {
-		toolCall := resp.FunctionCalls()[0]
-		tool, ok := maptools[toolCall.Name]
-		if !ok {
-			return nil, fmt.Errorf("tool %q not found", toolCall.Name)
-		}
+		for _, toolCall := range resp.FunctionCalls() {
 
-		args, err := json.Marshal(toolCall.Args)
-		if err != nil {
-			return nil, err
-		}
+			tool, ok := maptools[toolCall.Name]
+			if !ok {
+				return nil, fmt.Errorf("tool %q not found", toolCall.Name)
+			}
+			// Convert tool arguments map[string]interface {} to JSON
+			args, err := json.Marshal(toolCall.Args)
+			if err != nil {
+				return nil, err
+			}
 
-		startTime := time.Now()
+			if showToolsCall != nil && showToolsCall.(bool) {
+				debug := fmt.Sprintf("Tool %s \n", toolCall.Name)
+				debug += fmt.Sprintf("Args: %s \n", string(args))
+				utils.ToolCallPanel(debug)
+			}
 
-		toolResult, err := tool.Execute(args)
-		if err != nil {
-			return nil, fmt.Errorf("tool execution failed: %w", err)
-		}
+			// Execute the tool
+			toolResult, err := tool.Execute(toolCall.Name, args)
+			if err != nil {
+				return nil, fmt.Errorf("tool execution failed: %w", err)
+			}
 
-		// Show tool result
-		toolexec := fmt.Sprintf("Tool %s \n result: %v", toolCall.Name, toolResult)
-		utils.CreateToolCallPanel(toolexec, time.Since(startTime).Seconds())
-
-		// Final answer with tool result
-		resultContents := []*genai.Content{
-			{
+			resultContents = append(resultContents, &genai.Content{
 				Role: "user",
 				Parts: []*genai.Part{{
 					Text: fmt.Sprintf("The result of tool %s is: %v", toolCall.Name, toolResult),
 				}},
-			},
+			})
+
 		}
 
 		finalResp, err := c.genaiClient.Models.GenerateContent(ctx, c.model, resultContents, nil)
@@ -175,7 +184,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 // StreamChatCompletion streams responses
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan models.MessageResponse, error) {
-	debugmod := ctx.Value("debug")
+	debugmod := ctx.Value(models.DebugKey)
+	showToolsCall := ctx.Value(models.ShowToolsCallKey)
 
 	callOptions := models.DefaultCallOptions()
 	for _, opt := range options {
@@ -197,7 +207,9 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 	messages = removeSystemMessage(messages)
 
 	if debugmod != nil && debugmod.(bool) {
-		utils.CreateDebugPanel(systemInstruction.Parts[0].Text, 0)
+		debug := "[Prompt] \n" + systemInstruction.Parts[0].Text + "\n"
+		utils.DebugPanel(debug)
+
 	}
 
 	config := &genai.GenerateContentConfig{
@@ -228,9 +240,8 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 	go func() {
 		defer close(responseChannel)
 
-		// Send the initial request and process the stream
 		var fullResponse string
-		var toolCallDetected bool
+		var resultContents []*genai.Content
 
 		for chunk, err := range c.genaiClient.Models.GenerateContentStream(ctx, c.model, contents, config) {
 			if err != nil {
@@ -238,81 +249,92 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 				break
 			}
 
-			// Check for function calls
-			if len(chunk.FunctionCalls()) > 0 && !toolCallDetected {
-				toolCallDetected = true
-				toolCall := chunk.FunctionCalls()[0]
-				tool, ok := maptools[toolCall.Name]
-				if !ok {
-					fmt.Printf("Tool %q not found\n", toolCall.Name)
-					continue
-				}
+			// ✅ Processa todas as tools no chunk
+			if len(chunk.FunctionCalls()) > 0 {
+				for _, toolCall := range chunk.FunctionCalls() {
+					tool, ok := maptools[toolCall.Name]
+					if !ok {
+						fmt.Printf("Tool %q not found\n", toolCall.Name)
+						continue
+					}
 
-				// Execute the tool
-				args, err := json.Marshal(toolCall.Args)
-				if err != nil {
-					fmt.Printf("Failed to marshal tool args: %v\n", err)
-					continue
-				}
-				startTime := time.Now()
-				toolResult, err := tool.Execute(args)
-				if err != nil {
-					fmt.Printf("Tool execution failed: %v\n", err)
-					continue
-				}
+					args, err := json.Marshal(toolCall.Args)
+					if err != nil {
+						fmt.Printf("Failed to marshal tool args: %v\n", err)
+						continue
+					}
 
-				// Show tool result
-				toolexec := fmt.Sprintf("Tool %s \n result: %v", toolCall.Name, toolResult)
-				utils.CreateToolCallPanel(toolexec, time.Since(startTime).Seconds())
+					if showToolsCall != nil && showToolsCall.(bool) {
+						startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", toolCall.Name, string(args))
+						utils.ToolCallPanel(startTool)
 
-				// Send tool result to the channel
-				toolResultMsg := fmt.Sprintf("Tool %s result: %v", toolCall.Name, toolResult)
-				responseChannel <- models.MessageResponse{
-					Role:    string(models.TypeAssistantRole),
-					Content: toolResultMsg,
-				}
+					}
 
-				if callOptions.StreamingFunc != nil {
-					callOptions.StreamingFunc(ctx, []byte(toolResultMsg))
-				}
+					toolResult, err := tool.Execute(toolCall.Name, args)
+					if err != nil {
+						fmt.Printf("Tool execution failed: %v\n", err)
+						continue
+					}
 
-				// Send the tool result back to the model for a final response
-				feedbackContent := []*genai.Content{
-					{
+					// Acumula os resultados
+					resultContents = append(resultContents, &genai.Content{
 						Role: "user",
 						Parts: []*genai.Part{{
 							Text: fmt.Sprintf("The result of tool %s is: %v", toolCall.Name, toolResult),
 						}},
-					},
-				}
+					})
 
-				// Get final response with tool result and process the stream
-				for finalChunk, err := range c.genaiClient.Models.GenerateContentStream(ctx, c.model, feedbackContent, nil) {
-					if err != nil {
-						fmt.Printf("Error reading from final stream: %v\n", err)
-						break
+					// Também envia para o canal de stream imediatamente (opcional)
+					toolResultMsg := fmt.Sprintf("Tool %s result: %v", toolCall.Name, toolResult)
+					responseChannel <- models.MessageResponse{
+						Model:   c.model,
+						Role:    string(models.TypeAssistantRole),
+						Content: toolResultMsg,
+					}
+					if callOptions.StreamingFunc != nil {
+						callOptions.StreamingFunc(ctx, []byte(toolResultMsg))
 					}
 
-					if finalChunk.Text() != "" {
-						if callOptions.StreamingFunc != nil {
-							callOptions.StreamingFunc(ctx, []byte(finalChunk.Text()))
+					if showToolsCall != nil && showToolsCall.(bool) {
+						endTool := fmt.Sprintf("✅ Tool %s finished", toolCall.Name)
+						utils.ToolCallPanel(endTool)
+					}
+
+				}
+
+				// Depois de processar todas as tools, gera a resposta final
+				if len(resultContents) > 0 {
+					finalStream := c.genaiClient.Models.GenerateContentStream(ctx, c.model, resultContents, nil)
+					for finalChunk, err := range finalStream {
+						if err != nil {
+							fmt.Printf("Error reading from final stream: %v\n", err)
+							break
 						}
-						responseChannel <- models.MessageResponse{
-							Role:    string(models.TypeAssistantRole),
-							Content: finalChunk.Text(),
+
+						if finalChunk.Text() != "" {
+							if callOptions.StreamingFunc != nil {
+								callOptions.StreamingFunc(ctx, []byte(finalChunk.Text()))
+							}
+							responseChannel <- models.MessageResponse{
+								Model:   c.model,
+								Role:    string(models.TypeAssistantRole),
+								Content: finalChunk.Text(),
+							}
 						}
 					}
 				}
-				return // End after tool execution and final response
+
+				continue // continua o loop para novos chunks
 			}
 
-			// Regular text response
+			// ✅ Resposta normal do modelo
 			if chunk.Text() != "" {
 				fullResponse += chunk.Text()
 				if callOptions.StreamingFunc != nil {
 					callOptions.StreamingFunc(ctx, []byte(chunk.Text()))
 				}
 				responseChannel <- models.MessageResponse{
+					Model:   c.model,
 					Role:    string(models.TypeAssistantRole),
 					Content: chunk.Text(),
 				}
@@ -335,85 +357,207 @@ func toContents(messages []models.Message) []*genai.Content {
 	return contents
 }
 
-// Prepares tools
-func (c *Client) prepareTools(toolsCall []tools.Tool) ([]*genai.FunctionDeclaration, map[string]tools.Tool, []string) {
+func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]*genai.FunctionDeclaration, map[string]toolkit.Tool, []string) {
 	var functionDeclarations []*genai.FunctionDeclaration
-	maptools := make(map[string]tools.Tool)
+	maptools := make(map[string]toolkit.Tool)
 	var names []string
 
 	for _, tool := range toolsCall {
-		params, _ := tools.GenerateJSONSchema(tool.GetParameterStruct())
-		schema := &genai.Schema{
-			Type: genai.TypeObject,
-		}
+		for methodName := range tool.GetMethods() {
 
-		if propsMap, ok := params["properties"].(map[string]any); ok {
-			schema.Properties = make(map[string]*genai.Schema)
+			// ✅ Pega o schema da função já gerado no toolkit
+			params := tool.GetParameterStruct(methodName)
 
-			// Extract required properties if available
+			propsMap, ok := params["properties"].(map[string]interface{})
+			if !ok {
+				fmt.Printf("⚠️ params['properties'] is not a map[string]interface{}\n")
+				continue
+			}
+
+			schema := &genai.Schema{
+				Type:       genai.TypeObject,
+				Properties: make(map[string]*genai.Schema),
+				Required:   []string{},
+			}
+
+			// ✅ Extrai required
 			var requiredProps []string
-			if requiredArr, ok := params["required"].([]any); ok {
-				for _, req := range requiredArr {
-					if reqStr, ok := req.(string); ok {
-						requiredProps = append(requiredProps, reqStr)
-					}
-				}
+			if requiredArr, ok := params["required"].([]string); ok {
+				requiredProps = requiredArr
 			}
 
+			// ✅ Mapeia todas as propriedades
 			for propName, propValue := range propsMap {
-				if propObj, ok := propValue.(map[string]any); ok {
-					typeStr := "string" // Default type
-					if typeVal, ok := propObj["type"]; ok {
-						if typeStr, ok = typeVal.(string); !ok {
-							typeStr = "string" // Fallback to string if type is not a string
+				propObj, ok := propValue.(map[string]interface{})
+				if !ok {
+					fmt.Printf("⚠️ propObj is not map[string]interface{} for field '%s'\n", propName)
+					continue
+				}
+
+				typeStr := "string"
+				if typeVal, ok := propObj["type"].(string); ok {
+					typeStr = strings.ToLower(typeVal)
+				}
+
+				description := ""
+				if descVal, ok := propObj["description"].(string); ok {
+					description = descVal
+				}
+
+				fieldSchema := &genai.Schema{
+					Type:        parseSchemaType(typeStr),
+					Description: description,
+				}
+
+				// ✅ Tratamento especial para arrays
+				if typeStr == "array" {
+					if itemsValRaw, ok := propObj["items"]; ok {
+						if itemsVal, ok := itemsValRaw.(map[string]interface{}); ok {
+							if itemTypeVal, ok := itemsVal["type"].(string); ok {
+								fieldSchema.Items = &genai.Schema{
+									Type: parseSchemaType(strings.ToLower(itemTypeVal)),
+								}
+							}
+						} else {
+							fmt.Printf("⚠️ Missing 'items' for array field '%s'\n", propName)
+							continue
 						}
-					}
-
-					description := ""
-					if descVal, ok := propObj["description"]; ok {
-						if descStr, ok := descVal.(string); ok {
-							description = descStr
-						}
-					}
-
-					schema.Properties[propName] = &genai.Schema{
-						Type:        parseSchemaType(typeStr),
-						Description: description,
-					}
-
-					// Check if this property is in the required list
-					isRequired := false
-					for _, req := range requiredProps {
-						if req == propName {
-							isRequired = true
-							break
-						}
-					}
-					// Note: We could use slices.Contains in Go 1.21+, but keeping compatibility with older Go versions
-
-					if isRequired {
-						schema.Required = append(schema.Required, propName)
 					}
 				}
+
+				schema.Properties[propName] = fieldSchema
+				schema.Required = requiredProps
+
 			}
+
+			// ✅ Cria a declaração da função final
+			functionDeclarations = append(functionDeclarations, &genai.FunctionDeclaration{
+				Name:        methodName,
+				Description: tool.GetDescription(),
+				Parameters:  schema,
+			})
+
+			maptools[methodName] = tool
+
+			names = append(names, methodName)
 		}
-
-		functionDeclarations = append(functionDeclarations, &genai.FunctionDeclaration{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			Parameters:  schema,
-		})
-
-		maptools[tool.Name()] = tool
-		names = append(names, tool.Name())
 	}
 
 	return functionDeclarations, maptools, names
 }
 
+func safeConvertMap(input interface{}) map[string]any {
+	result := make(map[string]any)
+
+	switch inputMap := input.(type) {
+
+	case map[string]any:
+		return inputMap
+
+	case map[string]string:
+		for k, v := range inputMap {
+			result[k] = v
+		}
+		return result
+
+	case map[string]float64:
+		for k, v := range inputMap {
+			result[k] = v
+		}
+		return result
+
+	case map[string]bool:
+		for k, v := range inputMap {
+			result[k] = v
+		}
+		return result
+
+	case map[interface{}]interface{}:
+		for k, v := range inputMap {
+			if keyStr, ok := k.(string); ok {
+				result[keyStr] = v
+			}
+		}
+		return result
+
+	case map[interface{}]string:
+		for k, v := range inputMap {
+			if keyStr, ok := k.(string); ok {
+				result[keyStr] = v
+			}
+		}
+		return result
+
+	case map[interface{}]float64:
+		for k, v := range inputMap {
+			if keyStr, ok := k.(string); ok {
+				result[keyStr] = v
+			}
+		}
+		return result
+
+	case map[interface{}]bool:
+		for k, v := range inputMap {
+			if keyStr, ok := k.(string); ok {
+				result[keyStr] = v
+			}
+		}
+		return result
+
+	default:
+		fmt.Printf("⚠️ safeConvertMap: unexpected type %T\n", input)
+	}
+
+	return result
+}
+
+func convertMapInterfaceToString(input interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	switch inputMap := input.(type) {
+	case map[string]any:
+		for k, v := range inputMap {
+			result[k] = normalizeValue(v)
+		}
+	case map[string]string:
+		for k, v := range inputMap {
+			result[k] = v
+		}
+	case map[interface{}]interface{}:
+		for k, v := range inputMap {
+			if keyStr, ok := k.(string); ok {
+				result[keyStr] = normalizeValue(v)
+			}
+		}
+	default:
+		fmt.Printf("⚠️ convertMapInterfaceToString: unexpected type %T\n", input)
+	}
+
+	return result
+}
+
+func normalizeValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		return convertMapInterfaceToString(v)
+	case map[string]string:
+		return convertMapInterfaceToString(v)
+	case map[interface{}]interface{}:
+		return convertMapInterfaceToString(v)
+	case []interface{}:
+		for i := range v {
+			v[i] = normalizeValue(v[i])
+		}
+		return v
+	default:
+		return v
+	}
+}
+
 // Maps schema types
 func parseSchemaType(typeStr string) genai.Type {
-	switch typeStr {
+	// Normalize para lowercase
+	switch strings.ToLower(typeStr) {
 	case "string":
 		return genai.TypeString
 	case "number", "integer":
@@ -432,13 +576,14 @@ func parseSchemaType(typeStr string) genai.Type {
 // Builds completion response
 func buildCompletionResponse(model string, resp *genai.GenerateContentResponse) *CompletionResponse {
 	return &CompletionResponse{
-		ID:      "",
+		ID:      resp.ResponseID,
 		Object:  "chat.completion",
 		Created: 0,
 		Model:   model,
 		Choices: []Choices{{
 			Index: 0,
 			Message: models.MessageResponse{
+				Model:   model,
 				Role:    string(models.TypeAssistantRole),
 				Content: resp.Text(),
 			},

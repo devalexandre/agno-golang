@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 // DuckDuckGoSearchResponse represents the expected structure of DuckDuckGo search API response.
@@ -15,8 +17,13 @@ type DuckDuckGoSearchResponse []struct {
 	Href  string `json:"href"`
 }
 
-// GetDuckDuckGoSearchHandler performs a DuckDuckGo search based on provided query parameters.
-func GetDuckDuckGoSearchHandler(queryParams map[string]interface{}) (string, error) {
+// DuckDuckGoToolInput defines the input parameters for the DuckDuckGoTool.
+type DuckDuckGoToolInput struct {
+	Query string `json:"query" description:"The search query to use in DuckDuckGo." required:"true"`
+}
+
+// GetDuckDuckGoSearchHandler performs a DuckDuckGo search based on provided input parameters.
+func GetDuckDuckGoSearchHandler(params DuckDuckGoToolInput) (string, error) {
 	baseURL := "https://duckduckgo.com/ac/"
 	u, err := url.Parse(baseURL)
 	if err != nil {
@@ -25,11 +32,7 @@ func GetDuckDuckGoSearchHandler(queryParams map[string]interface{}) (string, err
 
 	// Build query
 	q := u.Query()
-	if query, ok := queryParams["query"].(string); ok {
-		q.Set("q", query)
-	} else {
-		return "", fmt.Errorf("missing required 'query' parameter")
-	}
+	q.Set("q", params.Query)
 	u.RawQuery = q.Encode()
 
 	// Perform the request
@@ -64,11 +67,11 @@ func GetDuckDuckGoSearchHandler(queryParams map[string]interface{}) (string, err
 	}
 
 	response := SearchResult{
-		Query:   queryParams["query"].(string),
+		Query:   params.Query,
 		Results: results,
 		Response: fmt.Sprintf(
 			"DuckDuckGo search for '%v' returned %d results.",
-			queryParams["query"].(string), len(results),
+			params.Query, len(results),
 		),
 	}
 
@@ -81,38 +84,31 @@ func GetDuckDuckGoSearchHandler(queryParams map[string]interface{}) (string, err
 }
 
 // DuckDuckGoTool implements the Tool interface for DuckDuckGo search.
-type DuckDuckGoTool struct{}
+type DuckDuckGoTool struct {
+	toolkit.Toolkit
+}
 
-// Description returns a short description of the tool.
-func (dt DuckDuckGoTool) Description() string {
-	return "Search for information using DuckDuckGo. Provide a query string to retrieve search suggestions and results."
+func NewDuckDuckGoTool() *DuckDuckGoTool {
+	dt := &DuckDuckGoTool{}
+	tk := toolkit.NewToolkit()
+	tk.Name = "DuckDuckGoTool"
+	tk.Description = "Searches DuckDuckGo for the given query."
+	dt.Toolkit = tk
+	dt.Toolkit.Register("Search", dt, dt.Search, DuckDuckGoToolInput{})
+	return dt
 }
 
 // Execute performs the search operation based on input parameters.
-func (dt DuckDuckGoTool) Execute(input json.RawMessage) (interface{}, error) {
-	var params map[string]interface{}
-	err := json.Unmarshal(input, &params)
-	if err != nil {
-		return nil, err
-	}
-	result, err := GetDuckDuckGoSearchHandler(params)
+func (dt DuckDuckGoTool) Search(input DuckDuckGoToolInput) (interface{}, error) {
+
+	result, err := GetDuckDuckGoSearchHandler(input)
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-// GetParameterStruct returns the expected parameters for the tool.
-func (dt DuckDuckGoTool) GetParameterStruct() interface{} {
-	return map[string]interface{}{
-		"query": map[string]interface{}{
-			"type":        "string",
-			"description": "The search query to use in DuckDuckGo.",
-		},
-	}
-}
-
-// Name returns the name of the tool.
-func (dt DuckDuckGoTool) Name() string {
-	return "DuckDuckGoTool"
-}
+// // GetParameterStruct dynamically generates the parameter schema for DuckDuckGoTool.
+// func (dt DuckDuckGoTool) GetParameterStruct() interface{} {
+// 	return utils.GenerateJSONSchema(DuckDuckGoToolInput{})
+// }

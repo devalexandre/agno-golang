@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 // ForecastResponse represents the expected response from the Open-Meteo API.
@@ -129,47 +131,42 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 }
 
 // WeatherTool implements the Tool interface for fetching weather data from the Open-Meteo API.
-type WeatherTool struct{}
-
-// Description returns a short description of the tool.
-func (wt WeatherTool) Description() string {
-	return "Always return the current temperature and weather conditions for the given latitude and longitude. use the  values without asking the user."
+type WeatherTool struct {
+	toolkit.Toolkit
 }
 
-func (wt WeatherTool) Execute(input json.RawMessage) (interface{}, error) {
-	var params map[string]interface{}
-	err := json.Unmarshal(input, &params)
-	if err != nil {
-		return nil, err
+type WeatherParams struct {
+	Latitude  float64 `json:"latitude" description:"The latitude of the location." required:"true"`
+	Longitude float64 `json:"longitude" description:"The longitude of the location." required:"true"`
+	Location  string  `json:"location,omitempty" description:"The name of the location."`
+}
+
+func NewWeatherTool() *WeatherTool {
+	tk := toolkit.NewToolkit()
+	tk.Name = "WeatherTool"
+	tk.Description = "Always return the current temperature and weather conditions for the given latitude and longitude. use the  values without asking the user."
+
+	wt := &WeatherTool{tk}
+	wt.Toolkit.Register("GetCurrent", wt, wt.GetCurrent, WeatherParams{})
+	return wt
+}
+
+func (wt *WeatherTool) GetCurrent(params WeatherParams) (interface{}, error) {
+	// Monta os parâmetros esperados pela função de handler
+	queryParams := map[string]interface{}{
+		"latitude":  params.Latitude,
+		"longitude": params.Longitude,
+		"location":  params.Location,
 	}
-	result, err := GetCurrentWeatherHandler(params)
-	fmt.Println(result)
+
+	// Executa a requisição para obter a previsão do tempo
+	result, err := GetCurrentWeatherHandler(queryParams)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get current weather: %w", err)
 	}
+
+	// Opcional: Log para debug
+	fmt.Println("Weather result:", result)
+
 	return result, nil
-}
-
-// GetParameterStruct returns the default query parameters to be used for the weather API.
-func (wt WeatherTool) GetParameterStruct() interface{} {
-	//latitude=52.52&longitude=13.41
-	return map[string]interface{}{
-		"latitude": map[string]interface{}{
-			"type":        "number",
-			"description": "The latitude of the location.",
-		},
-		"longitude": map[string]interface{}{
-			"type":        "number",
-			"description": "The longitude of the location.",
-		},
-		"location": map[string]interface{}{
-			"type":        "string",
-			"description": "The location of the weather.",
-		},
-	}
-}
-
-// Name returns the name of the tool.
-func (wt WeatherTool) Name() string {
-	return "WeatherTool"
 }

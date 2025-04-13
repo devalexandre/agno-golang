@@ -5,24 +5,25 @@ import (
 	"errors"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/models/openai"
 	"github.com/devalexandre/agno-golang/agno/models/openai/client"
 )
 
 // OpenAIChat represents the integration with the OpenAIChat API.
 type OpenAIChat struct {
 	client client.ClientInterface
-	opts   *client.ClientOptions
+	opts   *openai.ClientOptions
 }
 
 // NewOpenAIChat creates a new instance of the integration with the OpenAIChat API.
 // This function accepts options as functions that modify *ClientOptions.
-func NewOpenAIChat(options ...client.OptionClient) (models.AgnoModelInterface, error) {
+func NewOpenAIChat(options ...openai.OptionClient) (models.AgnoModelInterface, error) {
 	cli, err := client.NewClient(options...)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := client.DefaultOptions()
+	opts := openai.DefaultOptions()
 	for _, option := range options {
 		option(opts)
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/tools"
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 // CallOptions represents the options for making a request to the OpenAI API.
@@ -34,14 +35,16 @@ type CallOptions struct {
 	RequestParams       map[string]interface{}              `json:"request_params,omitempty"`        // Additional request parameters.
 	StreamingFunc       func(context.Context, []byte) error `json:"-"`                               // Callback function for streaming.
 	Tools               []tools.Tools                       `json:"tools,omitempty"`                 // Tools for function calls.
-	ToolCall            []tools.Tool                        `json:"-"`                               // Tools for function calls.
+	ToolCall            []toolkit.Tool                      `json:"-"`                               // Tools for function calls.
 }
 
-func WithTools(tool []tools.Tool) Option {
+func WithTools(tool []toolkit.Tool) Option {
 	var _tools []tools.Tools
 	for _, t := range tool {
-		toolConverted := tools.ConvertToTools(t)
-		_tools = append(_tools, toolConverted)
+		for methodName := range t.GetMethods() {
+			toolConverted := tools.ConvertToTools(t, methodName)
+			_tools = append(_tools, toolConverted)
+		}
 	}
 
 	return func(o *CallOptions) {
@@ -274,3 +277,6 @@ func (o *CallOptions) MarshalJSON() ([]byte, error) {
 		Alias: (*Alias)(o),
 	})
 }
+
+// OptionClient defines a function that modifies the client options.
+type OptionClient func(*ClientOptions)
