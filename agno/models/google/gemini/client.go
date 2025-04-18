@@ -18,15 +18,12 @@ type Client struct {
 	model       string
 	apiKey      string
 	genaiClient *genai.Client
-	options     ClientOptions
+	options     models.ClientOptions
 }
 
-// OptionClient defines options for the client
-type OptionClient func(*ClientOptions)
-
 // NewClient creates a new Gemini client
-func NewClient(options ...OptionClient) (*Client, error) {
-	opts := ClientOptions{}
+func NewClient(options ...models.OptionClient) (*Client, error) {
+	opts := models.ClientOptions{}
 	for _, option := range options {
 		option(&opts)
 	}
@@ -177,7 +174,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 }
 
 // StreamChatCompletion streams responses
-func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan models.MessageResponse, error) {
+func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {
 	debugmod := ctx.Value(models.DebugKey)
 	showToolsCall := ctx.Value(models.ShowToolsCallKey)
 
@@ -228,115 +225,84 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 	// Convert messages to contents for the API
 	contents := toContents(messages)
 
-	// Create response channel
-	responseChannel := make(chan models.MessageResponse)
+	var resultContents []*genai.Content
 
-	go func() {
-		defer close(responseChannel)
+	for chunk, err := range c.genaiClient.Models.GenerateContentStream(ctx, c.model, contents, config) {
+		if err != nil {
+			fmt.Printf("Error reading from stream: %v\n", err)
+			break
+		}
 
-		var fullResponse string
-		var resultContents []*genai.Content
+		// ✅ Processa todas as tools no chunk
+		if len(chunk.FunctionCalls()) > 0 {
+			for _, toolCall := range chunk.FunctionCalls() {
+				tool, ok := maptools[toolCall.Name]
+				if !ok {
+					fmt.Printf("Tool %q not found\n", toolCall.Name)
+					continue
+				}
 
-		for chunk, err := range c.genaiClient.Models.GenerateContentStream(ctx, c.model, contents, config) {
-			if err != nil {
-				fmt.Printf("Error reading from stream: %v\n", err)
-				break
+				args, err := json.Marshal(toolCall.Args)
+				if err != nil {
+					fmt.Printf("Failed to marshal tool args: %v\n", err)
+					continue
+				}
+
+				if showToolsCall != nil && showToolsCall.(bool) {
+					startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", toolCall.Name, string(args))
+					utils.ToolCallPanel(startTool)
+
+				}
+
+				toolResult, err := tool.Execute(toolCall.Name, args)
+				if err != nil {
+					fmt.Printf("Tool execution failed: %v\n", err)
+					continue
+				}
+
+				// Acumula os resultados
+				resultContents = append(resultContents, &genai.Content{
+					Role: "user",
+					Parts: []*genai.Part{{
+						Text: fmt.Sprintf("The result of tool %s is: %v", toolCall.Name, toolResult),
+					}},
+				})
+
+				if showToolsCall != nil && showToolsCall.(bool) {
+					endTool := fmt.Sprintf("✅ Tool %s finished", toolCall.Name)
+					utils.ToolCallPanel(endTool)
+				}
+
 			}
 
-			// ✅ Processa todas as tools no chunk
-			if len(chunk.FunctionCalls()) > 0 {
-				for _, toolCall := range chunk.FunctionCalls() {
-					tool, ok := maptools[toolCall.Name]
-					if !ok {
-						fmt.Printf("Tool %q not found\n", toolCall.Name)
-						continue
-					}
-
-					args, err := json.Marshal(toolCall.Args)
+			// Depois de processar todas as tools, gera a resposta final
+			if len(resultContents) > 0 {
+				for resp, err := range c.genaiClient.Models.GenerateContentStream(ctx, c.model, resultContents, nil) {
 					if err != nil {
-						fmt.Printf("Failed to marshal tool args: %v\n", err)
-						continue
+						fmt.Printf("Error reading from final stream: %v\n", err)
+						break
 					}
 
-					if showToolsCall != nil && showToolsCall.(bool) {
-						startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", toolCall.Name, string(args))
-						utils.ToolCallPanel(startTool)
-
-					}
-
-					toolResult, err := tool.Execute(toolCall.Name, args)
-					if err != nil {
-						fmt.Printf("Tool execution failed: %v\n", err)
-						continue
-					}
-
-					// Acumula os resultados
-					resultContents = append(resultContents, &genai.Content{
-						Role: "user",
-						Parts: []*genai.Part{{
-							Text: fmt.Sprintf("The result of tool %s is: %v", toolCall.Name, toolResult),
-						}},
-					})
-
-					// Também envia para o canal de stream imediatamente (opcional)
-					toolResultMsg := fmt.Sprintf("Tool %s result: %v", toolCall.Name, toolResult)
-					responseChannel <- models.MessageResponse{
-						Model:   c.model,
-						Role:    string(models.TypeAssistantRole),
-						Content: toolResultMsg,
-					}
-					if callOptions.StreamingFunc != nil {
-						callOptions.StreamingFunc(ctx, []byte(toolResultMsg))
-					}
-
-					if showToolsCall != nil && showToolsCall.(bool) {
-						endTool := fmt.Sprintf("✅ Tool %s finished", toolCall.Name)
-						utils.ToolCallPanel(endTool)
-					}
-
-				}
-
-				// Depois de processar todas as tools, gera a resposta final
-				if len(resultContents) > 0 {
-					finalStream := c.genaiClient.Models.GenerateContentStream(ctx, c.model, resultContents, nil)
-					for finalChunk, err := range finalStream {
-						if err != nil {
-							fmt.Printf("Error reading from final stream: %v\n", err)
-							break
-						}
-
-						if finalChunk.Text() != "" {
-							if callOptions.StreamingFunc != nil {
-								callOptions.StreamingFunc(ctx, []byte(finalChunk.Text()))
-							}
-							responseChannel <- models.MessageResponse{
-								Model:   c.model,
-								Role:    string(models.TypeAssistantRole),
-								Content: finalChunk.Text(),
-							}
+					if resp.Text() != "" {
+						if callOptions.StreamingFunc != nil {
+							callOptions.StreamingFunc(ctx, []byte(resp.Text()))
 						}
 					}
-				}
 
-				continue // continua o loop para novos chunks
-			}
-
-			// ✅ Resposta normal do modelo
-			if chunk.Text() != "" {
-				fullResponse += chunk.Text()
-				if callOptions.StreamingFunc != nil {
-					callOptions.StreamingFunc(ctx, []byte(chunk.Text()))
-				}
-				responseChannel <- models.MessageResponse{
-					Model:   c.model,
-					Role:    string(models.TypeAssistantRole),
-					Content: chunk.Text(),
 				}
 			}
 		}
-	}()
 
-	return responseChannel, nil
+		if len(functionDeclarations) == 0 {
+			if chunk.Text() != "" {
+				if callOptions.StreamingFunc != nil {
+					callOptions.StreamingFunc(ctx, []byte(chunk.Text()))
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // Helper: convert messages to contents

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/openai"
 	"github.com/devalexandre/agno-golang/agno/tools"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
@@ -17,9 +16,9 @@ func TestCreateChatCompletion(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []openai.OptionClient{
-		openai.WithID("gpt-4o"),
-		openai.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gpt-4o"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.
@@ -49,9 +48,9 @@ func TestCreateChatCompletionStream(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []openai.OptionClient{
-		openai.WithID("gpt-4o"),
-		openai.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gpt-4o"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.
@@ -90,9 +89,9 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []openai.OptionClient{
-		openai.WithID("gpt-4o"),
-		openai.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gpt-4o"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.
@@ -134,9 +133,9 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 	if apiKey == "" {
 		t.Skip("Skipping integration test. OPENAI_API_KEY is not set.")
 	}
-	optsClient := []openai.OptionClient{
-		openai.WithID("gpt-4o"),
-		openai.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gpt-4o"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new OpenAI client with a test API key.

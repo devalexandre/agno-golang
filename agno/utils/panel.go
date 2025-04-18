@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"time"
 
 	mkdown "github.com/MichaelMure/go-term-markdown"
@@ -27,12 +28,12 @@ type ContentUpdateMsg struct {
 }
 
 // StartSimplePanel starts the simple printing loop
-func StartSimplePanel(spinner *pterm.SpinnerPrinter, start time.Time) chan<- ContentUpdateMsg {
+func StartSimplePanel(spinner *pterm.SpinnerPrinter, start time.Time, markdown bool) chan<- ContentUpdateMsg {
 	contentChan := make(chan ContentUpdateMsg)
 
 	go func() {
 		for update := range contentChan {
-			printPanel(update.PanelName, update.Content, spinner, start)
+			printPanel(update.PanelName, update.Content, spinner, start, markdown)
 		}
 	}()
 
@@ -96,7 +97,7 @@ func ToolCallPanel(content string) {
 func ResponsePanel(content string, sp *pterm.SpinnerPrinter, start time.Time, markdown bool) {
 
 	sp.Stop()
-	res := pterm.LightBlue("Response... \n")
+	res := pterm.LightBlue(fmt.Sprintf("Response (%.1fs)\n\n", time.Since(start).Seconds()))
 	if markdown {
 		content = string(mkdown.Render(content, 100, 0))
 	}
@@ -106,7 +107,7 @@ func ResponsePanel(content string, sp *pterm.SpinnerPrinter, start time.Time, ma
 }
 
 // printPanel prints a panel using pterm
-func printPanel(panelName MessageType, content string, spinnerResponse *pterm.SpinnerPrinter, stime time.Time) {
+func printPanel(panelName MessageType, content string, spinnerResponse *pterm.SpinnerPrinter, stime time.Time, markdown bool) {
 	paddedBox := pterm.DefaultBox.
 		WithLeftPadding(4).
 		WithRightPadding(4).
@@ -154,6 +155,10 @@ func printPanel(panelName MessageType, content string, spinnerResponse *pterm.Sp
 		spinnerResponse.WithWriter(paddedBox.Writer)
 		spinnerResponse.UpdateText(content)
 	case MessageResponse:
+		if markdown {
+			content = string(mkdown.Render(content, 100, 0))
+		}
+
 		spinnerResponse.Stop()
 		paddedBox.
 			WithTextStyle(pterm.NewStyle(pterm.FgLightBlue))

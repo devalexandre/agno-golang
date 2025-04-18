@@ -91,12 +91,14 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 	}, nil
 }
 
-func (a *Agent) RunStream(prompt string) (<-chan models.RunResponse, <-chan error) {
+func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
 	start := time.Now()
 	messages := a.prepareMessages(prompt)
+	//get debug
+	debugmod := a.ctx.Value(models.DebugKey)
 
 	spinnerResponse := utils.ThinkingPanel(prompt)
-	contentChan := utils.StartSimplePanel(spinnerResponse, start)
+	contentChan := utils.StartSimplePanel(spinnerResponse, start, a.markdown)
 	defer close(contentChan)
 
 	// Thinking
@@ -105,46 +107,34 @@ func (a *Agent) RunStream(prompt string) (<-chan models.RunResponse, <-chan erro
 		Content:   prompt,
 	}
 
-	respStream, errChan := a.model.AInvokeStream(a.ctx, messages, models.WithTools(a.tools))
-
-	out := make(chan models.RunResponse)
-	errOut := make(chan error, 1)
-
-	go func() {
-		defer close(out)
-		defer close(errOut)
-		defer close(contentChan)
-
-		for msg := range respStream {
-			contentChan <- utils.ContentUpdateMsg{
-				PanelName: "Response",
-				Content:   fmt.Sprintf("Response (%.1fs)\n\n%s", time.Since(start).Seconds(), msg.Content),
+	opts := []models.Option{
+		models.WithTools(a.tools),
+		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+			if debugmod != nil && debugmod.(bool) {
+				contentChan <- utils.ContentUpdateMsg{
+					PanelName: "Response",
+					Content:   fmt.Sprintf("Response (%.1fs)\n\n%s", time.Since(start).Seconds(), string(chunk)),
+				}
 			}
 
-			out <- models.RunResponse{
-				TextContent: msg.Content,
-				ContentType: "text",
-				Event:       "RunResponse",
-				Messages: []models.Message{
-					{
-						Role:    models.Role(msg.Role),
-						Content: msg.Content,
-					},
-				},
-				Model:     msg.Model,
-				CreatedAt: time.Now().Unix(),
-			}
-		}
+			return fn(chunk)
+		}),
+	}
 
-		if err, ok := <-errChan; ok && err != nil {
-			errOut <- err
-		}
-	}()
+	return a.model.InvokeStream(a.ctx, messages, opts...)
 
-	return out, errOut
 }
 
+// create Print with stream func is optional
 func (a *Agent) PrintResponse(prompt string, stream bool, markdown bool) {
+	if stream {
+		a.print_stream_response(prompt, markdown)
+	} else {
+		a.print_response(prompt, markdown)
+	}
+}
+
+func (a *Agent) print_response(prompt string, markdown bool) {
 	start := time.Now()
 	messages := a.prepareMessages(prompt)
 
@@ -160,44 +150,42 @@ func (a *Agent) PrintResponse(prompt string, stream bool, markdown bool) {
 
 }
 
-func (a *Agent) PrintStreamResponse(prompt string, stream bool, markdown bool) {
+func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	start := time.Now()
 	messages := a.prepareMessages(prompt)
 	// Thinking
 	spinnerResponse := utils.ThinkingPanel(prompt)
-	contentChan := utils.StartSimplePanel(spinnerResponse, start)
+	contentChan := utils.StartSimplePanel(spinnerResponse, start, markdown)
 	defer close(contentChan)
 
 	// Response
 	responseTile := fmt.Sprintf("Response (%.1fs)\n\n", time.Since(start).Seconds())
 	showResponse := false
-	respStream, err := a.model.InvokeStream(a.ctx, messages, models.WithTools(a.tools))
-	if err != nil {
+	callOptions := []models.Option{
+		models.WithTools(a.tools),
+		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+			if !showResponse {
+				contentChan <- utils.ContentUpdateMsg{
+					PanelName: "Response",
+					Content:   responseTile,
+				}
+				showResponse = true
+			}
 
-		contentChan <- utils.ContentUpdateMsg{
-			PanelName: "Error",
-			Content:   err.Error(),
-		}
-		return
-	}
-
-	var fullResponse string
-	for msg := range respStream {
-		if !showResponse {
+			// Final response
 			contentChan <- utils.ContentUpdateMsg{
 				PanelName: "Response",
-				Content:   responseTile,
+				Content:   string(chunk),
 			}
-			showResponse = true
-		}
 
-		fullResponse += msg.Content
+			return nil
+		}),
+	}
 
-		// Final response
-		contentChan <- utils.ContentUpdateMsg{
-			PanelName: "Response",
-			Content:   msg.Content,
-		}
+	err := a.model.InvokeStream(a.ctx, messages, callOptions...)
+	if err != nil {
+		fmt.Println(err)
+		return
 	}
 
 }

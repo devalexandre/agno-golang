@@ -25,12 +25,12 @@ type Client struct {
 	baseURL string
 	apiKey  string
 	client  *http.Client
-	options openai.ClientOptions
+	options models.ClientOptions
 }
 
 // NewClient creates a new client for the OpenAI API.
-func NewClient(options ...openai.OptionClient) (*Client, error) {
-	opts := openai.ClientOptions{}
+func NewClient(options ...models.OptionClient) (*Client, error) {
+	opts := models.ClientOptions{}
 	for _, option := range options {
 		option(&opts)
 	}
@@ -277,7 +277,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 }
 
 // StreamChatCompletion performs a streaming chat completion request.
-func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan ChatCompletionChunk, error) {
+func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {
 
 	callOptions := openai.DefaultCallOptions()
 	for _, option := range options {
@@ -310,34 +310,55 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewBuffer(body))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
 	httpReq.Header.Set("Content-Type", "application/json")
-	chunks := make(chan ChatCompletionChunk)
-	go func() {
-		defer close(chunks)
-		resp, err := c.client.Do(httpReq)
-		if err != nil {
-			return
+
+	httpResp, err := c.client.Do(httpReq)
+
+	if err != nil {
+		return err
+	}
+	defer httpResp.Body.Close()
+
+	scanner := bufio.NewScanner(httpResp.Body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
 		}
-		defer resp.Body.Close()
-		decoder := json.NewDecoder(resp.Body)
-		for {
-			var chunk ChatCompletionChunk
-			if err := decoder.Decode(&chunk); err == io.EOF {
-				break
-			} else if err != nil {
-				break
+		if line == "data: [DONE]" {
+			break
+		}
+		if strings.HasPrefix(line, "data: ") {
+			line = strings.TrimPrefix(line, "data: ")
+			line = strings.TrimSpace(line)
+		}
+		if line == "" {
+			continue
+		}
+		var chunk ChatCompletionChunk
+		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+			return err
+		}
+		if len(chunk.Choices) > 0 {
+			delta := chunk.Choices[0].Delta
+			if delta.Content != "" {
+				if callOptions.StreamingFunc != nil {
+					if err := callOptions.StreamingFunc(ctx, []byte(delta.Content)); err != nil {
+						return err
+					}
+				}
 			}
-			chunks <- chunk
 		}
-	}()
-	return chunks, nil
+	}
+
+	return nil
 }
 
 func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, maptools map[string]toolkit.Tool) *ChatCompletionRequest {
