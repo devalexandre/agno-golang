@@ -37,9 +37,9 @@ func TestInvokeStream(t *testing.T) {
 		}),
 	}
 
-	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.5-pro-exp-03-25"),
-		gemini.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gemini-2.5-pro-exp-03-25"),
+		models.WithAPIKey(apiKey),
 	}
 
 	ge, err := gemini.NewGemini(optsClient...)

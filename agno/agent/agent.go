@@ -160,6 +160,7 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 
 	// Response
 	responseTile := fmt.Sprintf("Response (%.1fs)\n\n", time.Since(start).Seconds())
+	fullResponse := ""
 	showResponse := false
 	callOptions := []models.Option{
 		models.WithTools(a.tools),
@@ -178,6 +179,7 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 				Content:   string(chunk),
 			}
 
+			fullResponse += string(chunk)
 			return nil
 		}),
 	}
@@ -186,6 +188,10 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	if err != nil {
 		fmt.Println(err)
 		return
+	}
+	contentChan <- utils.ContentUpdateMsg{
+		PanelName: "Response",
+		Content:   fullResponse,
 	}
 
 }

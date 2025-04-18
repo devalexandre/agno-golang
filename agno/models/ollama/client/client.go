@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
@@ -69,33 +68,15 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	}
 	req.Options = opts
 
-	// Show debug panel if requested
-	if debugmod != nil && debugmod.(bool) {
-		debug := "[Prompt] \n"
-
-		// Show system messages
-		for _, msg := range messages {
-			if msg.Role == models.TypeSystemRole {
-				debug += "[System Instruction]\n" + msg.Content + "\n"
-			}
-		}
-
-		// Show last user message
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == models.TypeUserRole {
-				debug += "[User Message]\n" + messages[i].Content + "\n"
-				break
-			}
-		}
-
-		utils.DebugPanel(debug)
-	}
-
 	_tools, maptools, _ := c.prepareTools(callOptions.ToolCall)
 	req.Tools = _tools
 
 	var responseTools []api.Message
 	var resp_ api.ChatResponse
+	if debugmod != nil && debugmod.(bool) {
+		jsonDebugReq, _ := json.MarshalIndent(req, "", "  ")
+		utils.DebugPanel(string(jsonDebugReq))
+	}
 	err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
 		resp_ = resp
 		if len(resp.Message.ToolCalls) == 0 {
@@ -112,14 +93,16 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 				if showToolsCall != nil && showToolsCall.(bool) {
 					// Tool call start panel
-					startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", tc.Function.Name, args)
+					startTool := fmt.Sprintf("🚀 Running tool %s with args:", tc.Function.Name)
 					utils.ToolCallPanel(startTool)
+					argsJsonPanel, _ := json.MarshalIndent(args, "", "  ")
+					utils.ToolCallPanel(string(argsJsonPanel))
 				}
 
 				// Convert back to JSON
 				argsJSON, err := json.Marshal(args)
 				if err != nil {
-					return fmt.Errorf("Error converting arguments to JSON: %w", err)
+					return fmt.Errorf("Error converting arguments to JSON: %v", err)
 				}
 
 				// Execute the tool with the corrected arguments
@@ -234,7 +217,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 	req := &api.ChatRequest{
 		Model:    c.model,
 		Messages: msgs,
-		Stream:   &FALSE,
+		Stream:   &TRUE,
 	}
 
 	// Process options
@@ -243,158 +226,134 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 		option(callOptions)
 	}
 
+	_tools, maptools, _ := c.prepareTools(callOptions.ToolCall)
 	callOptions.Tools = nil
-
+	req.Tools = _tools
 	opts, err := utils.StructToMap(callOptions)
 	if err != nil {
 		return err
 	}
+	//remove ToolCall from options
+	opts["ToolCall"] = nil
 	req.Options = opts
 
-	// Show debug panel if requested
-	if debugmod != nil && debugmod.(bool) {
-		debug := "[Prompt] \n"
+	if len(_tools) > 0 {
+		var responseTools []api.Message
 
-		// Show system messages
-		for _, msg := range messages {
-			if msg.Role == models.TypeSystemRole {
-				debug += "[System Instruction]\n" + msg.Content + "\n"
-			}
-		}
-
-		// Show last user message
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == models.TypeUserRole {
-				debug += "[User Message]\n" + messages[i].Content + "\n"
-				break
-			}
-		}
-
-		utils.DebugPanel(debug)
-	}
-
-	_tools, maptools, _ := c.prepareTools(callOptions.ToolCall)
-	req.Tools = _tools
-
-	if len(_tools) == 0 {
-		req.Stream = &TRUE
-	}
-
-	var responseTools []api.Message
-	var resp_ api.ChatResponse
-	var buffer strings.Builder
-	lastFlush := time.Now()
-	err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
-		resp_ = resp
-		if resp.Done {
-			return nil
-		}
-		if len(resp.Message.ToolCalls) == 0 {
-
-			if resp.Message.Content != "" {
-				buffer.WriteString(resp.Message.Content)
-				if time.Since(lastFlush) > 300*time.Millisecond || strings.HasSuffix(resp.Message.Content, ".") {
-					callOptions.StreamingFunc(ctx, []byte(buffer.String()))
-					buffer.Reset()
-					lastFlush = time.Now()
-				}
-			}
-
-			return nil
-		}
-		// Process each tool call
-		for _, tc := range resp.Message.ToolCalls {
-			if tool, ok := maptools[tc.Function.Name]; ok {
-				args := tc.Function.Arguments
-
-				if showToolsCall != nil && showToolsCall.(bool) {
-					// Tool call start panel
-					startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", tc.Function.Name, args)
-					utils.ToolCallPanel(startTool)
-				}
-
-				// Convert back to JSON
-				argsJSON, err := json.Marshal(args)
-				if err != nil {
-					return fmt.Errorf("Error converting arguments to JSON: %w", err)
-				}
-
-				// Execute the tool with the corrected arguments
-				resTool, err := tool.Execute(tc.Function.Name, argsJSON)
-				if err != nil {
-					return fmt.Errorf("error executing tool %s: %w", tc.Function.Name, err)
-				}
-
-				// Tool call completion panel
-				if showToolsCall != nil && showToolsCall.(bool) {
-					endTool := fmt.Sprintf("✅ Tool %s finished", tc.Function.Name)
-					utils.ToolCallPanel(endTool)
-				}
-
-				// Convert tool result to string
-				var toolResultStr string
-				switch result := resTool.(type) {
-				case string:
-					toolResultStr = result
-				case map[string]interface{}:
-					// Convert map to JSON
-					resultJSON, err := json.Marshal(result)
-					if err != nil {
-						return fmt.Errorf("error converting tool result to JSON: %w", err)
-					}
-					toolResultStr = string(resultJSON)
-				default:
-					// Try to convert any other type to JSON
-					resultJSON, err := json.Marshal(result)
-					if err != nil {
-						return fmt.Errorf("error converting tool result to JSON: %w", err)
-					}
-					toolResultStr = string(resultJSON)
-				}
-
-				// Convert tool response to JSON
-				// Add tool response to the response list
-				responseTools = append(responseTools, api.Message{
-					Role:    "tool",
-					Content: toolResultStr,
-				})
-
-				req.Messages = append(req.Messages, responseTools...)
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return err
-	}
-
-	if len(resp_.Message.ToolCalls) > 0 {
-		req.Stream = &TRUE
 		err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
 			if resp.Done {
 				return nil
 			}
+			// Process each tool call
+			for _, tc := range resp.Message.ToolCalls {
+				if tool, ok := maptools[tc.Function.Name]; ok {
+					args := tc.Function.Arguments
 
-			// ✅ Normal model response
+					if showToolsCall != nil && showToolsCall.(bool) {
+						// Tool call start panel
+						argsJsonPanel, _ := json.MarshalIndent(args, "", "  ")
+						startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", tc.Function.Name)
+						utils.ToolCallPanel(startTool)
+						utils.ToolCallPanel(string(argsJsonPanel))
+					}
 
-			if resp.Message.Content != "" {
-				buffer.WriteString(resp.Message.Content)
-				if time.Since(lastFlush) > 300*time.Millisecond || strings.HasSuffix(resp.Message.Content, ".") {
-					callOptions.StreamingFunc(ctx, []byte(buffer.String()))
-					buffer.Reset()
-					lastFlush = time.Now()
+					// Convert back to JSON
+					argsJSON, err := json.Marshal(args)
+					if err != nil {
+						return fmt.Errorf("Error converting arguments to JSON: %w", err)
+					}
+
+					// Execute the tool with the corrected arguments
+					resTool, err := tool.Execute(tc.Function.Name, argsJSON)
+					if err != nil {
+						return fmt.Errorf("error executing tool %s: %w", tc.Function.Name, err)
+					}
+
+					// Tool call completion panel
+					if showToolsCall != nil && showToolsCall.(bool) {
+						endTool := fmt.Sprintf("✅ Tool %s finished", tc.Function.Name)
+						utils.ToolCallPanel(endTool)
+					}
+
+					// Convert tool result to string
+					var toolResultStr string
+					switch result := resTool.(type) {
+					case string:
+						toolResultStr = result
+					case map[string]interface{}:
+						// Convert map to JSON
+						resultJSON, err := json.Marshal(result)
+						if err != nil {
+							return fmt.Errorf("error converting tool result to JSON: %w", err)
+						}
+						toolResultStr = string(resultJSON)
+					default:
+						// Try to convert any other type to JSON
+						resultJSON, err := json.Marshal(result)
+						if err != nil {
+							return fmt.Errorf("error converting tool result to JSON: %w", err)
+						}
+						toolResultStr = string(resultJSON)
+					}
+
+					// Convert tool response to JSON
+					// Add tool response to the response list
+					responseTools = append(responseTools, api.Message{
+						Role:    "tool",
+						Content: toolResultStr,
+					})
+
+					req.Messages = append(req.Messages, responseTools...)
 				}
 			}
 
 			return nil
 		})
 
+		if err != nil {
+			return err
+		}
+	}
+
+	var buffer strings.Builder
+	//lastFlush := time.Now()
+	req.Tools = nil
+	if debugmod != nil && debugmod.(bool) {
+		jsonDebugReq, _ := json.MarshalIndent(req, "", "  ")
+		utils.DebugPanel(string(jsonDebugReq))
+	}
+
+	err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
+
+		if resp.Message.Content != "" {
+			buffer.WriteString(resp.Message.Content)
+			if stopSentence(resp.Message.Content) {
+				callOptions.StreamingFunc(ctx, []byte(buffer.String()))
+				buffer.Reset()
+				//	lastFlush = time.Now()
+
+				fmt.Println(buffer.String())
+			}
+		}
+
+		return nil
+	})
+
+	// add last response in req
+	if buffer.Len() > 0 {
+		msg := api.Message{
+			Role:    "assistant",
+			Content: buffer.String(),
+		}
+		req.Messages = append(req.Messages, msg)
 	}
 
 	return err
 
+}
+
+func stopSentence(text string) bool {
+	return strings.HasSuffix(text, ".") || strings.HasSuffix(text, "?") || strings.HasSuffix(text, "!") || strings.HasSuffix(text, "\n") || strings.HasSuffix(text, ":")
 }
 
 func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]toolkit.Tool, []string) {

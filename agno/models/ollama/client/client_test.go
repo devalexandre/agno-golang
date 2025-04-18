@@ -95,7 +95,6 @@ func TestOllama_StreamChatCompletion(t *testing.T) {
 	callOPtions := []models.Option{
 		models.WithTemperature(0.5),
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-			fmt.Println("Chunk received:", string(chunk))
 			response += string(chunk)
 			return nil
 		}),
@@ -139,5 +138,5 @@ func TestOllama_StreamChatCompletionWithTool(t *testing.T) {
 		t.Fatalf("StreamChatCompletion with tools failed: %v", err)
 	}
 
-	t.Logf("Full response: %s", response)
+	fmt.Println(response)
 }
