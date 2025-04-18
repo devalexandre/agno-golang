@@ -11,17 +11,17 @@ import (
 // Gemini is the implementation for the Gemini model of the Agno API
 type Gemini struct {
 	client *Client
-	opts   *ClientOptions
+	opts   *models.ClientOptions
 }
 
 // NewGemini creates a new instance of the Gemini integration.
-func NewGemini(options ...OptionClient) (models.AgnoModelInterface, error) {
+func NewGemini(options ...models.OptionClient) (models.AgnoModelInterface, error) {
 	cli, err := NewClient(options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	opts := &ClientOptions{}
+	opts := &models.ClientOptions{}
 	for _, option := range options {
 		option(opts)
 	}
@@ -67,23 +67,15 @@ func (g *Gemini) AInvoke(ctx context.Context, messages []models.Message, options
 }
 
 // InvokeStream implements the streaming method for continuous responses.
-func (g *Gemini) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, error) {
-	responseChannel := make(chan *models.MessageResponse)
+func (g *Gemini) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
 
-	stream, err := g.client.StreamChatCompletion(ctx, messages, options...)
+	err := g.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
-		close(responseChannel)
-		return nil, fmt.Errorf("failed to start stream: %w", err)
+
+		return fmt.Errorf("failed to start stream: %w", err)
 	}
 
-	go func() {
-		defer close(responseChannel)
-		for msg := range stream {
-			responseChannel <- &msg
-		}
-	}()
-
-	return responseChannel, nil
+	return nil
 
 }
 
@@ -91,16 +83,23 @@ func (g *Gemini) InvokeStream(ctx context.Context, messages []models.Message, op
 func (g *Gemini) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
 	ch := make(chan *models.MessageResponse)
 	errChan := make(chan error)
+
+	optsFunction := models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+		ch <- &models.MessageResponse{
+			Content: string(chunk),
+		}
+		return nil
+	})
+	options = append(options, optsFunction)
+
 	go func() {
 		defer close(ch)
 		defer close(errChan)
-		stream, err := g.InvokeStream(ctx, messages, options...)
+		err := g.InvokeStream(ctx, messages, options...)
 		if err != nil {
 			errChan <- err
 		}
-		for msg := range stream {
-			ch <- msg
-		}
+
 	}()
 	return ch, errChan
 }

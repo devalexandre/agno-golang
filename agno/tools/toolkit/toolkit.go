@@ -4,30 +4,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
-// NewToolkit inicializa um novo Toolkit vazio.
+// NewToolkit initializes a new empty Toolkit.
 func NewToolkit() Toolkit {
 	return Toolkit{
 		methods: make(map[string]Method),
 	}
 }
 
-// GetName retorna o nome da toolkit.
+// GetName returns the toolkit name.
 func (tk *Toolkit) GetName() string {
 	return tk.Name
 }
 
-// GetDescription retorna a descrição da toolkit.
+// GetDescription returns the toolkit description.
 func (tk *Toolkit) GetDescription() string {
 	return tk.Description
 }
 
-// Register registra um método na toolkit.
-// methodName = Nome da função
-// fn = Função de execução
-// paramExample = Exemplo da struct que representa os parâmetros para geração do schema
+// Register registers a method in the toolkit.
+// methodName = Function name
+// fn = Execution function
+// paramExample = Example struct that represents the parameters for schema generation
 func (tk *Toolkit) Register(methodName string, receiver interface{}, fn interface{}, paramExample interface{}) {
 	if _, ok := tk.methods[methodName]; ok {
 		panic(fmt.Sprintf("Register: method %s already registered", methodName))
@@ -52,7 +53,7 @@ func (tk *Toolkit) Register(methodName string, receiver interface{}, fn interfac
 		panic("Register expects a function")
 	}
 
-	// Gera o schema baseado na struct informada
+	// Generate schema based on the provided struct
 	paramType := reflect.TypeOf(paramExample)
 	if paramType.Kind() == reflect.Ptr {
 		paramType = paramType.Elem()
@@ -73,12 +74,12 @@ func (tk *Toolkit) Register(methodName string, receiver interface{}, fn interfac
 	}
 }
 
-// GetMethods retorna todos os métodos registrados na toolkit.
+// GetMethods returns all methods registered in the toolkit.
 func (tk *Toolkit) GetMethods() map[string]Method {
 	return tk.methods
 }
 
-// GetFunction retorna a função de execução associada a um método registrado.
+// GetFunction returns the execution function associated with a registered method.
 func (tk *Toolkit) GetFunction(methodName string) interface{} {
 	method, ok := tk.methods[tk.Name+"_"+methodName]
 	if !ok {
@@ -87,41 +88,82 @@ func (tk *Toolkit) GetFunction(methodName string) interface{} {
 	return method.Function
 }
 
-// Execute executa a função associada a um método, passando o input JSON.
-// Execute executa a função associada a um método, passando o input JSON.
+// Execute runs the function associated with a method, passing the JSON input.
 func (tk *Toolkit) Execute(methodName string, input json.RawMessage) (interface{}, error) {
 	method, ok := tk.methods[methodName]
 	if !ok {
 		return nil, fmt.Errorf("Execute: method %s not found", methodName)
 	}
 
-	// Cria uma nova instância do tipo de parâmetro
-	paramInstance := reflect.New(method.ParamType).Interface()
-
-	// Faz o Unmarshal do input JSON para a struct
-	if err := json.Unmarshal(input, paramInstance); err != nil {
-		return nil, fmt.Errorf("Execute: failed to unmarshal input: %w", err)
+	// Parse JSON to intermediate map
+	var argsMap map[string]interface{}
+	if err := json.Unmarshal(input, &argsMap); err != nil {
+		return nil, fmt.Errorf("Execute: failed to parse input JSON: %w", err)
 	}
 
-	// Prepara argumentos: apenas os parâmetros da função
+	// Fix common types that come as strings
+	for i := 0; i < method.ParamType.NumField(); i++ {
+		field := method.ParamType.Field(i)
+		jsonName := field.Tag.Get("json")
+		if jsonName == "" {
+			jsonName = strings.ToLower(field.Name)
+		} else {
+			jsonName = strings.Split(jsonName, ",")[0]
+		}
+
+		val, exists := argsMap[jsonName]
+		if !exists {
+			continue
+		}
+
+		switch field.Type.Kind() {
+		case reflect.Float64:
+			if strVal, ok := val.(string); ok {
+				if f, err := strconv.ParseFloat(strVal, 64); err == nil {
+					argsMap[jsonName] = f
+				}
+			}
+		case reflect.Bool:
+			if strVal, ok := val.(string); ok {
+				if b, err := strconv.ParseBool(strVal); err == nil {
+					argsMap[jsonName] = b
+				}
+			}
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			if strVal, ok := val.(string); ok {
+				if i, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+					argsMap[jsonName] = i
+				}
+			}
+		}
+	}
+
+	// Re-marshal corrected data
+	cleanJSON, err := json.Marshal(argsMap)
+	if err != nil {
+		return nil, fmt.Errorf("Execute: failed to marshal corrected input: %w", err)
+	}
+
+	paramInstance := reflect.New(method.ParamType).Interface()
+	if err := json.Unmarshal(cleanJSON, paramInstance); err != nil {
+		return nil, fmt.Errorf("Execute: failed to unmarshal corrected input: %w", err)
+	}
+
 	args := []reflect.Value{
 		reflect.ValueOf(paramInstance).Elem(),
 	}
-
-	// Chama a função dinamicamente usando reflection
 	resultValues := reflect.ValueOf(method.Function).Call(args)
 
-	// Extrai resultados
 	result := resultValues[0].Interface()
-	var err error
+	var errResult error
 	if !resultValues[1].IsNil() {
-		err = resultValues[1].Interface().(error)
+		errResult = resultValues[1].Interface().(error)
 	}
 
-	return result, err
+	return result, errResult
 }
 
-// GetParameterStruct retorna o schema JSON de parâmetros para o método registrado.
+// GetParameterStruct returns the JSON schema of parameters for the registered method.
 func (tk *Toolkit) GetParameterStruct(methodName string) map[string]interface{} {
 	method, ok := tk.methods[methodName]
 	if !ok {
@@ -130,7 +172,7 @@ func (tk *Toolkit) GetParameterStruct(methodName string) map[string]interface{} 
 	return method.Schema
 }
 
-// GenerateSchemaFromType gera um JSON Schema baseado no tipo informado.
+// GenerateSchemaFromType generates a JSON Schema based on the provided type.
 func GenerateSchemaFromType(paramType reflect.Type) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":       "object",
@@ -144,7 +186,7 @@ func GenerateSchemaFromType(paramType reflect.Type) map[string]interface{} {
 	for i := 0; i < paramType.NumField(); i++ {
 		field := paramType.Field(i)
 
-		// Pega o nome do campo pela tag json
+		// Get field name from json tag
 		fieldName := field.Tag.Get("json")
 		if fieldName == "" || fieldName == "-" {
 			fieldName = strings.ToLower(field.Name)
@@ -156,17 +198,17 @@ func GenerateSchemaFromType(paramType reflect.Type) map[string]interface{} {
 			continue
 		}
 
-		// Mapeia tipo JSON Schema
+		// Map to JSON Schema type
 		typeStr := mapGoTypeToJSONType(field.Type.Kind())
 
-		// Descrição da tag
+		// Tag description
 		description := field.Tag.Get("description")
 
 		prop := map[string]interface{}{
 			"type":        typeStr,
 			"description": description,
 		}
-		// 🚀 Se for array ou slice, define o items automaticamente!
+		// 🚀 If it's an array or slice, define items automatically!
 		if field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array {
 			elemType := field.Type.Elem().Kind()
 			prop["items"] = map[string]interface{}{
@@ -176,19 +218,19 @@ func GenerateSchemaFromType(paramType reflect.Type) map[string]interface{} {
 
 		properties[fieldName] = prop
 
-		// Se a tag for required, adiciona
+		// If the tag is required, add it
 		if field.Tag.Get("required") == "true" {
 			requiredFields = append(requiredFields, fieldName)
 		}
 	}
 
-	// Atualiza os required fields
+	// Update required fields
 	schema["required"] = requiredFields
 
 	return schema
 }
 
-// mapGoTypeToJSONType converte tipos Go para tipos JSON Schema.
+// mapGoTypeToJSONType converts Go types to JSON Schema types.
 func mapGoTypeToJSONType(kind reflect.Kind) string {
 	switch kind {
 	case reflect.String:

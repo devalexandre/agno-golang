@@ -136,15 +136,15 @@ type WeatherTool struct {
 }
 
 type WeatherParams struct {
-	Latitude  float64 `json:"latitude" description:"The latitude of the location." required:"true"`
-	Longitude float64 `json:"longitude" description:"The longitude of the location." required:"true"`
+	Latitude  float64 `json:"latitude" description:"The latitude of the location. this need to be a number." required:"true"`
+	Longitude float64 `json:"longitude" description:"The longitude of the location. this need to be a number. " required:"true"`
 	Location  string  `json:"location,omitempty" description:"The name of the location."`
 }
 
 func NewWeatherTool() *WeatherTool {
 	tk := toolkit.NewToolkit()
 	tk.Name = "WeatherTool"
-	tk.Description = "Always return the current temperature and weather conditions for the given latitude and longitude. use the  values without asking the user."
+	tk.Description = "Always return the current temperature and weather conditions for the given latitude(number) and longitude(number). use the  values without asking the user."
 
 	wt := &WeatherTool{tk}
 	wt.Toolkit.Register("GetCurrent", wt, wt.GetCurrent, WeatherParams{})
