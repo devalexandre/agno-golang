@@ -71,7 +71,7 @@ type CompletionResponse struct {
 // ClientInterface defines the interface for communication with the OpenAI API.
 type ClientInterface interface {
 	CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error)
-	StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan ChatCompletionChunk, error)
+	StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error
 }
 
 type ChatCompletionMessage = models.Message

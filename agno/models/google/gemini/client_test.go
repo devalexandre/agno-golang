@@ -19,9 +19,9 @@ func TestCreateChatCompletion(t *testing.T) {
 		t.Skip("Skipping integration test. GEMINI_API_KEY is not set.")
 	}
 
-	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.5-pro-exp-03-25"),
-		gemini.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gemini-2.5-pro-exp-03-25"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new Gemini client with a test API key
@@ -57,9 +57,9 @@ func TestCreateChatCompletionWithTool(t *testing.T) {
 		t.Skip("Skipping integration test. GEMINI_API_KEY is not set.")
 	}
 
-	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.0-flash"),
-		gemini.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gemini-2.0-flash"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new Gemini client with a test API key
@@ -103,9 +103,9 @@ func TestCreateChatCompletionStream(t *testing.T) {
 		t.Skip("Skipping integration test. GEMINI_API_KEY is not set.")
 	}
 
-	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.5-pro-exp-03-25"),
-		gemini.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gemini-2.5-pro-exp-03-25"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new Gemini client with a test API key
@@ -149,9 +149,9 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 		t.Skip("Skipping integration test. GEMINI_API_KEY is not set.")
 	}
 
-	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.5-pro-exp-03-25"),
-		gemini.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gemini-2.5-pro-exp-03-25"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new Gemini client with a test API key
@@ -192,9 +192,9 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 		t.Skip("Skipping integration test. GEMINI_API_KEY is not set.")
 	}
 
-	optsClient := []gemini.OptionClient{
-		gemini.WithID("gemini-2.5-pro-exp-03-25"),
-		gemini.WithAPIKey(apiKey),
+	optsClient := []models.OptionClient{
+		models.WithID("gemini-2.5-pro-exp-03-25"),
+		models.WithAPIKey(apiKey),
 	}
 
 	// Create a new Gemini client with a test API key
@@ -215,13 +215,13 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 			tools.NewWeatherTool(),
 		}),
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-			t.Logf("Streaming chunk:: %s", string(chunk))
+			fmt.Println("Chunk received:", string(chunk))
 			response += string(chunk)
 			return nil
 		}),
 	}
 
-	chatCompletion, err := client.CreateChatCompletion(context.Background(), []models.Message{message}, callOPtions...)
+	err = client.StreamChatCompletion(context.Background(), []models.Message{message}, callOPtions...)
 	if err != nil {
 		// Check if the error is due to quota limitations
 		if strings.Contains(err.Error(), "quota") || strings.Contains(err.Error(), "rate limit") {
@@ -232,5 +232,5 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 	}
 
 	// Check the response
-	t.Logf("Chat completion response: %s", chatCompletion.Choices[0].Message.Content)
+	fmt.Println(response)
 }
