@@ -39,7 +39,8 @@ type FunctionDefinition struct {
 	// Parameters is a list of parameters for the function.
 	Parameters Parameters `json:"parameters,omitempty"`
 	// Strict is a flag to indicate if the function should be called strictly. Only used for openai llm structured output.
-	Strict bool `json:"strict,omitempty"`
+	Strict   bool     `json:"strict,omitempty"`
+	Required []string `json:"required,omitempty"`
 }
 
 // FunctionReference is a reference to a function.

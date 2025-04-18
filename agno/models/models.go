@@ -48,7 +48,7 @@ func (r Role) IsValid() bool {
 type AgnoModelInterface interface {
 	Invoke(ctx context.Context, messages []Message, options ...Option) (*MessageResponse, error)
 	AInvoke(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, <-chan error)
-	InvokeStream(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, error)
+	InvokeStream(ctx context.Context, messages []Message, options ...Option) error
 	AInvokeStream(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, <-chan error)
 }
 

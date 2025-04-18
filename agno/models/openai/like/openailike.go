@@ -5,53 +5,49 @@ import (
 	"errors"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/openai"
 	"github.com/devalexandre/agno-golang/agno/models/openai/client"
 )
 
-// OpenAILike represents the integration with the OpenAILike API.
-type OpenAILike struct {
+// OpenAIChat represents the integration with the OpenAIChat API.
+type OpenAIChat struct {
 	client client.ClientInterface
-	opts   *openai.ClientOptions
+	opts   *models.ClientOptions
 }
 
-// NewOpenAILike creates a new instance of the integration with the OpenAILike API.
+// NewOpenAIChat creates a new instance of the integration with the OpenAIChat API.
 // This function accepts options as functions that modify *ClientOptions.
-func NewOpenAILike(options ...openai.OptionClient) (models.AgnoModelInterface, error) {
+func NewLikeOpenAIChat(options ...models.OptionClient) (models.AgnoModelInterface, error) {
 	cli, err := client.NewClient(options...)
 	if err != nil {
 		return nil, err
 	}
 
-	opts := openai.DefaultOptions()
+	opts := models.DefaultOptions()
 	for _, option := range options {
 		option(opts)
+	}
+
+	if opts.ID == "" {
+		return nil, errors.New("model ID not set")
 	}
 
 	if opts.BaseURL == "" {
 		return nil, errors.New("base URL not set")
 	}
 
-	if opts.APIKey == "" {
-		return nil, errors.New("API key not set")
-	}
-	if opts.ID == "" {
-		return nil, errors.New("model not set")
-	}
-
-	return &OpenAILike{
+	return &OpenAIChat{
 		client: cli,
 		opts:   opts,
 	}, nil
 }
 
 // ChatCompletion performs a chat completion request.
-func (o *OpenAILike) ChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*client.ChatCompletionResponse, error) {
+func (o *OpenAIChat) ChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*client.ChatCompletionResponse, error) {
 	return o.client.CreateChatCompletion(ctx, messages, options...)
 }
 
 // Invoke sends a chat completion request and parses the response into a Message.
-func (o *OpenAILike) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
+func (o *OpenAIChat) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
 	resp, err := o.ChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
@@ -66,7 +62,7 @@ func (o *OpenAILike) Invoke(ctx context.Context, messages []models.Message, opti
 }
 
 // AInvoke is the asynchronous version of Invoke. It delegates to Invoke.
-func (o *OpenAILike) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+func (o *OpenAIChat) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
 	ch := make(chan *models.MessageResponse, 1)
 	errChan := make(chan error)
 	go func() {
@@ -84,42 +80,33 @@ func (o *OpenAILike) AInvoke(ctx context.Context, messages []models.Message, opt
 }
 
 // InvokeStream sends a streaming chat completion request and converts each chunk into a Message.
-func (o *OpenAILike) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, error) {
-	chunkStream, err := o.client.StreamChatCompletion(ctx, messages, options...)
+func (o *OpenAIChat) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
+	err := o.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	respStream := make(chan *models.MessageResponse)
-	go func() {
-		defer close(respStream)
-		for chunk := range chunkStream {
-			if len(chunk.Choices) > 0 {
-				respStream <- &models.MessageResponse{
-					Role:      chunk.Choices[0].Message.Role,
-					Content:   chunk.Choices[0].Message.Content,
-					ToolCalls: chunk.Choices[0].Message.ToolCalls,
-				}
-			}
-		}
-	}()
-	return respStream, nil
+	return nil
 }
 
 // AInvokeStream is the asynchronous version of InvokeStream. It delegates to InvokeStream.
-func (o *OpenAILike) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+func (o *OpenAIChat) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
 	respChan := make(chan *models.MessageResponse)
-	errChan := make(chan error)
-	go func() {
-		defer close(respChan)
-		defer close(errChan)
-		resp, err := o.InvokeStream(ctx, messages, options...)
-		if err != nil {
-			errChan <- err
-			return
+	errChan := make(chan error, 1)
+
+	optsFunction := models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+		respChan <- &models.MessageResponse{
+			Content: string(chunk),
 		}
-		for msg := range resp {
-			respChan <- msg
-		}
-	}()
+		return nil
+	})
+	options = append(options, optsFunction)
+
+	err := o.InvokeStream(ctx, messages, options...)
+
+	if err != nil {
+		errChan <- err
+		return nil, errChan
+	}
+
 	return respChan, errChan
 }
