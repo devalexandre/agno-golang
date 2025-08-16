@@ -27,6 +27,10 @@ type Parameters struct {
 	Type string `json:"type"`
 	// Properties is a map of properties for the parameters.
 	Properties Properties `json:"properties,omitempty"`
+	// Required fields for the parameters.
+	Required []string `json:"required,omitempty"`
+	// AdditionalProperties controls whether additional properties are allowed.
+	AdditionalProperties *bool `json:"additionalProperties,omitempty"`
 }
 type Properties map[string]interface{}
 

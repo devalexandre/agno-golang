@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -110,10 +111,6 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 		models.WithTools([]toolkit.Tool{
 			tools.NewWeatherTool(),
 		}),
-		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-			t.Logf("Streaming chunk:: %+v", string(chunk))
-			return nil
-		}),
 	}
 
 	chatCompletion, err := client.CreateChatCompletion(context.Background(), []models.Message{message}, callOPtions...)
@@ -123,6 +120,22 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 		return
 	}
 
+	// Log full response for debugging
+	t.Logf("Full chat completion response: %+v", chatCompletion)
+	t.Logf("Message: %+v", chatCompletion.Choices[0].Message)
+
+	// Tool calls are expected for this test
+	if len(chatCompletion.Choices[0].Message.ToolCalls) == 0 {
+		t.Fatal("Expected tool calls in response")
+	}
+
+	// Log tool calls for verification
+	for i, toolCall := range chatCompletion.Choices[0].Message.ToolCalls {
+		t.Logf("Tool call %d: %+v", i, toolCall)
+	}
+
+	fmt.Println("Response Content:")
+	fmt.Println(chatCompletion.Choices[0].Message.Content)
 	// Check the response.
 	t.Logf("Chat completion response: %+v", chatCompletion.Choices[0].Message.Content)
 }
@@ -165,4 +178,17 @@ func TestCreateChatCompletionStreamWithTools(t *testing.T) {
 
 	// Check the response.
 	t.Logf("Chat completion response: %+v", chatCompletion.Choices[0].Message.Content)
+
+	// Validate we have a response
+	if len(chatCompletion.Choices) == 0 {
+		t.Fatal("No choices in response")
+	}
+
+	// Check if we have tool calls
+	if len(chatCompletion.Choices[0].Message.ToolCalls) > 0 {
+		t.Logf("Tool calls found: %d", len(chatCompletion.Choices[0].Message.ToolCalls))
+		for i, tc := range chatCompletion.Choices[0].Message.ToolCalls {
+			t.Logf("Tool call %d: %s - %s", i+1, tc.Function.Name, tc.Function.Arguments)
+		}
+	}
 }
