@@ -13,6 +13,7 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/models/openai"
+	"github.com/devalexandre/agno-golang/agno/tools"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/devalexandre/agno-golang/agno/utils"
 )
@@ -123,6 +124,9 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		option(callOptions)
 	}
 
+	// Debug: print model value
+	// fmt.Printf("DEBUG: Model value: '%s'\n", c.model)
+
 	req := &ChatCompletionRequest{
 		Model:               c.model,
 		Messages:            messages,
@@ -152,11 +156,26 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	if len(callOptions.ToolCall) > 0 {
 		// Set ToolChoice flag as pointer value.
 		req.ToolChoice = "auto"
+
+		// Build tools in the correct OpenAI format
+		openaiTools, err := buildOpenAIToolsFromToolkit(callOptions.ToolCall)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build OpenAI tools: %w", err)
+		}
+
+		// Debug: Print the generated tools
+		// toolsJSON, _ := json.MarshalIndent(openaiTools, "", "  ")
+		// fmt.Printf("DEBUG: Generated OpenAI tools: %s\n", string(toolsJSON))
+
+		// Set the tools in the request
+		req.Tools = openaiTools
+
+		// Create mapping for tool execution
 		for _, t := range callOptions.ToolCall {
 			for methodName := range t.GetMethods() {
+				// methodName already includes the full name like "WeatherTool_GetCurrent"
 				maptools[methodName] = t
 			}
-
 		}
 	}
 
@@ -264,11 +283,20 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		return nil, err
 	}
 
+	// Debug: Print the full response to understand the structure
+	// respJSON, _ := json.MarshalIndent(resp, "", "  ")
+	// fmt.Printf("DEBUG: Full OpenAI response:\n%s\n", string(respJSON))
+
 	if len(resp.Choices) > 0 {
-		req = parserResponseTool(req, resp, maptools)
-		if len(maptools) > 0 {
-			if err := c.Do(ctx, http.MethodPost, "/chat/completions", req, resp); err != nil {
-				return nil, err
+		choice := resp.Choices[0]
+		
+		// Only process tool calls if finish reason is "tool_calls"
+		if choice.FinishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
+			req = parserResponseTool(req, resp, maptools)
+			if len(maptools) > 0 {
+				if err := c.Do(ctx, http.MethodPost, "/chat/completions", req, resp); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -372,31 +400,85 @@ func parserResponseTool(req *ChatCompletionRequest, resp *CompletionResponse, ma
 			})
 			if len(choice.Message.ToolCalls) > 0 {
 				for _, tc := range choice.Message.ToolCalls {
+					// Always create a tool response message, even if tool execution fails
+					var toolResponse string
+					
 					//check if the function exists in the map
 					if tcm, ok := maptools[tc.Function.Name]; ok {
-						args, err := json.Marshal(tc.Function.Arguments)
-						if err != nil {
-							return nil
-						}
+						// tc.Function.Arguments is already a JSON string, don't marshal it again
+						args := tc.Function.Arguments
 						debug := fmt.Sprintf("Tool %s \n", tc.Function.Name)
-						debug += fmt.Sprintf("Args: %s \n", string(args))
+						debug += fmt.Sprintf("Args: %s \n", args)
 						utils.ToolCallPanel(debug)
-						//execute the tool
-						resTool, err := tcm.Execute(tc.Function.Name, args)
+
+						//execute the tool - use the method name without the tool prefix
+						resTool, err := tcm.Execute(tc.Function.Name, []byte(args))
 						if err != nil {
-							return nil
+							fmt.Printf("ERROR executing tool %s: %v\n", tc.Function.Name, err)
+							toolResponse = fmt.Sprintf("Error executing tool: %v", err)
+						} else {
+							toolResponse = resTool.(string)
 						}
-						//update the response content
-						req.Messages = append(req.Messages, models.Message{
-							ToolCallID: &tc.ID,
-							Role:       models.TypeToolRole,
-							Content:    resTool.(string),
-						})
+					} else {
+						fmt.Printf("ERROR: Tool %s not found in maptools\n", tc.Function.Name)
+						toolResponse = fmt.Sprintf("Tool %s not found", tc.Function.Name)
 					}
+					
+					//update the response content - always add a tool response message
+					req.Messages = append(req.Messages, models.Message{
+						ToolCallID: &tc.ID,
+						Role:       models.TypeToolRole,
+						Content:    toolResponse,
+					})
 				}
 			}
 		}
 	}
 
 	return req
+}
+
+// buildOpenAIToolsFromToolkit converts toolkit tools to OpenAI API format
+func buildOpenAIToolsFromToolkit(toolkits []toolkit.Tool) ([]tools.Tools, error) {
+	var result []tools.Tools
+
+	for _, tool := range toolkits {
+		for methodName := range tool.GetMethods() {
+			// methodName already includes the full name like "WeatherTool_GetCurrent"
+			// Get parameter schema (already a map)
+			paramSchema := tool.GetParameterStruct(methodName)
+
+			// Extract properties and required fields from the existing schema
+			properties := make(tools.Properties)
+			var required []string
+
+			if props, ok := paramSchema["properties"].(map[string]interface{}); ok {
+				for fieldName, fieldDef := range props {
+					properties[fieldName] = fieldDef
+					// In strict mode, all properties must be in required array
+					required = append(required, fieldName)
+				}
+			} // Create OpenAI compatible tool
+			additionalPropertiesFalse := false
+			openaiTool := tools.Tools{
+				Type: "function",
+				Function: &tools.FunctionDefinition{
+					Name:        methodName, // Use the full method name as it already includes the tool name
+					Description: tool.GetDescription(),
+					Parameters: tools.Parameters{
+						Type:                 "object",
+						Properties:           properties,
+						Required:             required,
+						AdditionalProperties: &additionalPropertiesFalse,
+					},
+					Required: required,
+					Strict:   true,
+				},
+			}
+
+			result = append(result, openaiTool)
+		}
+	}
+
+	return result, nil
 }
