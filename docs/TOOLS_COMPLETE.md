@@ -18,6 +18,7 @@ O Agno Framework agora possui um conjunto completo de ferramentas (tools) implem
 - **Status**: ✅ Completamente funcional e testado
 - **Uso**: Criar, ler, escrever, listar, buscar arquivos e diretórios
 - **🛡️ Segurança**: Escrita desabilitada por padrão. Use `EnableWrite()` ou `NewFileToolWithWrite()`
+- **🛡️ Segurança**: Escrita desabilitada por padrão. Use `EnableWrite()` ou `NewFileToolWithWrite()`
 
 ### 3. **MathTool** - Cálculos Matemáticos
 - **Funcionalidades**: Operações matemáticas, estatísticas, trigonometria
@@ -51,7 +52,8 @@ examples/
 ├── ollama/
 │   └── web_simple/      # Exemplo WebTool + Ollama
 ├── toolkit_test/        # Teste funcional de todos os tools
-└── functional_test/     # Teste prático integrado
+├── functional_test/     # Teste prático integrado
+└── file_security_test/  # Demonstração do sistema de segurança do FileTool
 ```
 
 ## 🧪 Testes Realizados
@@ -59,10 +61,16 @@ examples/
 ### ✅ Teste Individual de Cada Tool
 ```bash
 # MathTool: 15 + 25 = 40
-# FileTool: Criação e leitura de arquivo
+# FileTool: Criação e leitura de arquivo (com sistema de segurança)
 # ShellTool: Obtenção do diretório atual
 # WebTool: Requisição HTTP para httpbin.org
 ```
+
+### ✅ Sistema de Segurança FileTool
+- Escrita desabilitada por padrão ✅
+- Controle granular com EnableWrite() ✅  
+- Mensagens claras de erro ✅
+- Flexibilidade com NewFileToolWithWrite() ✅
 
 ### ✅ Compilação
 - Todos os tools compilam sem erros

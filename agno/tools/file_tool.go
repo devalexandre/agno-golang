@@ -30,9 +30,9 @@ type FileOperationResult struct {
 
 // ReadFileParams represents parameters for reading files
 type ReadFileParams struct {
-	Path      string `json:"path" description:"The file path to read" required:"true"`
-	MaxBytes  int    `json:"max_bytes,omitempty" description:"Maximum bytes to read. Default: 10000"`
-	Encoding  string `json:"encoding,omitempty" description:"File encoding. Default: utf-8"`
+	Path     string `json:"path" description:"The file path to read" required:"true"`
+	MaxBytes int    `json:"max_bytes,omitempty" description:"Maximum bytes to read. Default: 10000"`
+	Encoding string `json:"encoding,omitempty" description:"File encoding. Default: utf-8"`
 }
 
 // WriteFileParams represents parameters for writing files
@@ -72,7 +72,7 @@ func NewFileTool() *FileTool {
 		Toolkit:      tk,
 		WriteEnabled: false, // Disabled by default for security
 	}
-	
+
 	// Register methods
 	ft.Toolkit.Register("ReadFile", ft, ft.ReadFile, ReadFileParams{})
 	ft.Toolkit.Register("WriteFile", ft, ft.WriteFile, WriteFileParams{})
@@ -81,7 +81,7 @@ func NewFileTool() *FileTool {
 	ft.Toolkit.Register("SearchFiles", ft, ft.SearchFiles, SearchFileParams{})
 	ft.Toolkit.Register("CreateDirectory", ft, ft.CreateDirectory, FileInfoParams{})
 	ft.Toolkit.Register("DeleteFile", ft, ft.DeleteFile, FileInfoParams{})
-	
+
 	return ft
 }
 
@@ -165,7 +165,7 @@ func (ft *FileTool) ReadFile(params ReadFileParams) (interface{}, error) {
 	}
 
 	content := string(buffer[:n])
-	
+
 	// Add truncation notice if file was larger than MaxBytes
 	if int64(n) == int64(params.MaxBytes) && info.Size() > int64(params.MaxBytes) {
 		content += fmt.Sprintf("\n\n[... file truncated, showing first %d bytes of %d total bytes]", params.MaxBytes, info.Size())

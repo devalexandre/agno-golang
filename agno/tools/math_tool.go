@@ -63,14 +63,14 @@ func NewMathTool() *MathTool {
 	tk.Description = "A comprehensive mathematical tool for performing basic operations, statistical analysis, trigonometry, random number generation, and expression evaluation."
 
 	mt := &MathTool{tk}
-	
+
 	// Register methods
 	mt.Toolkit.Register("BasicMath", mt, mt.BasicMath, BasicMathParams{})
 	mt.Toolkit.Register("Statistics", mt, mt.Statistics, StatisticsParams{})
 	mt.Toolkit.Register("Trigonometry", mt, mt.Trigonometry, TrigonometryParams{})
 	mt.Toolkit.Register("Random", mt, mt.Random, RandomParams{})
 	mt.Toolkit.Register("Calculate", mt, mt.Calculate, CalculateParams{})
-	
+
 	return mt
 }
 
@@ -233,7 +233,7 @@ func (mt *MathTool) Statistics(params StatisticsParams) (interface{}, error) {
 	// Calculate median (need to sort first)
 	sorted := make([]float64, len(numbers))
 	copy(sorted, numbers)
-	
+
 	// Simple bubble sort for median calculation
 	for i := 0; i < len(sorted); i++ {
 		for j := 0; j < len(sorted)-1-i; j++ {
@@ -405,7 +405,7 @@ func (mt *MathTool) Calculate(params CalculateParams) (interface{}, error) {
 
 	// This is a simplified calculator - for production use, consider using a proper expression parser
 	expression := strings.ReplaceAll(params.Expression, " ", "")
-	
+
 	// Handle basic operations with two operands for now
 	var result float64
 	var operator string
