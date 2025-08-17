@@ -127,6 +127,9 @@ func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
 
 // create Print with stream func is optional
 func (a *Agent) PrintResponse(prompt string, stream bool, markdown bool) {
+	fmt.Println("Running agent  stream:", stream, "markdown:", markdown)
+	a.stream = stream
+	a.markdown = markdown
 	if stream {
 		a.print_stream_response(prompt, markdown)
 	} else {
@@ -138,16 +141,40 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 	start := time.Now()
 	messages := a.prepareMessages(prompt)
 
+	if a.debug {
+		fmt.Printf("DEBUG: Prepared %d messages for model\n", len(messages))
+		for i, msg := range messages {
+			fmt.Printf("DEBUG: Message %d - Role: %s, Content length: %d\n", i, msg.Role, len(msg.Content))
+		}
+		fmt.Printf("DEBUG: Using %d tools\n", len(a.tools))
+	}
+
 	spinnerResponse := utils.ThinkingPanel(prompt)
+
+	if a.debug {
+		fmt.Println("DEBUG: Calling model.Invoke...")
+	}
 
 	resp, err := a.model.Invoke(a.ctx, messages, models.WithTools(a.tools))
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("ERROR: Model invoke failed: %v\n", err)
 		return
+	}
+
+	if a.debug {
+		fmt.Printf("DEBUG: Model response received - Content length: %d\n", len(resp.Content))
+		fmt.Printf("DEBUG: Response content preview: %.100s...\n", resp.Content)
+		fmt.Printf("DEBUG: Response type: %T\n", resp)
+		fmt.Printf("DEBUG: Response role: %s\n", resp.Role)
+		fmt.Printf("DEBUG: Response model: %s\n", resp.Model)
 	}
 
 	utils.ResponsePanel(resp.Content, spinnerResponse, start, markdown)
 
+	if a.debug {
+		fmt.Println("DEBUG: ResponsePanel called")
+		fmt.Printf("DEBUG: Final response content:\n%s\n", resp.Content)
+	}
 }
 
 func (a *Agent) print_stream_response(prompt string, markdown bool) {
@@ -161,6 +188,7 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	// Response
 	responseTile := fmt.Sprintf("Response (%.1fs)\n\n", time.Since(start).Seconds())
 	fullResponse := ""
+	var streamBuffer string // Mover para fora do callback
 	showResponse := false
 	callOptions := []models.Option{
 		models.WithTools(a.tools),
@@ -173,13 +201,34 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 				showResponse = true
 			}
 
-			// Final response
-			contentChan <- utils.ContentUpdateMsg{
-				PanelName: "Response",
-				Content:   string(chunk),
+			// Adicionar chunk ao buffer
+			streamBuffer += string(chunk)
+			fullResponse += string(chunk)
+
+			// Verificar se devemos fazer flush do buffer
+			shouldFlush := false
+
+			// Flush se encontrar ponto final, exclamação ou interrogação
+			if strings.Contains(streamBuffer, ".") ||
+				strings.Contains(streamBuffer, "!") ||
+				strings.Contains(streamBuffer, "?") {
+				shouldFlush = true
 			}
 
-			fullResponse += string(chunk)
+			// Flush se buffer ficar muito grande (mais de 50 caracteres)
+			if len(streamBuffer) > 50 {
+				shouldFlush = true
+			}
+
+			if shouldFlush {
+				// Enviar conteúdo acumulado
+				contentChan <- utils.ContentUpdateMsg{
+					PanelName: "Response",
+					Content:   streamBuffer,
+				}
+				streamBuffer = "" // Limpar buffer
+			}
+
 			return nil
 		}),
 	}
@@ -189,11 +238,14 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 		fmt.Println(err)
 		return
 	}
-	contentChan <- utils.ContentUpdateMsg{
-		PanelName: "Response",
-		Content:   fullResponse,
-	}
 
+	// Flush qualquer conteúdo restante no buffer
+	if streamBuffer != "" {
+		contentChan <- utils.ContentUpdateMsg{
+			PanelName: "Response",
+			Content:   streamBuffer,
+		}
+	}
 }
 
 func (a *Agent) prepareMessages(prompt string) []models.Message {
