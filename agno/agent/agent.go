@@ -20,6 +20,8 @@ import (
 type AgentConfig struct {
 	Context        context.Context
 	Model          models.AgnoModelInterface
+	Name           string
+	Role           string
 	Description    string
 	Goal           string
 	Instructions   string
@@ -47,6 +49,8 @@ type AgentConfig struct {
 type Agent struct {
 	ctx                    context.Context
 	model                  models.AgnoModelInterface
+	name                   string
+	role                   string
 	description            string
 	goal                   string
 	instructions           string
@@ -89,6 +93,8 @@ func NewAgent(config AgentConfig) *Agent {
 	agent := &Agent{
 		ctx:             config.Context,
 		model:           config.Model,
+		name:            config.Name,
+		role:            config.Role,
 		description:     config.Description,
 		goal:            config.Goal,
 		instructions:    config.Instructions,
@@ -123,6 +129,22 @@ func NewAgent(config AgentConfig) *Agent {
 	}
 
 	return agent
+}
+
+// GetName returns the agent's name (implements TeamMember interface)
+func (a *Agent) GetName() string {
+	if a.name != "" {
+		return a.name
+	}
+	return "Agent"
+}
+
+// GetRole returns the agent's role (implements TeamMember interface)
+func (a *Agent) GetRole() string {
+	if a.role != "" {
+		return a.role
+	}
+	return "Assistant"
 }
 
 func (a *Agent) Run(prompt string) (models.RunResponse, error) {
@@ -477,14 +499,17 @@ func (a *Agent) loadSession() error {
 		// Session doesn't exist, create new one
 		if err.Error() == "session not found" {
 			session := &storage.AgentSession{
-				ID:          uuid.New().String(),
-				SessionID:   a.sessionID,
-				UserID:      a.userID,
-				AgentData:   make(map[string]interface{}),
-				UserData:    make(map[string]interface{}),
-				SessionData: make(map[string]interface{}),
-				CreatedAt:   time.Now(),
-				UpdatedAt:   time.Now(),
+				Session: storage.Session{
+					SessionID:   a.sessionID,
+					UserID:      a.userID,
+					Memory:      make(map[string]interface{}),
+					SessionData: make(map[string]interface{}),
+					ExtraData:   make(map[string]interface{}),
+					CreatedAt:   time.Now().Unix(),
+					UpdatedAt:   time.Now().Unix(),
+				},
+				AgentID:   "default-agent",
+				AgentData: make(map[string]interface{}),
 			}
 			if err := a.storage.CreateSession(a.ctx, session); err != nil {
 				return fmt.Errorf("failed to create session: %w", err)
