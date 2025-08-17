@@ -34,11 +34,11 @@ type ShellResult struct {
 
 // ExecuteParams represents parameters for command execution
 type ExecuteParams struct {
-	Command    string `json:"command" description:"Command to execute" required:"true"`
+	Command    string   `json:"command" description:"Command to execute" required:"true"`
 	Args       []string `json:"args,omitempty" description:"Command arguments"`
-	WorkingDir string `json:"working_dir,omitempty" description:"Working directory for command execution"`
-	Timeout    int    `json:"timeout,omitempty" description:"Timeout in seconds. Default: 30"`
-	Shell      bool   `json:"shell,omitempty" description:"Execute in shell environment. Default: false"`
+	WorkingDir string   `json:"working_dir,omitempty" description:"Working directory for command execution"`
+	Timeout    int      `json:"timeout,omitempty" description:"Timeout in seconds. Default: 30"`
+	Shell      bool     `json:"shell,omitempty" description:"Execute in shell environment. Default: false"`
 }
 
 // SystemInfoParams represents parameters for system information
@@ -53,16 +53,16 @@ func NewShellTool() *ShellTool {
 	tk.Description = "A powerful shell tool for executing system commands, managing processes, and retrieving system information. Supports cross-platform command execution with timeout and error handling."
 
 	st := &ShellTool{tk}
-	
+
 	// Register methods
 	st.Toolkit.Register("Execute", st, st.Execute, ExecuteParams{})
 	st.Toolkit.Register("GetSystemInfo", st, st.GetSystemInfo, SystemInfoParams{})
 	st.Toolkit.Register("ListProcesses", st, st.ListProcesses, struct{}{})
 	st.Toolkit.Register("GetCurrentDirectory", st, st.GetCurrentDirectory, struct{}{})
-	st.Toolkit.Register("ChangeDirectory", st, st.ChangeDirectory, struct{
+	st.Toolkit.Register("ChangeDirectory", st, st.ChangeDirectory, struct {
 		Path string `json:"path" description:"Directory path to change to" required:"true"`
 	}{})
-	
+
 	return st
 }
 
@@ -210,12 +210,12 @@ func (st *ShellTool) GetSystemInfo(params SystemInfoParams) (interface{}, error)
 	switch infoType {
 	case "os":
 		return map[string]interface{}{
-			"os":           runtime.GOOS,
-			"arch":         runtime.GOARCH,
-			"num_cpu":      runtime.NumCPU(),
-			"go_version":   runtime.Version(),
-			"operation":    "GetSystemInfo",
-			"info_type":    "os",
+			"os":         runtime.GOOS,
+			"arch":       runtime.GOARCH,
+			"num_cpu":    runtime.NumCPU(),
+			"go_version": runtime.Version(),
+			"operation":  "GetSystemInfo",
+			"info_type":  "os",
 		}, nil
 
 	case "env":
@@ -263,21 +263,21 @@ func (st *ShellTool) GetSystemInfo(params SystemInfoParams) (interface{}, error)
 		currentDir, _ := os.Getwd()
 		// Get disk usage for current directory
 		var diskInfo map[string]interface{}
-		
+
 		if runtime.GOOS == "windows" {
 			// For Windows, we'd need to use syscalls for accurate disk info
 			diskInfo = map[string]interface{}{
 				"current_directory": currentDir,
-				"note": "Detailed disk information requires platform-specific implementation",
+				"note":              "Detailed disk information requires platform-specific implementation",
 			}
 		} else {
 			// For Unix-like systems, we could use statvfs syscall
 			diskInfo = map[string]interface{}{
 				"current_directory": currentDir,
-				"note": "Detailed disk information requires platform-specific implementation",
+				"note":              "Detailed disk information requires platform-specific implementation",
 			}
 		}
-		
+
 		diskInfo["operation"] = "GetSystemInfo"
 		diskInfo["info_type"] = "disk"
 		return diskInfo, nil
@@ -285,15 +285,15 @@ func (st *ShellTool) GetSystemInfo(params SystemInfoParams) (interface{}, error)
 	case "memory":
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		
+
 		return map[string]interface{}{
-			"alloc_mb":         bToMb(m.Alloc),
-			"total_alloc_mb":   bToMb(m.TotalAlloc),
-			"sys_mb":           bToMb(m.Sys),
-			"num_gc":           m.NumGC,
-			"goroutines":       runtime.NumGoroutine(),
-			"operation":        "GetSystemInfo",
-			"info_type":        "memory",
+			"alloc_mb":       bToMb(m.Alloc),
+			"total_alloc_mb": bToMb(m.TotalAlloc),
+			"sys_mb":         bToMb(m.Sys),
+			"num_gc":         m.NumGC,
+			"goroutines":     runtime.NumGoroutine(),
+			"operation":      "GetSystemInfo",
+			"info_type":      "memory",
 		}, nil
 
 	default:
@@ -304,7 +304,7 @@ func (st *ShellTool) GetSystemInfo(params SystemInfoParams) (interface{}, error)
 // ListProcesses lists running processes (simplified version)
 func (st *ShellTool) ListProcesses(params struct{}) (interface{}, error) {
 	var cmd *exec.Cmd
-	
+
 	switch runtime.GOOS {
 	case "windows":
 		cmd = exec.Command("tasklist", "/FO", "CSV")
@@ -379,11 +379,11 @@ func (st *ShellTool) ChangeDirectory(params struct {
 	newDir, _ := os.Getwd()
 
 	return map[string]interface{}{
-		"old_directory": oldDir,
-		"new_directory": newDir,
+		"old_directory":  oldDir,
+		"new_directory":  newDir,
 		"requested_path": params.Path,
-		"operation":     "ChangeDirectory",
-		"success":       true,
+		"operation":      "ChangeDirectory",
+		"success":        true,
 	}, nil
 }
 

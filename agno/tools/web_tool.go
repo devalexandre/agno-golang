@@ -55,13 +55,13 @@ func NewWebTool() *WebTool {
 	tk.Description = "A comprehensive web tool for making HTTP requests and web scraping. Supports GET, POST, PUT, DELETE requests and can extract content from web pages using CSS selectors."
 
 	wt := &WebTool{tk}
-	
+
 	// Register methods
 	wt.Toolkit.Register("HttpRequest", wt, wt.HttpRequest, HttpRequestParams{})
 	wt.Toolkit.Register("ScrapeContent", wt, wt.ScrapeContent, ScrapeParams{})
 	wt.Toolkit.Register("GetPageText", wt, wt.GetPageText, SimpleUrlParams{})
 	wt.Toolkit.Register("GetPageTitle", wt, wt.GetPageTitle, SimpleUrlParams{})
-	
+
 	return wt
 }
 
