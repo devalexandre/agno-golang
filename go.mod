@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	github.com/MichaelMure/go-term-markdown v0.1.4
 	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/mattn/go-sqlite3 v1.14.16
 	github.com/openai/openai-go v1.12.0
 	github.com/pterm/pterm v0.12.80
 	github.com/vingarcia/ksql v1.12.3
