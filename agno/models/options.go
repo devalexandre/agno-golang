@@ -121,6 +121,13 @@ func WithAPIKey(key string) func(*ClientOptions) {
 	}
 }
 
+// WithClientMaxTokens sets the maximum number of tokens for the client.
+func WithClientMaxTokens(tokens int) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		o.MaxTokens = intPtr(tokens)
+	}
+}
+
 // Option is a function that modifies the options.
 type Option func(*CallOptions)
 
