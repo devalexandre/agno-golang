@@ -3,7 +3,7 @@ module github.com/devalexandre/agno-golang
 go 1.24.0
 
 require (
-	github.com/openai/openai-go v0.1.0-alpha.57
+	github.com/openai/openai-go v1.12.0
 	github.com/sashabaranov/go-openai v1.37.0
 )
 
