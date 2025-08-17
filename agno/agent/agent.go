@@ -9,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/devalexandre/agno-golang/agno/utils"
+	"github.com/google/uuid"
 )
 
 type AgentConfig struct {
@@ -27,6 +30,18 @@ type AgentConfig struct {
 	Markdown       bool
 	ShowToolsCall  bool
 	Debug          bool
+
+	// Memory and Storage Configuration
+	Memory                 memory.MemoryManager
+	Storage                storage.AgentStorage
+	SessionID              string
+	UserID                 string
+	AddHistoryToMessages   bool
+	NumHistoryRuns         int
+	EnableUserMemories     bool
+	EnableAgenticMemory    bool
+	EnableSessionSummaries bool
+	ReadChatHistory        bool
 }
 
 type Agent struct {
@@ -43,12 +58,35 @@ type Agent struct {
 	markdown               bool
 	showToolsCall          bool
 	debug                  bool
+
+	// Memory and Storage
+	memory                 memory.MemoryManager
+	storage                storage.AgentStorage
+	sessionID              string
+	userID                 string
+	addHistoryToMessages   bool
+	numHistoryRuns         int
+	enableUserMemories     bool
+	enableAgenticMemory    bool
+	enableSessionSummaries bool
+	readChatHistory        bool
+
+	// Session state
+	messages []models.Message
+	runs     []*storage.AgentRun
 }
 
 func NewAgent(config AgentConfig) *Agent {
 	config.Context = context.WithValue(config.Context, models.DebugKey, config.Debug)
 	config.Context = context.WithValue(config.Context, models.ShowToolsCallKey, config.ShowToolsCall)
-	return &Agent{
+
+	// Generate session ID if not provided
+	sessionID := config.SessionID
+	if sessionID == "" {
+		sessionID = uuid.New().String()
+	}
+
+	agent := &Agent{
 		ctx:             config.Context,
 		model:           config.Model,
 		description:     config.Description,
@@ -61,7 +99,30 @@ func NewAgent(config AgentConfig) *Agent {
 		markdown:        config.Markdown,
 		showToolsCall:   config.ShowToolsCall,
 		debug:           config.Debug,
+
+		// Memory and Storage
+		memory:                 config.Memory,
+		storage:                config.Storage,
+		sessionID:              sessionID,
+		userID:                 config.UserID,
+		addHistoryToMessages:   config.AddHistoryToMessages,
+		numHistoryRuns:         config.NumHistoryRuns,
+		enableUserMemories:     config.EnableUserMemories,
+		enableAgenticMemory:    config.EnableAgenticMemory,
+		enableSessionSummaries: config.EnableSessionSummaries,
+		readChatHistory:        config.ReadChatHistory,
+
+		// Initialize session state
+		messages: []models.Message{},
+		runs:     []*storage.AgentRun{},
 	}
+
+	// Load existing session if storage is provided
+	if agent.storage != nil {
+		agent.loadSession()
+	}
+
+	return agent
 }
 
 func (a *Agent) Run(prompt string) (models.RunResponse, error) {
@@ -75,6 +136,40 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 	}
 
 	utils.ResponsePanel(resp.Content, bx, time.Now(), a.markdown)
+
+	// Save run to storage if enabled
+	if a.storage != nil {
+		if err := a.saveRun(prompt, resp.Content, messages); err != nil && a.debug {
+			fmt.Printf("Warning: Failed to save run: %v\n", err)
+		}
+	}
+
+	// Process memories if enabled
+	if a.memory != nil {
+		if err := a.processMemories(prompt, resp.Content); err != nil && a.debug {
+			fmt.Printf("Warning: Failed to process memories: %v\n", err)
+		}
+	}
+
+	// Update message history for next interaction
+	if a.addHistoryToMessages {
+		a.messages = append(a.messages, models.Message{
+			Role:    "user",
+			Content: prompt,
+		})
+		a.messages = append(a.messages, models.Message{
+			Role:    "assistant",
+			Content: resp.Content,
+		})
+
+		// Keep only recent messages based on history limit
+		if a.numHistoryRuns > 0 {
+			maxMessages := a.numHistoryRuns * 2 // user + assistant per run
+			if len(a.messages) > maxMessages {
+				a.messages = a.messages[len(a.messages)-maxMessages:]
+			}
+		}
+	}
 
 	return models.RunResponse{
 		TextContent: resp.Content,
@@ -107,9 +202,15 @@ func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
 		Content:   prompt,
 	}
 
+	// Collect streaming content for memory processing
+	var fullResponse strings.Builder
+
 	opts := []models.Option{
 		models.WithTools(a.tools),
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+			// Collect content for memory processing
+			fullResponse.Write(chunk)
+
 			if debugmod != nil && debugmod.(bool) {
 				contentChan <- utils.ContentUpdateMsg{
 					PanelName: "Response",
@@ -121,7 +222,48 @@ func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
 		}),
 	}
 
-	return a.model.InvokeStream(a.ctx, messages, opts...)
+	err := a.model.InvokeStream(a.ctx, messages, opts...)
+
+	// After streaming is complete, process memory and storage
+	if err == nil {
+		responseContent := fullResponse.String()
+
+		// Save run to storage if enabled
+		if a.storage != nil {
+			if saveErr := a.saveRun(prompt, responseContent, messages); saveErr != nil && a.debug {
+				fmt.Printf("Warning: Failed to save run: %v\n", saveErr)
+			}
+		}
+
+		// Process memories if enabled
+		if a.memory != nil {
+			if memErr := a.processMemories(prompt, responseContent); memErr != nil && a.debug {
+				fmt.Printf("Warning: Failed to process memories: %v\n", memErr)
+			}
+		}
+
+		// Update message history for next interaction
+		if a.addHistoryToMessages {
+			a.messages = append(a.messages, models.Message{
+				Role:    "user",
+				Content: prompt,
+			})
+			a.messages = append(a.messages, models.Message{
+				Role:    "assistant",
+				Content: responseContent,
+			})
+
+			// Keep only recent messages based on history limit
+			if a.numHistoryRuns > 0 {
+				maxMessages := a.numHistoryRuns * 2 // user + assistant per run
+				if len(a.messages) > maxMessages {
+					a.messages = a.messages[len(a.messages)-maxMessages:]
+				}
+			}
+		}
+	}
+
+	return err
 
 }
 
@@ -266,6 +408,24 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 	if a.expected_output != "" {
 		systemMessage += fmt.Sprintf("<expected_output>\n%s\n</expected_output>\n", a.expected_output)
 	}
+
+	// Add user memories if enabled and available
+	if a.enableUserMemories && a.memory != nil && a.userID != "" {
+		userMemories, err := a.memory.GetUserMemories(a.ctx, a.userID)
+		if err == nil && len(userMemories) > 0 {
+			memoryContent := ""
+			// Limit to recent memories (last 10)
+			maxMemories := 10
+			if len(userMemories) > maxMemories {
+				userMemories = userMemories[len(userMemories)-maxMemories:]
+			}
+			for _, memory := range userMemories {
+				memoryContent += fmt.Sprintf("- %s\n", memory.Memory)
+			}
+			systemMessage += fmt.Sprintf("<user_memories>\nWhat I know about the user:\n%s</user_memories>\n", memoryContent)
+		}
+	}
+
 	if a.markdown {
 		a.additional_information = append(a.additional_information, "Use markdown to format your answers.")
 	}
@@ -292,10 +452,184 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 		})
 	}
 
+	// Add chat history if enabled
+	if a.addHistoryToMessages && len(a.messages) > 0 {
+		messages = append(messages, a.messages...)
+	}
+
 	messages = append(messages, models.Message{
 		Role:    models.TypeUserRole,
 		Content: prompt,
 	})
 
 	return messages
+}
+
+// loadSession loads existing session data from storage
+func (a *Agent) loadSession() error {
+	if a.storage == nil || a.sessionID == "" {
+		return nil
+	}
+
+	// Load session
+	_, err := a.storage.ReadSession(a.ctx, a.sessionID)
+	if err != nil {
+		// Session doesn't exist, create new one
+		if err.Error() == "session not found" {
+			session := &storage.AgentSession{
+				ID:          uuid.New().String(),
+				SessionID:   a.sessionID,
+				UserID:      a.userID,
+				AgentData:   make(map[string]interface{}),
+				UserData:    make(map[string]interface{}),
+				SessionData: make(map[string]interface{}),
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			}
+			if err := a.storage.CreateSession(a.ctx, session); err != nil {
+				return fmt.Errorf("failed to create session: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to load session: %w", err)
+		}
+	}
+
+	// Load runs if history is enabled
+	if a.addHistoryToMessages {
+		runs, err := a.storage.GetRunsForSession(a.ctx, a.sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to load session runs: %w", err)
+		}
+
+		// Keep only the most recent runs based on numHistoryRuns
+		if a.numHistoryRuns > 0 && len(runs) > a.numHistoryRuns {
+			runs = runs[len(runs)-a.numHistoryRuns:]
+		}
+
+		a.runs = runs
+
+		// Build message history from runs
+		a.buildMessageHistoryFromRuns()
+	}
+
+	return nil
+}
+
+// buildMessageHistoryFromRuns reconstructs message history from stored runs
+func (a *Agent) buildMessageHistoryFromRuns() {
+	a.messages = []models.Message{}
+
+	for _, run := range a.runs {
+		// Add user message
+		if run.UserMessage != "" {
+			a.messages = append(a.messages, models.Message{
+				Role:    "user",
+				Content: run.UserMessage,
+			})
+		}
+
+		// Add assistant response
+		if run.AgentMessage != "" {
+			a.messages = append(a.messages, models.Message{
+				Role:    "assistant",
+				Content: run.AgentMessage,
+			})
+		}
+	}
+}
+
+// saveRun saves a completed run to storage
+func (a *Agent) saveRun(userMessage, agentResponse string, messages []models.Message) error {
+	if a.storage == nil {
+		return nil
+	}
+
+	// Convert messages to map format for storage
+	messagesMaps := make([]map[string]interface{}, len(messages))
+	for i, msg := range messages {
+		messagesMaps[i] = map[string]interface{}{
+			"role":    msg.Role,
+			"content": msg.Content,
+		}
+	}
+
+	run := &storage.AgentRun{
+		ID:           uuid.New().String(),
+		SessionID:    a.sessionID,
+		UserID:       a.userID,
+		RunName:      fmt.Sprintf("run_%d", time.Now().Unix()),
+		RunData:      make(map[string]interface{}),
+		UserMessage:  userMessage,
+		AgentMessage: agentResponse,
+		Messages:     messagesMaps,
+		Metrics:      make(map[string]interface{}),
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	if err := a.storage.CreateRun(a.ctx, run); err != nil {
+		return fmt.Errorf("failed to save run: %w", err)
+	}
+
+	// Add to local runs list
+	a.runs = append(a.runs, run)
+
+	// Keep only the most recent runs in memory
+	if a.numHistoryRuns > 0 && len(a.runs) > a.numHistoryRuns {
+		a.runs = a.runs[len(a.runs)-a.numHistoryRuns:]
+	}
+
+	return nil
+}
+
+// processMemories handles memory extraction and session summarization
+func (a *Agent) processMemories(userMessage, agentResponse string) error {
+	if a.memory == nil {
+		return nil
+	}
+
+	// Extract and save user memories if enabled
+	if a.enableAgenticMemory && a.userID != "" {
+		_, err := a.memory.CreateMemory(a.ctx, a.userID, userMessage, agentResponse)
+		if err != nil {
+			// Log error but don't fail the whole operation
+			if a.debug {
+				fmt.Printf("Warning: Failed to create memory: %v\n", err)
+			}
+		}
+	}
+
+	// Generate session summary if enabled
+	if a.enableSessionSummaries && a.userID != "" && a.sessionID != "" {
+		// Check if we need to create/update session summary
+		// This could be done periodically or based on number of interactions
+		runCount := len(a.runs)
+		if runCount > 0 && runCount%5 == 0 { // Summarize every 5 interactions
+			conversation := []map[string]interface{}{}
+			for _, run := range a.runs {
+				if run.UserMessage != "" {
+					conversation = append(conversation, map[string]interface{}{
+						"role":    "user",
+						"content": run.UserMessage,
+					})
+				}
+				if run.AgentMessage != "" {
+					conversation = append(conversation, map[string]interface{}{
+						"role":    "assistant",
+						"content": run.AgentMessage,
+					})
+				}
+			}
+
+			_, err := a.memory.CreateSessionSummary(a.ctx, a.userID, a.sessionID, conversation)
+			if err != nil {
+				// Log error but don't fail the whole operation
+				if a.debug {
+					fmt.Printf("Warning: Failed to create session summary: %v\n", err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
