@@ -95,15 +95,15 @@ func ToolCallPanel(content string) {
 
 // response panel
 func ResponsePanel(content string, sp *pterm.SpinnerPrinter, start time.Time, markdown bool) {
-
 	sp.Stop()
 	res := pterm.LightBlue(fmt.Sprintf("Response (%.1fs)\n\n", time.Since(start).Seconds()))
 	if markdown {
 		content = string(mkdown.Render(content, 100, 0))
 	}
 	res += content
-	sp.UpdateText(res)
 
+	// Print the final result instead of just updating spinner text
+	fmt.Println(res)
 }
 
 // printPanel prints a panel using pterm

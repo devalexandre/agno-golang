@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/models/openai/client"
@@ -47,6 +48,20 @@ func (o *OpenAIChat) Invoke(ctx context.Context, messages []models.Message, opti
 	if len(resp.Choices) == 0 {
 		return nil, errors.New("no choices in response")
 	}
+
+	// Debug: Log response details
+	if debugCtx := ctx.Value(models.DebugKey); debugCtx != nil && debugCtx.(bool) {
+		fmt.Printf("DEBUG: OpenAI Chat Invoke - Response ID: %s\n", resp.ID)
+		fmt.Printf("DEBUG: OpenAI Chat Invoke - Choices count: %d\n", len(resp.Choices))
+		fmt.Printf("DEBUG: OpenAI Chat Invoke - First choice role: %s\n", resp.Choices[0].Message.Role)
+		fmt.Printf("DEBUG: OpenAI Chat Invoke - First choice content length: %d\n", len(resp.Choices[0].Message.Content))
+		fmt.Printf("DEBUG: OpenAI Chat Invoke - First choice content: %.200s...\n", resp.Choices[0].Message.Content)
+		fmt.Printf("DEBUG: OpenAI Chat Invoke - First choice finish reason: %s\n", resp.Choices[0].FinishReason)
+		if len(resp.Choices[0].Message.ToolCalls) > 0 {
+			fmt.Printf("DEBUG: OpenAI Chat Invoke - Tool calls count: %d\n", len(resp.Choices[0].Message.ToolCalls))
+		}
+	}
+
 	return &models.MessageResponse{
 		Role:    resp.Choices[0].Message.Role,
 		Content: resp.Choices[0].Message.Content,

@@ -24,13 +24,15 @@ func mapToParameters(m map[string]interface{}) Parameters {
 
 func ConvertToTools(tool toolkit.Tool, methodName string) Tools {
 	// Generates the JSONSchema for the parameters.
+	parameters := mapToParameters(tool.GetParameterStruct(methodName))
 
 	return Tools{
 		Type: "function",
 		Function: &FunctionDefinition{
 			Name:        methodName,
 			Description: tool.GetDescription(),
-			Parameters:  mapToParameters(tool.GetParameterStruct(methodName)),
+			Parameters:  parameters,
+			Strict:      true, // Enable strict mode as per OpenAI documentation
 		},
 	}
 }
