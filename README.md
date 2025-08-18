@@ -1,6 +1,8 @@
 # Agno Framework - Go Implementation 🚀
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
+### **📚 Level 2: Knowledge & Storage (PARTIAL)**
+
+#### **✅ Knowledge Base System**Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MPL--2.0-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)](examples/)
 
@@ -16,8 +18,8 @@ Agno-Golang is a **high-performance Go port** of the popular Python Agno Framewo
 ### **5 Levels of Agentic Systems**
 
 - **Level 1**: ✅ Agents with tools and instructions **(FULLY IMPLEMENTED)**
-- **Level 2**: ✅ Agents with knowledge and storage **(IMPLEMENTED)**  
-- **Level 3**: 🔄 Agents with memory and reasoning **(IN PROGRESS)**
+- **Level 2**: 🔄 Agents with knowledge and storage **(PARTIALLY IMPLEMENTED)**  
+- **Level 3**: � Agents with memory and reasoning **(BASIC IMPLEMENTATION)**
 - **Level 4**: ⏳ Agent Teams that can reason and collaborate
 - **Level 5**: ⏳ Agentic Workflows with state and determinism
 
@@ -50,7 +52,7 @@ kb := knowledge.NewKnowledgeBase(vectorDB)
 err := kb.LoadFromPDFs([]string{"doc1.pdf", "doc2.pdf"})
 ```
 
-#### **Vector Database Support**
+#### **✅ Vector Database Support**
 ```go
 import "github.com/devalexandre/agno-golang/agno/vectordb/qdrant"
 
@@ -61,13 +63,37 @@ vectorDB, _ := qdrant.NewQdrant(qdrant.QdrantConfig{
 })
 ```
 
-#### **Embedding Generation**  
+#### **✅ Embedding Generation**  
 ```go
 import "github.com/devalexandre/agno-golang/agno/embedder"
 
 // Multiple providers
 openaiEmbedder := embedder.NewOpenAIEmbedder()
 ollamaEmbedder := embedder.NewOllamaEmbedder()
+```
+
+#### **❌ Missing for Level 2 Complete:**
+- **RAG Integration**: Auto-search knowledge during conversations
+- **Document Q&A**: Direct questions to loaded documents  
+- **Persistent Agent Context**: Cross-session conversation history
+- **Knowledge-Augmented Responses**: Automatic context injection
+
+### **🧠 Level 3: Memory & Reasoning (BASIC)**
+
+#### **🔄 Session Storage** 
+```go
+// Basic session storage implemented
+agent.SessionID = "session-123"
+agent.UserID = "user-456"
+agent.AddHistoryToMessages = true
+```
+
+#### **🚧 User Memories** 
+```go
+// Memory system exists but needs refinement
+memory := memory.NewMemory(db, model)
+agent.EnableUserMemories = true
+agent.Memory = memory
 ```
 
 ### **�🔧 Model Providers** 
@@ -89,22 +115,30 @@ ollamaEmbedder := embedder.NewOllamaEmbedder()
 - **ExaTool** - Advanced web search with API
 - **EchoTool** - Communication and message handling
 
-## 🔄 **Next: Advanced Memory & Reasoning (Level 3)**
+## 🔄 **Next: Complete Level 2 + Advanced Level 3**
 
-**🎯 Current Focus**: Implementing advanced memory systems and reasoning capabilities for intelligent agent interactions.
+**🎯 Current Priority**: Complete Level 2 with RAG integration and persistent agent conversations.
 
-### **Planned Level 3 Features**
-- **Session Memory**: Persistent conversation context across sessions
-- **User Profiling**: Adaptive agent behavior based on user preferences  
-- **Reasoning Engine**: Advanced decision-making and problem-solving
-- **Context Awareness**: Intelligent context management and retrieval
+### **Missing for Level 2 Complete:**
+- ✅ **Knowledge Base**: Complete (PDF processing, vector storage, embeddings)
+- ❌ **RAG Integration**: Auto-search knowledge during agent conversations
+- ❌ **Document Q&A**: Direct questions about loaded documents
+- ❌ **Persistent Context**: Cross-session conversation memory
+- ❌ **Knowledge Search**: Automatic context injection in responses
 
-### **Already Implemented (Level 2)**
-- ✅ **Knowledge Base**: PDF processing with chunking and embeddings
+### **Basic Level 3 Already Implemented:**
+- ✅ **Session Storage**: SQLite-based session persistence
+- ✅ **User Memories**: AI-powered memory extraction from conversations
+- ✅ **Session Summaries**: Automatic conversation summarization
+- 🔄 **Advanced Reasoning**: Decision-making and problem-solving engines
+
+### **Already Implemented (Level 2+3 Partial)**
+- ✅ **Knowledge Base**: PDF processing, chunking, parallel loading
 - ✅ **Vector Storage**: Qdrant and PostgreSQL/pgvector support
 - ✅ **Embedding System**: OpenAI and Ollama embedding generation
-- ✅ **Document Management**: Advanced search and retrieval
-- ✅ **Parallel Processing**: Efficient batch operations and workers
+- ✅ **Memory System**: User memories, session summaries, storage
+- ❌ **RAG Integration**: Knowledge + Agent conversation integration
+- ❌ **Document Q&A**: Direct document querying capabilities
 
 > 📋 **See detailed roadmap**: [ROADMAP.md](ROADMAP.md)
 
