@@ -7,6 +7,8 @@
 > **High-performance Go implementation of the [Agno Framework](https://github.com/agno-agi/agno)**  
 > Building Multi-Agent Systems with memory, knowledge and reasoning in Go
 
+📖 **[Complete English Documentation Available](docs/README.md)** | 📚 **[Documentação Completa em Inglês](docs/README.md)**
+
 ## 🎯 **What is Agno-Golang?**
 
 Agno-Golang is a **high-performance Go port** of the popular Python Agno Framework, designed for building production-ready Multi-Agent Systems. We combine the simplicity and power of the original Agno with Go's superior performance and concurrency capabilities.
