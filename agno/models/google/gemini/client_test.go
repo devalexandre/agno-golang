@@ -162,7 +162,7 @@ func TestCreateChatCompletionWithTools(t *testing.T) {
 
 	message := models.Message{
 		Role:    models.TypeUserRole,
-		Content: "Por favor, use a ferramenta WeatherTool para me dizer qual é a temperatura atual em Poços de Caldas - MG. A ferramenta precisa de latitude e longitude, que são -21.7872 e -46.5614 respectivamente.",
+		Content: "Please use the WeatherTool to tell me what the current temperature is in Poços de Caldas - MG. The tool needs latitude and longitude, which are -21.7872 and -46.5614 respectively.",
 	}
 
 	callOPtions := []models.Option{
