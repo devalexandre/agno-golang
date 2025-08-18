@@ -99,7 +99,7 @@ func TestOllama_StreamChatCompletion(t *testing.T) {
 			return nil
 		}),
 	}
-	// Chamar o método de streaming
+	// Call the streaming method
 	err := client.StreamChatCompletion(ctx, []models.Message{message}, callOPtions...)
 	if err != nil {
 		t.Fatalf("StreamChatCompletion failed: %v", err)
@@ -115,9 +115,9 @@ func TestOllama_StreamChatCompletionWithTool(t *testing.T) {
 		Content: "What's the weather today in São Paulo?",
 	}
 
-	// Configurar opções com ferramentas
+	// Configure options with tools
 
-	// Criar contexto com flags para debug e exibição de ferramentas
+	// Create context with flags for debug and tool display
 	ctx := context.WithValue(context.Background(), models.ShowToolsCallKey, true)
 
 	var response string
@@ -132,7 +132,7 @@ func TestOllama_StreamChatCompletionWithTool(t *testing.T) {
 			return nil
 		}),
 	}
-	// Chamar o método de streaming com ferramentas
+	// Call the streaming method with tools
 	err := client.StreamChatCompletion(ctx, []models.Message{message}, callOPtions...)
 	if err != nil {
 		t.Fatalf("StreamChatCompletion with tools failed: %v", err)
