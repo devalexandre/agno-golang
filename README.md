@@ -15,8 +15,8 @@ Agno-Golang is a **high-performance Go port** of the popular Python Agno Framewo
 
 ### **5 Levels of Agentic Systems**
 
-- **Level 1**: ✅ Agents with tools and instructions **(IMPLEMENTED)**
-- **Level 2**: 🔄 Agents with knowledge and storage **(IN PROGRESS)**  
+- **Level 1**: ✅ Agents with tools and instructions **(FULLY IMPLEMENTED)**
+- **Level 2**: ✅ Agents with knowledge and storage **(IMPLEMENTED)**  
 - **Level 3**: 🔄 Agents with memory and reasoning **(IN PROGRESS)**
 - **Level 4**: ⏳ Agent Teams that can reason and collaborate
 - **Level 5**: ⏳ Agentic Workflows with state and determinism
@@ -30,55 +30,81 @@ Agno-Golang is a **high-performance Go port** of the popular Python Agno Framewo
 | Deployment | Dependencies | **Single binary** | **Much simpler** |
 | Concurrency | Threading | **Goroutines** | **Native & faster** |
 
-## ✅ **Currently Implemented (Level 1)**
+## ✅ **Currently Implemented**
 
-### **🤖 Agent System**
+### **🤖 Level 1: Agent System (COMPLETE)**
 ```go
 agent := agent.NewAgent(openai.GPT4o())
 agent.AddTool(tools.NewWebTool())
 agent.PrintResponse("Search for news about AI", false, true)
 ```
 
-### **🔧 Model Providers** 
+### **� Level 2: Knowledge & Storage (IMPLEMENTED)**
+
+#### **Knowledge Base System**
+```go
+import "github.com/devalexandre/agno-golang/agno/knowledge"
+
+// Load documents with parallel processing
+kb := knowledge.NewKnowledgeBase(vectorDB)
+err := kb.LoadFromPDFs([]string{"doc1.pdf", "doc2.pdf"})
+```
+
+#### **Vector Database Support**
+```go
+import "github.com/devalexandre/agno-golang/agno/vectordb/qdrant"
+
+// Qdrant vector storage
+vectorDB, _ := qdrant.NewQdrant(qdrant.QdrantConfig{
+    Host: "localhost", Port: 6333,
+    Collection: "docs", Embedder: embedder,
+})
+```
+
+#### **Embedding Generation**  
+```go
+import "github.com/devalexandre/agno-golang/agno/embedder"
+
+// Multiple providers
+openaiEmbedder := embedder.NewOpenAIEmbedder()
+ollamaEmbedder := embedder.NewOllamaEmbedder()
+```
+
+### **�🔧 Model Providers** 
 - **OpenAI**: GPT-4o, GPT-4, GPT-3.5
 - **Ollama**: Local models (Llama, Mistral, etc.)
 - **Google**: Gemini Pro, Gemini Flash
 
-### **🛠️ Tool Suite (4 Core Tools)**
+### **🛠️ Tool Suite (8 Production Tools)**
 
-#### **WebTool** - Web Operations
-```go
-webTool := tools.NewWebTool()
-// HTTP requests, web scraping, content extraction
-```
+#### **Core Tools**
+- **WebTool** - HTTP requests, web scraping, content extraction
+- **FileTool** - Complete file system operations (security-first)
+- **MathTool** - Mathematical operations and statistics
+- **ShellTool** - System commands and process management
 
-#### **FileTool** - File System Operations
-```go
-fileTool := tools.NewFileToolWithWrite() // Security: write disabled by default
-// Read, write, list, search, create, delete files/directories
-```
+#### **Specialized Tools**
+- **WeatherTool** - Weather information and forecasts
+- **DuckDuckGoTool** - Web search integration
+- **ExaTool** - Advanced web search with API
+- **EchoTool** - Communication and message handling
 
-#### **MathTool** - Mathematical Operations  
-```go
-mathTool := tools.NewMathTool()
-// Basic math, statistics, trigonometry, random numbers
-```
+## 🔄 **Next: Advanced Memory & Reasoning (Level 3)**
 
-#### **ShellTool** - System Commands
-```go
-shellTool := tools.NewShellTool()  
-// Execute commands, system info, process management
-```
+**🎯 Current Focus**: Implementing advanced memory systems and reasoning capabilities for intelligent agent interactions.
 
-## 🔄 **Next: Memory & Storage (Level 2-3)**
+### **Planned Level 3 Features**
+- **Session Memory**: Persistent conversation context across sessions
+- **User Profiling**: Adaptive agent behavior based on user preferences  
+- **Reasoning Engine**: Advanced decision-making and problem-solving
+- **Context Awareness**: Intelligent context management and retrieval
 
-**🎯 Current Focus**: Implementing the memory and storage system to enable persistent conversations and user memories.
-
-### **Planned Features**
-- **Session Storage**: SQLite, PostgreSQL, MongoDB
-- **User Memories**: Personalized agent interactions
-- **Chat History**: Persistent conversation state
-- **Knowledge Base**: Vector storage and RAG
+### **Already Implemented (Level 2)**
+- ✅ **Knowledge Base**: PDF processing with chunking and embeddings
+- ✅ **Vector Storage**: Qdrant and PostgreSQL/pgvector support
+- ✅ **Embedding System**: OpenAI and Ollama embedding generation
+- ✅ **Document Management**: Advanced search and retrieval
+- ✅ **Parallel Processing**: Efficient batch operations and workers
 
 > 📋 **See detailed roadmap**: [ROADMAP.md](ROADMAP.md)
 
@@ -112,35 +138,51 @@ func main() {
 }
 ```
 
-### **3. File Operations (with Security)**
+### **3. Knowledge Base with Vector Search**
 ```go
-// Secure by default - write operations disabled
-fileTool := tools.NewFileTool()
+import (
+    "github.com/devalexandre/agno-golang/agno/knowledge"
+    "github.com/devalexandre/agno-golang/agno/vectordb/qdrant"
+    "github.com/devalexandre/agno-golang/agno/embedder"
+)
 
-// Enable write operations when needed
-fileTool.EnableWrite()
-// OR create with write enabled
-fileTool := tools.NewFileToolWithWrite()
+// Setup embedder and vector database
+embedder := embedder.NewOpenAIEmbedder()
+vectorDB, _ := qdrant.NewQdrant(qdrant.QdrantConfig{
+    Host: "localhost", Port: 6333,
+    Collection: "knowledge", Embedder: embedder,
+})
+
+// Create knowledge base and load documents
+kb := knowledge.NewKnowledgeBase(vectorDB)
+err := kb.LoadFromPDFs([]string{"manual.pdf", "docs.pdf"})
+
+// Search knowledge base
+results, _ := kb.Search("How to configure the system?", 5)
 ```
 
 ## 📚 **Examples**
 
 ### **Working Examples**
-- [`examples/openai/web_simple/`](examples/openai/web_simple/) - WebTool + OpenAI
-- [`examples/ollama/web_simple/`](examples/ollama/web_simple/) - WebTool + Ollama  
-- [`examples/toolkit_test/`](examples/toolkit_test/) - All tools functional test
-- [`examples/file_security_test/`](examples/file_security_test/) - FileTool security demo
+- [`examples/openai/agent/`](examples/openai/agent/) - Complete agent examples with streaming
+- [`examples/ollama/agent/`](examples/ollama/agent/) - Local model integration  
+- [`examples/gemini/`](examples/gemini/) - Google Gemini implementation
+- [`examples/exa/`](examples/exa/) - Advanced web search examples
+- [`examples/panels/`](examples/panels/) - Interactive UI demonstrations
 
 ### **Run Examples**
 ```bash
-# Web tool with OpenAI
-cd examples/openai/web_simple && go run main.go
+# Agent with streaming (OpenAI)
+cd examples/openai/agent/stream && go run main.go
 
-# All tools test
-cd examples/toolkit_test && go run main.go
+# Local agent with Ollama
+cd examples/ollama/agent/run && go run main.go
 
-# File security demo  
-cd examples/file_security_test && go run main.go
+# Agent with weather tools
+cd examples/openai/agent_weather && go run main.go
+
+# Agent with advanced search (Exa)
+cd examples/openai/agent_exa && go run main.go
 ```
 
 ## 🏗️ **Architecture**
@@ -148,13 +190,17 @@ cd examples/file_security_test && go run main.go
 ```
 agno-golang/
 ├── agno/
-│   ├── agent/           # 🤖 Agent system
+│   ├── agent/           # 🤖 Agent system with streaming
 │   ├── models/          # 🧠 LLM providers (OpenAI, Ollama, Gemini)
-│   ├── tools/           # 🛠️ Tool suite (Web, File, Math, Shell)
-│   │   └── toolkit/     # 🔧 Tool registration system
-│   └── utils/           # 🔨 Utilities
-├── examples/            # 📚 Working examples
-└── docs/               # 📖 Documentation
+│   ├── tools/           # 🛠️ 8-tool suite (Web, File, Math, Shell, Weather, Search, Echo, Exa)
+│   │   ├── toolkit/     # 🔧 Tool registration system
+│   │   └── exa/         # 🔍 Advanced web search integration
+│   ├── knowledge/       # 📚 Knowledge base with PDF processing
+│   ├── vectordb/        # 🗄️ Vector storage (Qdrant, pgvector)
+│   ├── embedder/        # 🧠 Embedding generation (OpenAI, Ollama)
+│   └── utils/           # 🔨 Utilities and helpers
+├── examples/            # 📚 Production-ready examples
+└── docs/               # 📖 Complete English documentation
 ```
 
 ## 🛡️ **Security Features**
@@ -177,22 +223,28 @@ fileTool := tools.NewFileToolWithWrite() // Pre-enabled
 
 ## 🧪 **Testing**
 
-### **All Tools Functional Test**
+### **Complete Agent Test**
 ```bash
-cd examples/toolkit_test && go run main.go
+cd examples/openai/agent/run && go run main.go
 ```
 
 **Expected Output**:
 ```
-✅ MathTool: 15 + 25 = 40
-✅ FileTool: Created and read file successfully  
-✅ ShellTool: Retrieved current directory
-✅ WebTool: HTTP request completed
+🤖 Agent initialized with OpenAI GPT-4o
+🛠️  Loaded 8 tools: Web, File, Math, Shell, Weather, DuckDuckGo, Exa, Echo
+💬 User: "What's the weather like and calculate 15 + 25?"
+🌤️  Weather: Current temperature in your location...
+🧮 Math: 15 + 25 = 40
 ```
 
-### **Security Test** 
+### **Knowledge Base Test** 
 ```bash
-cd examples/file_security_test && go run main.go
+cd examples/knowledge && go run main.go
+```
+
+### **Vector Database Test**
+```bash
+cd agno/vectordb/qdrant && go test -v
 ```
 
 ## 🗺️ **Roadmap**
@@ -200,9 +252,10 @@ cd examples/file_security_test && go run main.go
 | Phase | Features | Status |
 |-------|----------|--------|
 | **Phase 1** | Agent + Tools | ✅ **COMPLETE** |
-| **Phase 2** | Memory + Storage | 🔄 **IN PROGRESS** |
-| **Phase 3** | Multi-Agent Teams | ⏳ Planned |
-| **Phase 4** | Workflows + Production | ⏳ Planned |
+| **Phase 2** | Knowledge + Storage | ✅ **COMPLETE** |
+| **Phase 3** | Advanced Memory + Reasoning | 🔄 **IN PROGRESS** |
+| **Phase 4** | Multi-Agent Teams | ⏳ Planned |
+| **Phase 5** | Workflows + Production | ⏳ Planned |
 
 > 📋 **Detailed roadmap**: [ROADMAP.md](ROADMAP.md)
 
@@ -211,22 +264,34 @@ cd examples/file_security_test && go run main.go
 We welcome contributions! Focus areas:
 
 ### **High Priority**
-- **Session Storage** implementation (SQLite, PostgreSQL)
-- **Memory system** for persistent conversations
-- **Vector database** integrations
-- **Documentation** and examples
+- **Advanced Memory System** for multi-session context
+- **Reasoning Engine** implementation
+- **Agent Teams** and collaboration systems
+- **Production Workflows** and deployment tools
+
+### **Current Implementation Status**
+- ✅ **Knowledge Base**: PDF processing, chunking, parallel loading
+- ✅ **Vector Storage**: Qdrant and PostgreSQL/pgvector support  
+- ✅ **Embeddings**: OpenAI and Ollama integration
+- ✅ **8 Production Tools**: Complete tool ecosystem
+- 🔄 **Session Memory**: Advanced context management
 
 ### **Getting Started**
 1. Check [ROADMAP.md](ROADMAP.md) for planned features
-2. Look at [`/agno/tools/`](agno/tools/) for implementation patterns
-3. Add tests and examples for new features
+2. Explore [`/agno/knowledge/`](agno/knowledge/) for knowledge base patterns
+3. Review [`/agno/vectordb/`](agno/vectordb/) for vector storage implementations
+4. Add tests and examples for new features
 
 ## 📖 **Documentation**
 
-- **[ROADMAP.md](ROADMAP.md)** - Complete development roadmap
-- **[docs/TOOLS_COMPLETE.md](docs/TOOLS_COMPLETE.md)** - Current implementation status
-- **[docs/tools/FileTool_Security.md](docs/tools/FileTool_Security.md)** - Security system guide
-- **[examples/](examples/)** - Working code examples
+- **[Complete Documentation](docs/README.md)** - Full English documentation
+- **[Knowledge Base](docs/knowledge/README.md)** - PDF processing and loading
+- **[Vector Database](docs/vectordb/README.md)** - Storage and search systems
+- **[Embedder](docs/embedder/README.md)** - Embedding generation
+- **[Tools](docs/tools/README.md)** - Complete 8-tool documentation
+- **[Agent](docs/agent/README.md)** - Agent system guide
+- **[Examples](docs/examples/README.md)** - Production examples
+- **[ROADMAP.md](ROADMAP.md)** - Development roadmap
 
 ## 🌟 **Why Agno-Golang?**
 
@@ -236,12 +301,14 @@ We welcome contributions! Focus areas:
 - **📦 Deployment**: Single binary, no dependencies
 - **⚡ Concurrency**: Native goroutines
 - **🔒 Type Safety**: Compile-time error catching
+- **📚 Knowledge**: Native vector storage and embeddings
 
 ### **vs. Other Go AI Frameworks** 
-- **🧠 Intelligent**: Full multi-agent capabilities
-- **🔧 Complete**: Comprehensive tool ecosystem
-- **🛡️ Secure**: Security-first design
-- **📚 Proven**: Based on battle-tested Python Agno
+- **🧠 Intelligent**: Full multi-agent capabilities with knowledge
+- **🔧 Complete**: 8-tool ecosystem + vector storage + embeddings
+- **🛡️ Secure**: Security-first design with granular controls
+- **📚 Proven**: Based on battle-tested Python Agno + Go performance
+- **🔍 Advanced**: RAG, vector search, and knowledge management
 
 ## 📄 **License**
 
