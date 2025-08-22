@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -43,6 +44,10 @@ type WriteFileParams struct {
 	Mode    string `json:"mode,omitempty" description:"File permissions (e.g., '0644'). Default: 0644"`
 }
 
+type StringParams struct {
+	Content string `json:"content" description:"Content to encode or decode"`
+}
+
 // FileInfoParams represents parameters for file info operations
 type FileInfoParams struct {
 	Path string `json:"path" description:"The file or directory path" required:"true"`
@@ -63,14 +68,14 @@ type SearchFileParams struct {
 }
 
 // NewFileTool creates a new FileTool instance
-func NewFileTool() *FileTool {
+func NewFileTool(write bool) *FileTool {
 	tk := toolkit.NewToolkit()
 	tk.Name = "FileTool"
 	tk.Description = "A comprehensive file system tool for reading, writing, listing, and managing files and directories. Supports text files, binary operations, directory traversal, and file search functionality. Write operations are disabled by default for security."
 
 	ft := &FileTool{
 		Toolkit:      tk,
-		WriteEnabled: false, // Disabled by default for security
+		WriteEnabled: write,
 	}
 
 	// Register methods
@@ -81,6 +86,8 @@ func NewFileTool() *FileTool {
 	ft.Toolkit.Register("SearchFiles", ft, ft.SearchFiles, SearchFileParams{})
 	ft.Toolkit.Register("CreateDirectory", ft, ft.CreateDirectory, FileInfoParams{})
 	ft.Toolkit.Register("DeleteFile", ft, ft.DeleteFile, FileInfoParams{})
+	// ft.Toolkit.Register("Base64Encode", ft, ft.base64encode, StringParams{})
+	// ft.Toolkit.Register("Base64Decode", ft, ft.base64decode, StringParams{})
 
 	return ft
 }
@@ -88,7 +95,7 @@ func NewFileTool() *FileTool {
 // NewFileToolWithWrite creates a new FileTool instance with write operations enabled
 // Use this carefully as it allows file modifications
 func NewFileToolWithWrite() *FileTool {
-	ft := NewFileTool()
+	ft := NewFileTool(true)
 	ft.EnableWrite()
 	return ft
 }
@@ -182,6 +189,7 @@ func (ft *FileTool) ReadFile(params ReadFileParams) (interface{}, error) {
 
 // WriteFile writes content to a file
 func (ft *FileTool) WriteFile(params WriteFileParams) (interface{}, error) {
+	// Updated to accept []byte for content
 	// Check if write operations are enabled
 	if !ft.WriteEnabled {
 		return FileOperationResult{
@@ -196,7 +204,7 @@ func (ft *FileTool) WriteFile(params WriteFileParams) (interface{}, error) {
 		return nil, fmt.Errorf("file path is required")
 	}
 
-	if params.Content == "" {
+	if len(params.Content) == 0 {
 		return nil, fmt.Errorf("content is required")
 	}
 
@@ -231,15 +239,28 @@ func (ft *FileTool) WriteFile(params WriteFileParams) (interface{}, error) {
 	}
 	defer file.Close()
 
-	// Write content
-	bytesWritten, err := file.WriteString(params.Content)
-	if err != nil {
-		return FileOperationResult{
-			Path:      params.Path,
-			Success:   false,
-			Error:     fmt.Sprintf("failed to write to file: %v", err),
-			Operation: "WriteFile",
-		}, nil
+	// Decode base64 content if needed
+
+	chunkSize := 10000
+	contentBytes := []byte(params.Content)
+	totalBytes := len(contentBytes)
+	bytesWritten := 0
+
+	for start := 0; start < totalBytes; start += chunkSize {
+		end := start + chunkSize
+		if end > totalBytes {
+			end = totalBytes
+		}
+		_, err := file.Write(contentBytes[start:end])
+		if err != nil {
+			return FileOperationResult{
+				Path:      params.Path,
+				Success:   false,
+				Error:     fmt.Sprintf("failed to write chunk to file: %v", err),
+				Operation: "WriteFile",
+			}, nil
+		}
+		bytesWritten += end - start
 	}
 
 	return FileOperationResult{
@@ -519,4 +540,18 @@ func (ft *FileTool) DeleteFile(params FileInfoParams) (interface{}, error) {
 		IsDir:     info.IsDir(),
 		Operation: "DeleteFile",
 	}, nil
+}
+
+func (ft *FileTool) base64encode(content string) string {
+	// Encode content to base64
+	return base64.StdEncoding.EncodeToString([]byte(content))
+}
+
+func (ft *FileTool) base64decode(encoded string) (string, error) {
+	// Decode base64 content
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64 content: %v", err)
+	}
+	return string(decoded), nil
 }
