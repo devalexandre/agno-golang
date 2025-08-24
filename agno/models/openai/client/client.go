@@ -114,6 +114,12 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		params.MaxTokens = openai.Int(int64(*callOptions.MaxTokens))
 	}
 
+	debugmod := ctx.Value(models.DebugKey)
+	if debugmod != nil && debugmod.(bool) {
+		fmt.Printf("DEBUG: Creating chat completion with MaxTokens: %d, Temperature: %.2f\n",
+			params.MaxTokens, params.Temperature)
+	}
+
 	// Handle tools
 	var maptools map[string]toolkit.Tool
 	if len(callOptions.ToolCall) > 0 {
@@ -402,9 +408,6 @@ func (c *Client) processToolCalls(ctx context.Context, originalMessages []models
 	}
 	if callOptions.MaxTokens != nil {
 		newOptions = append(newOptions, models.WithMaxTokens(*callOptions.MaxTokens))
-	} else {
-		// Add a higher max tokens limit for the follow-up request
-		newOptions = append(newOptions, models.WithMaxTokens(2000))
 	}
 	if len(callOptions.ToolCall) > 0 {
 		newOptions = append(newOptions, models.WithTools(callOptions.ToolCall))

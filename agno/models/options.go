@@ -87,20 +87,22 @@ type ClientOptions struct {
 // DefaultCallOptions returns the default options for the request.
 func DefaultCallOptions() *CallOptions {
 	return &CallOptions{
-		Temperature:      floatPtr(0.7),
-		MaxTokens:        intPtr(100),
-		TopP:             floatPtr(1.0),
-		FrequencyPenalty: floatPtr(0.0),
-		PresencePenalty:  floatPtr(0.0),
+		Temperature:         floatPtr(0.7),
+		MaxTokens:           nil, // Default to no limit
+		MaxCompletionTokens: nil, // Default to no limit
+		TopP:                floatPtr(1.0),
+		FrequencyPenalty:    floatPtr(0.0),
+		PresencePenalty:     floatPtr(0.0),
 	}
 }
 
 // DefaultOptions returns the default options for the OpenAI API client.
 func DefaultOptions() *ClientOptions {
 	return &ClientOptions{
-		ID:               "gpt-3.5-turbo",
-		Temperature:      floatPtr(0.7),
-		MaxTokens:        intPtr(100),
+		ID:          "gpt-3.5-turbo",
+		Temperature: floatPtr(0.7),
+		MaxTokens:   nil, // Default to no limit
+
 		TopP:             floatPtr(1.0),
 		FrequencyPenalty: floatPtr(0.0),
 		PresencePenalty:  floatPtr(0.0),
