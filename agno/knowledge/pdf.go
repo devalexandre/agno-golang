@@ -2,6 +2,8 @@ package knowledge
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +15,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 
 	"github.com/devalexandre/agno-golang/agno/document"
 )
@@ -35,6 +39,20 @@ type PDFKnowledgeBase struct {
 	Formats      []string    `json:"formats"`                 // Supported formats
 	ChunkSize    int         `json:"chunk_size"`              // Text chunk size
 	ChunkOverlap int         `json:"chunk_overlap"`           // Overlap between chunks
+}
+
+func (p *PDFKnowledgeBase) Search(ctx context.Context, query string, numDocuments int) ([]*SearchResult, error) {
+	if p.VectorDB == nil {
+		return nil, fmt.Errorf("vector database not configured")
+	}
+
+	return p.VectorDB.Search(ctx, query, numDocuments, nil)
+
+}
+
+func (p *PDFKnowledgeBase) GetCount(ctx context.Context) (int64, error) {
+	//TODO implement me
+	panic("implement me")
 }
 
 // NewPDFKnowledgeBase creates a new PDF knowledge base
@@ -156,6 +174,7 @@ func (p *PDFKnowledgeBase) Load(ctx context.Context, recreate bool) error {
 	convertedDocs := ConvertDocumentPointers(allDocuments)
 
 	// Load documents into vector database with progress
+	fmt.Println("🚀 Inserting documents into vector database...")
 	return p.LoadDocumentsWithProgress(ctx, convertedDocs, false)
 }
 
@@ -190,6 +209,7 @@ func (p *PDFKnowledgeBase) LoadDocumentsWithProgress(ctx context.Context, docs [
 	totalBatches := (len(docs) + batchSize - 1) / batchSize
 
 	for i := 0; i < len(docs); i += batchSize {
+
 		end := i + batchSize
 		if end > len(docs) {
 			end = len(docs)
@@ -198,17 +218,15 @@ func (p *PDFKnowledgeBase) LoadDocumentsWithProgress(ctx context.Context, docs [
 		batch := docs[i:end]
 		batchNum := (i / batchSize) + 1
 
-		// Show progress
-		p.showInsertProgress(batchNum, totalBatches, fmt.Sprintf("Batch %d - %d documents", batchNum, len(batch)))
-
-		// Process batch
+		fmt.Println("Inserting batch...")
 		err := p.LoadDocuments(ctx, batch, false) // Don't recreate for each batch
 		if err != nil {
 			return fmt.Errorf("failed to load batch %d: %w", batchNum, err)
 		}
 
-		// Small delay to see progress
-		time.Sleep(100 * time.Millisecond)
+		// Show progress
+		p.showInsertProgress(batchNum, totalBatches, fmt.Sprintf("Batch %d - %d documents", batchNum, len(batch)))
+
 	}
 
 	fmt.Printf("\n✅ Processing complete!\n")
@@ -248,7 +266,7 @@ func (p *PDFKnowledgeBase) LoadParallel(ctx context.Context, recreate bool, numW
 
 	if p.VectorDB != nil {
 		if err := p.VectorDB.Create(ctx); err != nil {
-			return fmt.Errorf("failed to create vector database: %w", err)
+			fmt.Println("Collection already exists, skipping creation.")
 		}
 	}
 
@@ -371,8 +389,6 @@ func (p *PDFKnowledgeBase) LoadDocumentsParallel(ctx context.Context, docs []doc
 					errorChan <- nil
 				}
 
-				// Rate limiting - small delay between requests
-				time.Sleep(100 * time.Millisecond)
 			}
 			doneChan <- true
 		}(i)
@@ -656,7 +672,14 @@ func (p *PDFKnowledgeBase) extractPDFContent(filePath, sourceURL string, metadat
 			docMetadata["url"] = sourceURL
 		}
 
+		// Generate a unique ID for the chunk based on its content
+		chunkID := sha1.New()
+		chunkID.Write([]byte(chunk))
+		id := hex.EncodeToString(chunkID.Sum(nil))
+		docMetadata["id"] = id
+
 		doc := &document.Document{
+			ID:          id,
 			Content:     chunk,
 			ContentType: "text/plain",
 			Source:      source,
@@ -832,7 +855,11 @@ func (p *PDFKnowledgeBase) chunkDocument(doc document.Document) []document.Docum
 		chunkMetadata["total_chunks"] = len(chunks)
 		chunkMetadata["chunk_size"] = len(chunk)
 
+		// Gerar um UUID para cada chunk
+		id := generateUUID()
+
 		chunkDoc := document.Document{
+			ID:          id,
 			Content:     chunk,
 			ContentType: "text/plain",
 			Source:      doc.Source,
@@ -861,4 +888,9 @@ func (p *PDFKnowledgeBase) isValidPDF(filePath string) bool {
 	}
 
 	return string(buffer) == "%PDF"
+}
+
+// generateUUID generates a new UUID
+func generateUUID() string {
+	return uuid.New().String()
 }

@@ -29,8 +29,8 @@ type OllamaEmbeddingRequest struct {
 
 // OllamaEmbeddingResponse estrutura da resposta do Ollama
 type OllamaEmbeddingResponse struct {
-	Embeddings []float64 `json:"embeddings"`
-	Model      string    `json:"model"`
+	Embeddings [][]float64 `json:"embeddings"`
+	Model      string      `json:"model"`
 }
 
 // NewOllamaEmbedder cria um novo embedder Ollama
@@ -123,6 +123,9 @@ func (e *OllamaEmbedder) GetEmbedding(text string) ([]float64, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Log the raw response for debugging
+	// fmt.Printf("[DEBUG] Ollama raw response: %s\n", string(body))
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
@@ -136,12 +139,14 @@ func (e *OllamaEmbedder) GetEmbedding(text string) ([]float64, error) {
 		return nil, ErrInvalidResponse
 	}
 
+	embedding := response.Embeddings[0]
+
 	// Validar dimensões
-	if len(response.Embeddings) != e.Dimensions {
-		return nil, fmt.Errorf("%w: expected %d, got %d", ErrInvalidDimension, e.Dimensions, len(response.Embeddings))
+	if len(embedding) != e.Dimensions {
+		return nil, fmt.Errorf("%w: expected %d, got %d", ErrInvalidDimension, e.Dimensions, len(embedding))
 	}
 
-	return response.Embeddings, nil
+	return embedding, nil
 }
 
 // GetEmbeddingAndUsage gets embedding and usage information

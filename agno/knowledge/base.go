@@ -21,7 +21,7 @@ type Knowledge interface {
 	LoadDocument(ctx context.Context, doc document.Document) error
 
 	// Search busca documentos na base de conhecimento
-	Search(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*SearchResult, error)
+	Search(ctx context.Context, query string, numDocuments int) ([]*SearchResult, error)
 
 	// Drop remove todos os documentos da base
 	Drop(ctx context.Context) error
@@ -126,14 +126,7 @@ func (k *BaseKnowledge) LoadDocuments(ctx context.Context, docs []document.Docum
 
 	// Criar tabela se não existir
 	if err := k.VectorDB.Create(ctx); err != nil {
-		return fmt.Errorf("failed to create vector database: %w", err)
-	}
-
-	// Verificar se já possui documentos
-	if !recreate {
-		if c, err := k.VectorDB.GetCount(ctx); err == nil && c > 0 {
-			return nil // Já tem documentos
-		}
+		fmt.Println("There was VecctorDb skip create")
 	}
 
 	// Inserir documentos

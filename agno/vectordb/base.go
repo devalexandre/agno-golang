@@ -2,6 +2,7 @@ package vectordb
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/devalexandre/agno-golang/agno/document"
 	"github.com/devalexandre/agno-golang/agno/embedder"
@@ -98,9 +99,13 @@ func (b *BaseVectorDB) EmbedDocuments(docs []*document.Document) error {
 		if doc.Embeddings == nil || len(doc.Embeddings) == 0 {
 			embedding, err := b.Embedder.GetEmbedding(doc.Content)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to generate embedding for doc ID %s: %w", doc.ID, err)
+			}
+			if embedding == nil || len(embedding) == 0 {
+				return fmt.Errorf("empty embedding generated for doc ID %s (content: %.30s...) - check Ollama server and model", doc.ID, doc.Content)
 			}
 			doc.Embeddings = embedding
+
 		}
 	}
 

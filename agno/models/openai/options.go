@@ -65,8 +65,8 @@ func WithStreamingFunc(f func(context.Context, []byte) error) Option {
 // DefaultCallOptions returns the default options for the request.
 func DefaultCallOptions() *models.CallOptions {
 	return &models.CallOptions{
-		Temperature:      floatPtr(0.7),
-		MaxTokens:        intPtr(100),
+		Temperature: floatPtr(0.7),
+		//MaxTokens:        intPtr(100),
 		TopP:             floatPtr(1.0),
 		FrequencyPenalty: floatPtr(0.0),
 		PresencePenalty:  floatPtr(0.0),

@@ -88,7 +88,6 @@ type ClientOptions struct {
 func DefaultCallOptions() *CallOptions {
 	return &CallOptions{
 		Temperature:      floatPtr(0.7),
-		MaxTokens:        intPtr(100),
 		TopP:             floatPtr(1.0),
 		FrequencyPenalty: floatPtr(0.0),
 		PresencePenalty:  floatPtr(0.0),
@@ -100,7 +99,6 @@ func DefaultOptions() *ClientOptions {
 	return &ClientOptions{
 		ID:               "gpt-3.5-turbo",
 		Temperature:      floatPtr(0.7),
-		MaxTokens:        intPtr(100),
 		TopP:             floatPtr(1.0),
 		FrequencyPenalty: floatPtr(0.0),
 		PresencePenalty:  floatPtr(0.0),
