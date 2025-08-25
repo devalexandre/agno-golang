@@ -29,6 +29,7 @@ func NewClient(options ...models.OptionClient) (*Client, error) {
 		option(&opts)
 	}
 
+	copts := toRequestOptions(opts)
 	apiKey := opts.APIKey
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
@@ -38,10 +39,7 @@ func NewClient(options ...models.OptionClient) (*Client, error) {
 		opts.APIKey = apiKey
 	}
 
-	// Create the official OpenAI client with API key
-	client := openai.NewClient(
-		option.WithAPIKey(apiKey),
-	)
+	client := openai.NewClient(copts...)
 
 	return &Client{
 		model:   opts.ID,
@@ -104,6 +102,10 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	params := openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(c.model),
 		Messages: openaiMessages,
+	}
+
+	if c.options.BaseURL != "" {
+		params.Model = c.model
 	}
 
 	// Add optional parameters
@@ -431,4 +433,19 @@ func (c *Client) processToolCalls(ctx context.Context, originalMessages []models
 	finalResponse.Choices[0].Message.ToolCalls = originalToolCalls
 
 	return finalResponse, nil
+}
+
+// options to option.RequestOption
+func toRequestOptions(opts models.ClientOptions) []option.RequestOption {
+	var reqOpts []option.RequestOption
+
+	if opts.APIKey != "" {
+		reqOpts = append(reqOpts, option.WithAPIKey(opts.APIKey))
+	}
+
+	if opts.BaseURL != "" {
+		reqOpts = append(reqOpts, option.WithBaseURL(opts.BaseURL))
+	}
+
+	return reqOpts
 }

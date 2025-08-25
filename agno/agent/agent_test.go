@@ -24,7 +24,7 @@ func TestAgentPrintStreamResponse(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	agent := agent.NewAgent(agent.AgentConfig{
+	agent, _ := agent.NewAgent(agent.AgentConfig{
 		Context: context.Background(),
 		Model:   geminiModel,
 		Description: `
@@ -105,7 +105,7 @@ func TestAgentRunStream(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	agent := agent.NewAgent(agent.AgentConfig{
+	agent, _ := agent.NewAgent(agent.AgentConfig{
 		Context: context.Background(),
 		Model:   geminiModel,
 		Description: `
@@ -196,7 +196,7 @@ func TestSimpleAgentPrintStreamResponse(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	agent := agent.NewAgent(agent.AgentConfig{
+	agent, _ := agent.NewAgent(agent.AgentConfig{
 		Context:  context.Background(),
 		Model:    geminiModel,
 		Stream:   true,
@@ -213,7 +213,7 @@ func TestSimpleAgentPrintStreamResponseOllama(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	agent := agent.NewAgent(agent.AgentConfig{
+	agent, _ := agent.NewAgent(agent.AgentConfig{
 		Context:  context.Background(),
 		Model:    ollamaModel,
 		Stream:   true,
@@ -233,7 +233,7 @@ func TestAgentPrintStreamResponseOllama(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	agent := agent.NewAgent(agent.AgentConfig{
+	agent, _ := agent.NewAgent(agent.AgentConfig{
 		Context: context.Background(),
 		Model:   ollamaModel,
 		Description: `

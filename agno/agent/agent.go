@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/knowledge"
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/storage"
@@ -44,6 +45,9 @@ type AgentConfig struct {
 	EnableAgenticMemory    bool
 	EnableSessionSummaries bool
 	ReadChatHistory        bool
+
+	//knowledge
+	Knowledge knowledge.Knowledge
 }
 
 type Agent struct {
@@ -78,9 +82,12 @@ type Agent struct {
 	// Session state
 	messages []models.Message
 	runs     []*storage.AgentRun
+
+	//knowledge
+	knowledge knowledge.Knowledge
 }
 
-func NewAgent(config AgentConfig) *Agent {
+func NewAgent(config AgentConfig) (*Agent, error) {
 	config.Context = context.WithValue(config.Context, models.DebugKey, config.Debug)
 	config.Context = context.WithValue(config.Context, models.ShowToolsCallKey, config.ShowToolsCall)
 
@@ -121,6 +128,9 @@ func NewAgent(config AgentConfig) *Agent {
 		// Initialize session state
 		messages: []models.Message{},
 		runs:     []*storage.AgentRun{},
+
+		//knowledge
+		knowledge: config.Knowledge,
 	}
 
 	// Load existing session if storage is provided
@@ -128,7 +138,7 @@ func NewAgent(config AgentConfig) *Agent {
 		agent.loadSession()
 	}
 
-	return agent
+	return agent, nil
 }
 
 // GetName returns the agent's name (implements TeamMember interface)
@@ -450,6 +460,22 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 
 	if a.markdown {
 		a.additional_information = append(a.additional_information, "Use markdown to format your answers.")
+	}
+
+	//if have Knowledge, search for relevant documents
+	if a.knowledge != nil {
+		relevantDocs, err := a.knowledge.Search(a.ctx, prompt, 5)
+		if err == nil && len(relevantDocs) > 0 {
+			docContent := ""
+			for _, doc := range relevantDocs {
+				snippet := doc.Document.Content
+				if len(snippet) > 200 {
+					snippet = snippet[:200] + "..."
+				}
+				docContent += fmt.Sprintf("- %s\n", snippet)
+			}
+			systemMessage += fmt.Sprintf("<knowledge>\nRelevant information I found:\n%s</knowledge>\n", docContent)
+		}
 	}
 
 	if len(a.additional_information) > 0 {
