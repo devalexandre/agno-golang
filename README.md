@@ -4,7 +4,7 @@
 
 #### **✅ Knowledge Base System**Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MPL--2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)](examples/)
+[![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)](#)
 
 > **High-performance Go implementation of the [Agno Framework](https://github.com/agno-agi/agno)**  
 > Building Multi-Agent Systems with memory, knowledge and reasoning in Go
@@ -195,29 +195,6 @@ err := kb.LoadFromPDFs([]string{"manual.pdf", "docs.pdf"})
 results, _ := kb.Search("How to configure the system?", 5)
 ```
 
-## 📚 **Examples**
-
-### **Working Examples**
-- [`examples/openai/agent/`](examples/openai/agent/) - Complete agent examples with streaming
-- [`examples/ollama/agent/`](examples/ollama/agent/) - Local model integration  
-- [`examples/gemini/`](examples/gemini/) - Google Gemini implementation
-- [`examples/exa/`](examples/exa/) - Advanced web search examples
-- [`examples/panels/`](examples/panels/) - Interactive UI demonstrations
-
-### **Run Examples**
-```bash
-# Agent with streaming (OpenAI)
-cd examples/openai/agent/stream && go run main.go
-
-# Local agent with Ollama
-cd examples/ollama/agent/run && go run main.go
-
-# Agent with weather tools
-cd examples/openai/agent_weather && go run main.go
-
-# Agent with advanced search (Exa)
-cd examples/openai/agent_exa && go run main.go
-```
 
 ## 🏗️ **Architecture**
 
@@ -233,7 +210,6 @@ agno-golang/
 │   ├── vectordb/        # 🗄️ Vector storage (Qdrant, pgvector)
 │   ├── embedder/        # 🧠 Embedding generation (OpenAI, Ollama)
 │   └── utils/           # 🔨 Utilities and helpers
-├── examples/            # 📚 Production-ready examples
 └── docs/               # 📖 Complete English documentation
 ```
 
@@ -259,7 +235,8 @@ fileTool := tools.NewFileToolWithWrite() // Pre-enabled
 
 ### **Complete Agent Test**
 ```bash
-cd examples/openai/agent/run && go run main.go
+# Navigate to the appropriate example directory and run:
+go run main.go
 ```
 
 **Expected Output**:
@@ -273,7 +250,8 @@ cd examples/openai/agent/run && go run main.go
 
 ### **Knowledge Base Test** 
 ```bash
-cd examples/knowledge && go run main.go
+# Navigate to the knowledge example directory and run:
+go run main.go
 ```
 
 ### **Vector Database Test**
