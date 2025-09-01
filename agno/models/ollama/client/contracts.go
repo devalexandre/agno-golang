@@ -57,5 +57,6 @@ type OllamaToolCall struct {
 type ChatMessage struct {
 	Role      string           `json:"role"`
 	Content   string           `json:"content"`
+	Thinking  string           `json:"thinking,omitempty"`
 	ToolCalls []OllamaToolCall `json:"tool_calls,omitempty"`
 }

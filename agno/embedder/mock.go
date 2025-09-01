@@ -6,7 +6,7 @@ import (
 	"math"
 )
 
-// MockEmbedder embedder mock para testes
+// MockEmbedder mock embedder for tests
 type MockEmbedder struct {
 	BaseEmbedder
 	FixedEmbedding []float64
@@ -14,7 +14,7 @@ type MockEmbedder struct {
 	ErrorMessage   string
 }
 
-// NewMockEmbedder cria um novo embedder mock
+// NewMockEmbedder creates a new mock embedder
 func NewMockEmbedder(dimensions int) *MockEmbedder {
 	return &MockEmbedder{
 		BaseEmbedder: BaseEmbedder{
@@ -25,14 +25,14 @@ func NewMockEmbedder(dimensions int) *MockEmbedder {
 	}
 }
 
-// WithFixedEmbedding configura um embedding fixo
+// WithFixedEmbedding configures a fixed embedding
 func (m *MockEmbedder) WithFixedEmbedding(embedding []float64) *MockEmbedder {
 	m.FixedEmbedding = embedding
 	m.Dimensions = len(embedding)
 	return m
 }
 
-// WithError configura o mock para retornar erro
+// WithError configures the mock to return error
 func (m *MockEmbedder) WithError(errorMessage string) *MockEmbedder {
 	m.ShouldError = true
 	m.ErrorMessage = errorMessage
@@ -56,7 +56,7 @@ func (m *MockEmbedder) GetEmbedding(text string) ([]float64, error) {
 		return m.FixedEmbedding, nil
 	}
 
-	// Gerar embedding aleatório normalizado
+	// Generate normalized random embedding
 	embedding := make([]float64, m.Dimensions)
 	bytes := make([]byte, m.Dimensions*8)
 	rand.Read(bytes)
@@ -91,7 +91,7 @@ func (m *MockEmbedder) GetEmbeddingAndUsage(text string) ([]float64, map[string]
 	usage := map[string]interface{}{
 		"model":        m.ID,
 		"dimensions":   len(embedding),
-		"input_tokens": len(text) / 4, // Aproximação simples
+		"input_tokens": len(text) / 4, // Simple approximation
 		"total_tokens": len(text) / 4,
 		"mock":         true,
 	}

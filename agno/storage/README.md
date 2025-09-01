@@ -1,13 +1,13 @@
 # Agno-Golang Storage System
 
-Sistema de armazenamento persistente para o Agno-Golang, compatível com os padrões do Python Agno.
+Persistent storage system for Agno-Golang, compatible with Python Agno standards.
 
-## Visão Geral
+## Overview
 
-O sistema de storage fornece persistência de dados para:
-- **Sessões de Agente**: Armazenamento de conversas e estado de agentes individuais
-- **Sessões de Team**: Persistência de colaborações em equipe e histórico de mensagens
-- **Sessões de Workflow**: Armazenamento de execuções de workflow (V1 e V2)
+The storage system provides data persistence for:
+- **Agent Sessions**: Storage of conversations and individual agent state
+- **Team Sessions**: Persistence of team collaborations and message history
+- **Workflow Sessions**: Storage of workflow executions (V1 and V2)
 
 ## Arquitetura
 
@@ -18,7 +18,7 @@ agno/storage/
     └── sqlite.go      # Implementação SQLite
 ```
 
-### Components Principais
+### Main Components
 
 #### `contracts.go`
 - **Storage Interface**: Contrato principal para operações CRUD
@@ -41,9 +41,9 @@ const (
 )
 ```
 
-## Uso Básico
+## Basic Usage
 
-### 1. Configuração do Storage SQLite
+### 1. SQLite Storage Configuration
 
 ```go
 import (
@@ -51,7 +51,7 @@ import (
     "github.com/devalexandre/agno-golang/agno/storage/sqlite"
 )
 
-// Criar instância de storage
+// Create storage instance
 dbFile := "my_app.db"
 sqliteStorage, err := sqlite.NewSqliteStorage(sqlite.SqliteStorageConfig{
     TableName:         "sessions",
@@ -61,18 +61,18 @@ sqliteStorage, err := sqlite.NewSqliteStorage(sqlite.SqliteStorageConfig{
     Mode:              storage.TeamMode,
 })
 
-// Criar tabelas
+// Create tables
 err = sqliteStorage.Create()
 ```
 
-### 2. Integração com Team System
+### 2. Integration with Team System
 
 ```go
 import (
     "github.com/devalexandre/agno-golang/agno/team"
 )
 
-// Configurar team com storage
+// Configure team with storage
 teamConfig := team.TeamConfig{
     // ... outras configurações
     Storage:   sqliteStorage,
@@ -82,14 +82,14 @@ teamConfig := team.TeamConfig{
 
 myTeam := team.NewTeam(teamConfig)
 
-// As interações serão automaticamente persistidas
+// Interactions will be automatically persisted
 response, err := myTeam.Run("Analyze this data...")
 ```
 
-### 3. Operações Manuais de Storage
+### 3. Manual Storage Operations
 
 ```go
-// Criar uma sessão
+// Create a session
 session := &storage.TeamSession{
     Session: storage.Session{
         SessionID:   "session-001",
@@ -109,16 +109,16 @@ session := &storage.TeamSession{
     },
 }
 
-// Salvar (Upsert)
+// Save (Upsert)
 savedSession, err := sqliteStorage.Upsert(session)
 
-// Ler
+// Read
 loadedSession, err := sqliteStorage.Read("session-001", stringPtr("user-123"))
 
-// Listar
+// List
 sessions, err := sqliteStorage.List(stringPtr("user-123"), nil, nil)
 
-// Deletar
+// Delete
 err = sqliteStorage.Delete("session-001", stringPtr("user-123"))
 ```
 
@@ -137,11 +137,11 @@ CREATE TABLE sessions (
 );
 ```
 
-### Extensões por Modo
+### Extensions by Mode
 
 #### Team Mode
 ```sql
--- Colunas adicionais:
+-- Additional columns:
 team_id TEXT NOT NULL,
 team_data TEXT,
 team_session_id TEXT
@@ -149,67 +149,67 @@ team_session_id TEXT
 
 #### Workflow Mode
 ```sql
--- Colunas adicionais:
+-- Additional columns:
 workflow_id TEXT NOT NULL,
 workflow_data TEXT
 ```
 
 #### Agent Mode
 ```sql
--- Colunas adicionais:
+-- Additional columns:
 agent_id TEXT NOT NULL,
 agent_data TEXT
 ```
 
 ## Recursos Avançados
 
-### 1. Versionamento de Schema
-- Schema automático com versionamento
-- Upgrade automático de versões antigas
-- Compatibilidade backward
+### 1. Schema Versioning
+- Automatic schema with versioning
+- Automatic upgrade of old versions
+- Backward compatibility
 
-### 2. Serialização JSON
-- Dados complexos armazenados como JSON
-- Deserialização automática para structs Go
-- Compatibilidade com Python Agno
+### 2. JSON Serialization
+- Complex data stored as JSON
+- Automatic deserialization to Go structs
+- Compatibility with Python Agno
 
-### 3. Indexação
+### 3. Indexing
 ```sql
--- Índices automáticos criados:
+-- Automatic indexes created:
 CREATE INDEX idx_{table}_user_id ON {table} (user_id);
 CREATE INDEX idx_{table}_created_at ON {table} (created_at);
--- Índices específicos por modo (team_id, workflow_id, etc.)
+-- Mode-specific indexes (team_id, workflow_id, etc.)
 ```
 
-### 4. Operações UPSERT
-- Insert ou Update automático baseado em chave primária
-- Preservação de created_at em updates
-- Atualização automática de updated_at
+### 4. UPSERT Operations
+- Automatic Insert or Update based on primary key
+- Preservation of created_at on updates
+- Automatic update of updated_at
 
-## Compatibilidade com Python Agno
+## Compatibility with Python Agno
 
-Este sistema é projetado para ser compatível com o Python Agno:
+This system is designed to be compatible with Python Agno:
 
-- **Estruturas de dados idênticas**
-- **Schema de banco compatível**
-- **Modos de storage equivalentes**
-- **Serialização JSON compatível**
+- **Identical data structures**
+- **Compatible database schema**
+- **Equivalent storage modes**
+- **Compatible JSON serialization**
 
-## Exemplos Práticos
+## Practical Examples
 
-### Team com Persistência
+### Team with Persistence
 ```bash
-# Executar exemplo completo
+# Run complete example
 go run examples/team/sqlite_storage/main.go
 ```
 
-### Workflow com Storage (TODO)
+### Workflow with Storage (TODO)
 ```bash
-# Exemplo futuro
+# Future example
 go run examples/workflow/sqlite_storage/main.go
 ```
 
-## Configurações Avançadas
+## Advanced Configurations
 
 ### Custom Table Names
 ```go
@@ -219,7 +219,7 @@ config := sqlite.SqliteStorageConfig{
 }
 ```
 
-### Diferentes Databases por Modo
+### Different Databases by Mode
 ```go
 // Team storage
 teamDB := "teams.db"
@@ -236,26 +236,26 @@ agentStorage, _ := sqlite.NewSqliteStorage(sqlite.SqliteStorageConfig{
 })
 ```
 
-## Performance e Otimização
+## Performance and Optimization
 
-### Indexação
-- Índices automáticos em user_id, created_at
-- Índices específicos por modo (team_id, workflow_id)
-- Query optimization para operações comuns
+### Indexing
+- Automatic indexes on user_id, created_at
+- Mode-specific indexes (team_id, workflow_id)
+- Query optimization for common operations
 
 ### Connection Pooling
-- SQLite com configuração otimizada
-- WAL mode para melhor concorrência
-- Timeout configurável
+- SQLite with optimized configuration
+- WAL mode for better concurrency
+- Configurable timeout
 
 ### Memory Usage
-- Lazy loading de dados grandes
-- Streaming para operações batch
-- Cleanup automático de sessões antigas (futuro)
+- Lazy loading of large data
+- Streaming for batch operations
+- Automatic cleanup of old sessions (future)
 
 ## Roadmap
 
-### Futuras Implementações
+### Future Implementations
 - [ ] **PostgreSQL Storage**: Para aplicações enterprise
 - [ ] **Redis Storage**: Para cache e sessões temporárias
 - [ ] **Cloud Storage**: AWS RDS, Google Cloud SQL
@@ -263,7 +263,7 @@ agentStorage, _ := sqlite.NewSqliteStorage(sqlite.SqliteStorageConfig{
 - [ ] **Migration Tools**: Migração entre diferentes storages
 - [ ] **Analytics**: Métricas e analytics de uso
 
-### Recursos Avançados
+### Advanced Features
 - [ ] **Encryption**: Criptografia de dados sensíveis
 - [ ] **Compression**: Compressão de dados grandes
 - [ ] **Partitioning**: Particionamento de dados por data
@@ -271,38 +271,38 @@ agentStorage, _ := sqlite.NewSqliteStorage(sqlite.SqliteStorageConfig{
 
 ## Troubleshooting
 
-### Problemas Comuns
+### Common Issues
 
-#### Storage não salva dados
+#### Storage doesn't save data
 ```go
-// Verificar se storage e/ou memory estão configurados
+// Check if storage and/or memory are configured
 if team.storage == nil && team.memory == nil {
-    // Storage não será executado
+    // Storage will not be executed
 }
 ```
 
-#### Erro de schema
+#### Schema error
 ```go
-// Habilitar auto-upgrade
+// Enable auto-upgrade
 config.AutoUpgradeSchema = true
 ```
 
-#### Performance lenta
+#### Slow performance
 ```go
-// Verificar índices
+// Check indexes
 sqlite3 myapp.db ".schema"
-// Deve mostrar índices automáticos
+// Should show automatic indexes
 ```
 
-## Contribuição
+## Contribution
 
-Para contribuir com o sistema de storage:
+To contribute to the storage system:
 
-1. **Testes**: Adicionar testes para novos recursos
-2. **Documentação**: Atualizar esta documentação
-3. **Compatibilidade**: Manter compatibilidade com Python Agno
-4. **Performance**: Otimizações são sempre bem-vindas
+1. **Tests**: Add tests for new features
+2. **Documentation**: Update this documentation
+3. **Compatibility**: Maintain compatibility with Python Agno
+4. **Performance**: Optimizations are always welcome
 
-## Licença
+## License
 
-MIT License - compatível com o projeto Agno principal.
+MIT License - compatible with the main Agno project.

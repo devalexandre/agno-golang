@@ -136,6 +136,11 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		maptools = toolMap
 	}
 
+	// Add reasoning parameters for o1 models
+	if c.isReasoningModel() && ctx.Value("reasoning") == true {
+		params.ReasoningEffort = shared.ReasoningEffortMedium
+	}
+
 	// Handle streaming
 	if callOptions.StreamingFunc != nil {
 		return c.createStreamingCompletion(ctx, params, callOptions, maptools)
@@ -158,16 +163,19 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	if len(resp.Choices) > 0 {
 		choices := make([]Choices, len(resp.Choices))
 		for i, choice := range resp.Choices {
-			choices[i] = Choices{
-				Index:        int(choice.Index),
-				FinishReason: string(choice.FinishReason),
-				Message: models.MessageResponse{
-					Role:    string(choice.Message.Role),
-					Content: choice.Message.Content,
-				},
+			message := models.MessageResponse{
+				Role:    string(choice.Message.Role),
+				Content: choice.Message.Content,
 			}
-
-			// Handle tool calls in response
+			
+			// For reasoning models, extract reasoning content if available
+			if c.isReasoningModel() && ctx.Value("reasoning") == true {
+				// The reasoning content is typically in the content itself for o1 models
+				// or can be extracted from response metadata
+				message.ReasoningContent = choice.Message.Content
+			}
+			
+			// Handle tool calls if present
 			if len(choice.Message.ToolCalls) > 0 {
 				toolCalls := make([]tools.ToolCall, len(choice.Message.ToolCalls))
 				for j, tc := range choice.Message.ToolCalls {
@@ -180,24 +188,83 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 						},
 					}
 				}
-				choices[i].Message.ToolCalls = toolCalls
+				message.ToolCalls = toolCalls
+			}
+			
+			choices[i] = Choices{
+				Index:        int(choice.Index),
+				FinishReason: string(choice.FinishReason),
+				Message:      message,
 			}
 		}
 		result.Choices = choices
 	}
 
-	// Process tool calls if present - handle both "tool_calls" and "length" finish reasons
-	// Sometimes OpenAI returns "length" when the response is truncated but tool calls are present
+	// Handle tool calls first if present
+	var responseTools []models.Message
 	if len(result.Choices) > 0 && len(result.Choices[0].Message.ToolCalls) > 0 {
 		debugmod := ctx.Value(models.DebugKey)
 		if debugmod != nil && debugmod.(bool) {
 			fmt.Printf("DEBUG: Found %d tool calls with finish reason: %s\n", len(result.Choices[0].Message.ToolCalls), result.Choices[0].FinishReason)
 		}
+
+		// Add assistant message with tool calls
+		responseTools = append(responseTools, models.Message{
+			Role:      models.TypeAssistantRole,
+			Content:   result.Choices[0].Message.Content,
+			ToolCalls: result.Choices[0].Message.ToolCalls,
+		})
+
+		// Execute tools and add responses
+		for i, tc := range result.Choices[0].Message.ToolCalls {
+			if debugmod != nil && debugmod.(bool) {
+				fmt.Printf("DEBUG: Executing tool %d - %s with args: %s\n", i, tc.Function.Name, tc.Function.Arguments)
+			}
+
+			var toolResponse string
+			if tool, ok := maptools[tc.Function.Name]; ok {
+				resTool, err := tool.Execute(tc.Function.Name, []byte(tc.Function.Arguments))
+				if err != nil {
+					toolResponse = fmt.Sprintf("Error executing tool: %v", err)
+				} else {
+					switch v := resTool.(type) {
+					case string:
+						toolResponse = v
+					default:
+						jsonBytes, _ := json.Marshal(v)
+						toolResponse = string(jsonBytes)
+					}
+				}
+			} else {
+				toolResponse = fmt.Sprintf("Tool %s not found", tc.Function.Name)
+			}
+
+			// Add tool response message
+			responseTools = append(responseTools, models.Message{
+				ToolCallID: &tc.ID,
+				Role:       models.TypeToolRole,
+				Content:    toolResponse,
+			})
+		}
+	}
+
+	// Add tool responses to messages for reasoning context
+	allMessages := messages
+	if len(responseTools) > 0 {
+		allMessages = append(allMessages, responseTools...)
+	}
+
+	// For reasoning models, the response already contains reasoning content
+	// No need for separate processing since we set ReasoningEffort in params
+
+	// Process tool calls if present and not using reasoning
+	if len(result.Choices) > 0 && len(result.Choices[0].Message.ToolCalls) > 0 {
 		return c.processToolCalls(ctx, messages, result, maptools, callOptions)
 	}
 
 	return result, nil
 }
+
 
 // StreamChatCompletion performs a streaming chat completion request.
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {
@@ -451,4 +518,13 @@ func toRequestOptions(opts models.ClientOptions) []option.RequestOption {
 	}
 
 	return reqOpts
+}
+
+// isReasoningModel checks if the current model supports reasoning
+func (c *Client) isReasoningModel() bool {
+	// OpenAI reasoning models (o1 series)
+	return strings.Contains(c.model, "o1") ||
+		c.model == "o1-preview" ||
+		c.model == "o1-mini" ||
+		strings.HasPrefix(c.model, "o1-")
 }

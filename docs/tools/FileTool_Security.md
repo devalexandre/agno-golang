@@ -1,123 +1,123 @@
-# FileTool - Sistema de Segurança
+# FileTool - Security System
 
-## 🛡️ Visão Geral
+## 🛡️ Overview
 
-O **FileTool** implementa um sistema de segurança que **desabilita operações de escrita por padrão**. Esta é uma medida de proteção para prevenir modificações acidentais no sistema de arquivos.
+The **FileTool** implements a security system that **disables write operations by default**. This is a protection measure to prevent accidental modifications to the file system.
 
-## 🔒 Comportamento Padrão
+## 🔒 Default Behavior
 
-### Operações Permitidas (Sempre)
-- ✅ **ReadFile**: Leitura de arquivos
-- ✅ **GetFileInfo**: Informações sobre arquivos/diretórios  
-- ✅ **ListDirectory**: Listagem de diretórios
-- ✅ **SearchFiles**: Busca de arquivos
+### Allowed Operations (Always)
+- ✅ **ReadFile**: Reading files
+- ✅ **GetFileInfo**: File/directory information  
+- ✅ **ListDirectory**: Directory listing
+- ✅ **SearchFiles**: File search
 
-### Operações Restritas (Desabilitadas por padrão)
-- ❌ **WriteFile**: Escrita/criação de arquivos
-- ❌ **CreateDirectory**: Criação de diretórios
-- ❌ **DeleteFile**: Exclusão de arquivos/diretórios
+### Restricted Operations (Disabled by default)
+- ❌ **WriteFile**: Writing/creating files
+- ❌ **CreateDirectory**: Creating directories
+- ❌ **DeleteFile**: Deleting files/directories
 
-## 🔧 Como Usar
+## 🔧 How to Use
 
-### 1. FileTool Padrão (Somente Leitura)
+### 1. Default FileTool (Read-Only)
 ```go
 import "github.com/devalexandre/agno-golang/agno/tools"
 
-// Criar FileTool com escrita desabilitada
+// Create FileTool with write disabled
 fileTool := tools.NewFileTool()
 fmt.Println(fileTool.IsWriteEnabled()) // false
 
-// Operações de leitura funcionam normalmente
+// Read operations work normally
 content, err := fileTool.ReadFile(ReadFileParams{Path: "/etc/hostname"})
 
-// Operações de escrita falham com mensagem de segurança
+// Write operations fail with security message
 result, err := fileTool.WriteFile(WriteFileParams{
     Path: "/tmp/test.txt", 
     Content: "test"
 })
-// Retorna: "write operations are disabled for security"
+// Returns: "write operations are disabled for security"
 ```
 
-### 2. Habilitando Escrita Manualmente
+### 2. Enabling Write Manually
 ```go
-// Criar FileTool padrão
+// Create default FileTool
 fileTool := tools.NewFileTool()
 
-// Habilitar escrita quando necessário
+// Enable write when necessary
 fileTool.EnableWrite()
 fmt.Println(fileTool.IsWriteEnabled()) // true
 
-// Agora operações de escrita funcionam
+// Now write operations work
 result, err := fileTool.WriteFile(WriteFileParams{
     Path: "/tmp/test.txt", 
     Content: "test"
 })
 
-// Desabilitar novamente se necessário
+// Disable again if necessary
 fileTool.DisableWrite()
 ```
 
-### 3. FileTool com Escrita Pré-habilitada
+### 3. FileTool with Pre-enabled Write
 ```go
-// Criar FileTool já com escrita habilitada
+// Create FileTool with write already enabled
 fileTool := tools.NewFileToolWithWrite()
 fmt.Println(fileTool.IsWriteEnabled()) // true
 
-// Todas as operações funcionam imediatamente
+// All operations work immediately
 result, err := fileTool.WriteFile(WriteFileParams{
     Path: "/tmp/test.txt", 
     Content: "test"
 })
 ```
 
-## 📊 Métodos de Controle
+## 📊 Control Methods
 
-### Verificação de Status
+### Status Check
 ```go
 enabled := fileTool.IsWriteEnabled() // bool
 ```
 
-### Habilitação/Desabilitação
+### Enable/Disable
 ```go
-fileTool.EnableWrite()   // Habilita escrita
-fileTool.DisableWrite()  // Desabilita escrita
+fileTool.EnableWrite()   // Enable write
+fileTool.DisableWrite()  // Disable write
 ```
 
-### Construtores
+### Constructors
 ```go
-// Escrita desabilitada (padrão)
+// Write disabled (default)
 fileTool := tools.NewFileTool()
 
-// Escrita habilitada
+// Write enabled
 fileTool := tools.NewFileToolWithWrite()
 ```
 
-## 🛠️ Uso com Agentes
+## 🛠️ Usage with Agents
 
-### Agente Somente Leitura (Seguro)
+### Read-Only Agent (Safe)
 ```go
 agent := agent.NewAgent(model)
-agent.AddTool(tools.NewFileTool()) // Apenas leitura
+agent.AddTool(tools.NewFileTool()) // Read-only
 
-// O agente pode ler arquivos mas não modificar
+// Agent can read files but not modify
 agent.PrintResponse("Read the contents of /etc/hostname", false, true)
 ```
 
-### Agente com Escrita (Cuidado)
+### Agent with Write (Caution)
 ```go
 agent := agent.NewAgent(model)
-agent.AddTool(tools.NewFileToolWithWrite()) // Escrita habilitada
+agent.AddTool(tools.NewFileToolWithWrite()) // Write enabled
 
-// O agente pode modificar arquivos
+// Agent can modify files
 agent.PrintResponse("Create a file called test.txt with 'Hello World'", false, true)
 ```
 
-### Controle Dinâmico
+### Dynamic Control
 ```go
 fileTool := tools.NewFileTool()
 agent.AddTool(fileTool)
 
-// Habilitar escrita apenas quando necessário
+// Enable write only when necessary
 fileTool.EnableWrite()
 agent.PrintResponse("Create a backup file", false, true)
 
@@ -125,9 +125,9 @@ agent.PrintResponse("Create a backup file", false, true)
 fileTool.DisableWrite()
 ```
 
-## ⚠️ Mensagens de Erro
+## ⚠️ Error Messages
 
-Quando operações de escrita são tentadas com escrita desabilitada:
+When write operations are attempted with write disabled:
 
 ```json
 {
@@ -138,18 +138,18 @@ Quando operações de escrita são tentadas com escrita desabilitada:
 }
 ```
 
-## 🎯 Casos de Uso
+## 🎯 Use Cases
 
-### Desenvolvimento/Teste (Seguro)
+### Development/Testing (Safe)
 ```go
-// Para desenvolvimento, use FileTool padrão
+// For development, use default FileTool
 fileTool := tools.NewFileTool()
-// Agente pode analisar arquivos mas não modificar nada
+// Agent can analyze files but not modify anything
 ```
 
-### Produção com Controle
+### Production with Control
 ```go
-// Em produção, habilite escrita apenas quando necessário
+// In production, enable write only when necessary
 fileTool := tools.NewFileTool()
 
 if allowFileWrites {
@@ -157,21 +157,21 @@ if allowFileWrites {
 }
 ```
 
-### Automação/Scripts
+### Automation/Scripts
 ```go
-// Para scripts de automação que precisam modificar arquivos
+// For automation scripts that need to modify files
 fileTool := tools.NewFileToolWithWrite()
-// Todas as operações habilitadas desde o início
+// All operations enabled from the start
 ```
 
-## 🏆 Benefícios
+## 🏆 Benefits
 
-1. **Segurança por Padrão**: Previne modificações acidentais
-2. **Controle Granular**: Habilite escrita apenas quando necessário
-3. **Auditoria**: Claro quando escrita está habilitada ou não
-4. **Flexibilidade**: Múltiplas formas de controlar o comportamento
-5. **Transparência**: Mensagens claras sobre restrições
+1. **Security by Default**: Prevents accidental modifications
+2. **Granular Control**: Enable write only when necessary
+3. **Audit**: Clear when write is enabled or not
+4. **Flexibility**: Multiple ways to control behavior
+5. **Transparency**: Clear messages about restrictions
 
 ---
 
-**💡 Dica**: Para máxima segurança em produção, sempre use `NewFileTool()` e habilite escrita apenas temporariamente quando necessário.
+**💡 Tip**: For maximum security in production, always use `NewFileTool()` and enable write only temporarily when necessary.
