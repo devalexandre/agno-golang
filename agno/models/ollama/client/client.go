@@ -52,6 +52,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		Model:    c.model,
 		Messages: msgs,
 		Stream:   &FALSE,
+		Options:  make(map[string]interface{}),
 	}
 
 	// Process options
@@ -80,13 +81,17 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
 		resp_ = resp
 		if len(resp.Message.ToolCalls) == 0 {
-			responseTools = append(responseTools, api.Message{
-				Role:    resp.Message.Role,
-				Content: resp.Message.Content,
-			})
 			return nil
 		}
-		// Process each tool call
+		
+		// Add assistant message with tool calls first
+		responseTools = append(responseTools, api.Message{
+			Role:      resp.Message.Role,
+			Content:   resp.Message.Content,
+			ToolCalls: resp.Message.ToolCalls,
+		})
+		
+		// Process each tool call and add their responses
 		for _, tc := range resp.Message.ToolCalls {
 			if tool, ok := maptools[tc.Function.Name]; ok {
 				args := tc.Function.Arguments
@@ -138,14 +143,11 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 					toolResultStr = string(resultJSON)
 				}
 
-				// Convert tool response to JSON
-				// Add tool response to the response list
+				// Add tool response
 				responseTools = append(responseTools, api.Message{
 					Role:    "tool",
 					Content: toolResultStr,
 				})
-
-				req.Messages = append(req.Messages, responseTools...)
 			}
 		}
 
@@ -156,25 +158,67 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		return nil, err
 	}
 
-	var response *CompletionResponse
-	if len(responseTools) == 1 && responseTools[0].Role != "tool" {
-		resp := resp_
-		response = &CompletionResponse{
-			Model:        resp.Model,
-			EvalTime:     int64(resp.Metrics.EvalDuration),
-			EvalCount:    resp.Metrics.EvalCount,
-			PromptTime:   int64(resp.Metrics.PromptEvalDuration),
-			PromptTokens: resp.Metrics.PromptEvalCount,
-			TotalTime:    int64(resp.Metrics.TotalDuration),
-			Message: ChatMessage{
-				Role:    resp.Message.Role,
-				Content: resp.Message.Content,
-			},
-			Done: resp.Done,
+	// Add tool responses to request messages after tool execution
+	if len(responseTools) > 0 {
+		req.Messages = append(req.Messages, responseTools...)
+	}
+
+	// Reasoning: se contexto tiver reasoning true, usa API customizada
+	if c.model == "deepseek-r1" || c.model == "qwq" || c.model == "qwen2.5-coder" || c.model == "openthinker" || strings.Contains(c.model, "qwen") {
+		if ctx.Value("reasoning") == true {
+			// Use all messages including tool responses for reasoning
+			reasoningMsgs := req.Messages
+			
+			// Make a second request with thinking enabled
+			thinkingReq := &api.ChatRequest{
+				Model:    c.model,
+				Messages: reasoningMsgs,
+				Stream:   &FALSE,
+				Options: map[string]interface{}{
+					"think": true,
+				},
+			}
+
+			var thinkingResp api.ChatResponse
+			err = c.api.Chat(ctx, thinkingReq, func(resp api.ChatResponse) error {
+				thinkingResp = resp
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			return &CompletionResponse{
+				Model: thinkingResp.Model,
+				Message: ChatMessage{
+					Role:     thinkingResp.Message.Role,
+					Content:  thinkingResp.Message.Content,
+					Thinking: "", // Ollama doesn't return thinking field directly
+				},
+				Done: thinkingResp.Done,
+			}, nil
 		}
 	}
-	if len(resp_.Message.ToolCalls) > 0 {
 
+	// Always create a response from the initial response
+	resp := resp_
+	response := &CompletionResponse{
+		Model:        resp.Model,
+		EvalTime:     int64(resp.Metrics.EvalDuration),
+		EvalCount:    resp.Metrics.EvalCount,
+		PromptTime:   int64(resp.Metrics.PromptEvalDuration),
+		PromptTokens: resp.Metrics.PromptEvalCount,
+		TotalTime:    int64(resp.Metrics.TotalDuration),
+		Message: ChatMessage{
+			Role:     resp.Message.Role,
+			Content:  resp.Message.Content,
+			Thinking: "", // Will be populated from raw response if available
+		},
+		Done: resp.Done,
+	}
+
+	// If there were tool calls, make a second request to get the final response
+	if len(resp_.Message.ToolCalls) > 0 {
 		err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
 			response = &CompletionResponse{
 				Model:        resp.Model,
@@ -184,8 +228,9 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 				PromptTokens: resp.Metrics.PromptEvalCount,
 				TotalTime:    int64(resp.Metrics.TotalDuration),
 				Message: ChatMessage{
-					Role:    resp.Message.Role,
-					Content: resp.Message.Content,
+					Role:     resp.Message.Role,
+					Content:  resp.Message.Content,
+					Thinking: "", // Will be populated from raw response if available
 				},
 				Done: resp.Done,
 			}

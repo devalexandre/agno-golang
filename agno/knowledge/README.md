@@ -1,20 +1,20 @@
 # 📚 Agno-Golang PDF Knowledge Base
 
-Esta implementação adiciona suporte completo para bases de conhecimento PDF ao Agno-Golang, seguindo o padrão de compatibilidade nativa do Agno Python.
+This implementation adds complete support for PDF knowledge bases to Agno-Golang, following the native compatibility pattern of Python Agno.
 
-## 🚀 Recursos Implementados
+## 🚀 Implemented Features
 
-### ✅ Funcionalidades Principais
-- **Compatibilidade Nativa**: Interface `knowledge.VectorDB = vectordb.VectorDB` elimina necessidade de adapters
-- **PDFs Locais**: Suporte para arquivos PDF do sistema de arquivos
-- **PDFs de URLs**: Download e processamento automático de PDFs via HTTP/HTTPS
-- **Processamento Paralelo**: Workers paralelos com goroutines para inserção vetorial otimizada
-- **Barras de Progresso**: Feedback visual em tempo real com Unicode progress bars (█░▓▒)
-- **Chunking Inteligente**: Divisão de texto com sobreposição configurável (500 chars padrão)
-- **Metadados Ricos**: Preservação de informações de origem e contexto
-- **Rate Limiting**: Controle de taxa com delays configuráveis para APIs
-- **Retry Logic**: Lógica de retry com backoff exponencial para robustez
-- **Integração Qdrant**: Compatibilidade direta com Qdrant como backend vetorial
+### ✅ Main Features
+- **Native Compatibility**: Interface `knowledge.VectorDB = vectordb.VectorDB` eliminates need for adapters
+- **Local PDFs**: Support for PDF files from file system
+- **URL PDFs**: Automatic download and processing of PDFs via HTTP/HTTPS
+- **Parallel Processing**: Parallel workers with goroutines for optimized vector insertion
+- **Progress Bars**: Real-time visual feedback with Unicode progress bars (█░▓▒)
+- **Smart Chunking**: Text division with configurable overlap (500 chars default)
+- **Rich Metadata**: Preservation of source and context information
+- **Rate Limiting**: Rate control with configurable delays for APIs
+- **Retry Logic**: Retry logic with exponential backoff for robustness
+- **Qdrant Integration**: Direct compatibility with Qdrant as vector backend
 
 ### 🔧 Componentes Implementados
 

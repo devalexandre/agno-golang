@@ -22,7 +22,7 @@ func StructToMap(input interface{}) (map[string]interface{}, error) {
 		field := val.Field(i)
 		structField := typ.Field(i)
 
-		// Ignora campos não exportados
+		// Ignore non-exported fields
 		if structField.PkgPath != "" {
 			continue
 		}
@@ -42,7 +42,7 @@ func StructToMap(input interface{}) (map[string]interface{}, error) {
 			continue
 		}
 
-		// Obtém o nome do campo (usando tag JSON, se disponível)
+		// Get field name (using JSON tag, if available)
 		tag := structField.Tag.Get("json")
 		if tag == "" || tag == "-" {
 			tag = structField.Name
@@ -56,7 +56,7 @@ func StructToMap(input interface{}) (map[string]interface{}, error) {
 	return result, nil
 }
 
-// isEmptyValue retorna true se o valor é nulo, zero ou vazio
+// isEmptyValue returns true if the value is null, zero or empty
 func isEmptyValue(v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Invalid:

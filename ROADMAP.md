@@ -1,59 +1,56 @@
 # Agno-Golang Roadmap 🗺️
 
-> **Baseado na análise do [Agno Framework Python](https://github.com/agno-agi/agno)**  
-> Plano de migração e implementação das funcionalidades principais para Go
+> **Based on analysis of [Agno Framework Python](https://github.com/agno-agi/agno)**  
+> Migration plan and implementation of core features for Go
 
-## 📊 Status Atual vs. Meta
+## 📊 Current Status vs. Goal
 
-### ✅ **IMPLEMENTADO** 
+### ✅ **IMPLEMENTED** 
 ```
 🎯 Level 1: Agents with tools and instructions (COMPLETE)
 🎯 Level 2: Knowledge Base Infrastructure (COMPLETE)
 🎯 Level 3: Basic Memory System (PARTIAL)
 ```
 
-| Componente | Status | Detalhes |
-|------------|--------|----------|
-| **Agent Core** | ✅ | Sistema básico de agentes |
+| Component | Status | Details |
+|-----------|--------|---------|
+| **Agent Core** | ✅ | Basic agent system |
 | **Models** | ✅ | OpenAI, Ollama, Gemini |
 | **Tools System** | ✅ | 8 tools: Web, File, Math, Shell, Weather, DuckDuckGo, Exa, Echo |
-| **Toolkit Interface** | ✅ | Sistema de registro e execução |
+| **Toolkit Interface** | ✅ | Registration and execution system |
 | **Knowledge Base** | ✅ | PDF processing, chunking, parallel loading |
 | **Vector Database** | ✅ | Qdrant, PostgreSQL/pgvector |
 | **Embeddings** | ✅ | OpenAI, Ollama providers |
 | **Memory System** | ✅ | User memories, session storage (complete) |
 | **Session Storage** | ✅ | SQLite implementation (complete) |
-| **RAG Integration** | ✅ | Knowledge + Agent totalmente integrados |
-
-### 📚 **Exemplo Funcional Atual**
-- `examples/pdf_qdrant_agent/main.go`: Knowledge base + busca automática (com RAG completo)
+| **RAG Integration** | ✅ | Knowledge + Agent fully integrated |
 
 ---
 
-## 🎯 **Próximas Implementações**
+## 🎯 **Next Implementations**
 
-### ✅ **PRIORIDADE MÁXIMA: RAG Integration** (Level 2 COMPLETO) 
+### ✅ **TOP PRIORITY: RAG Integration** (Level 2 COMPLETE) 
 ```
 🎯 Level 2: Agents with knowledge and storage (COMPLETE: RAG)
 ```
 
-#### 2.0 **RAG (Retrieval-Augmented Generation)** - *COMPLETO* ✅
-- **Status atual**: Knowledge base funciona e agente acessa automaticamente através do método `prepareMessages`
-- **Exemplo atual**: `examples/pdf_qdrant_agent/main.go` e `examples/rag_complete/main.go` fazem busca automática
-- **Implementado**:
+#### 2.0 **RAG (Retrieval-Augmented Generation)** - *COMPLETE* ✅
+- **Current status**: Knowledge base works and agent accesses automatically through `prepareMessages` method
+- **Current example**: `examples/pdf_qdrant_agent/main.go` and `examples/rag_complete/main.go` perform automatic search
+- **Implemented**:
 
 ```go
-// Agent já tem integração automática com Knowledge
+// Agent already has automatic integration with Knowledge
 type Agent struct {
-    // ... outros campos
+    // ... other fields
     knowledge knowledge.Knowledge
 }
 
-// No método prepareMessages do Agent:
+// In Agent's prepareMessages method:
 func (a *Agent) prepareMessages(prompt string) []models.Message {
-    // ... código existente ...
+    // ... existing code ...
     
-    // Busca automática na knowledge base
+    // Automatic search in knowledge base
     if a.knowledge != nil {
         relevantDocs, err := a.knowledge.Search(a.ctx, prompt, 5)
         if err == nil && len(relevantDocs) > 0 {
@@ -69,108 +66,108 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
         }
     }
     
-    // ... código existente ...
+    // ... existing code ...
 }
 ```
 
-**Arquivos criados**:
-- `/agno/agent/knowledge_agent.go` - AgentKnowledge wrapper (opcional)
-- `/agno/knowledge/rag.go` - RAG pipeline (opcional)
+**Created files**:
+- `/agno/agent/knowledge_agent.go` - AgentKnowledge wrapper (optional)
+- `/agno/knowledge/rag.go` - RAG pipeline (optional)
 
-#### 2.1 **Session Storage** - *IMPLEMENTADO BÁSICO* ✅
-- **Status**: SQLite básico implementado
-- **Melhorias necessárias**:
+#### 2.1 **Session Storage** - *BASIC IMPLEMENTATION* ✅
+- **Status**: Basic SQLite implemented
+- **Needed improvements**:
   - Postgres driver
-  - Session management melhorado
+  - Improved session management
   - Cross-session context
 
-#### 2.2 **Memory System** - *IMPLEMENTADO BÁSICO* ✅
-- **Status**: Sistema básico implementado
-- **Arquivos existentes**:
+#### 2.2 **Memory System** - *BASIC IMPLEMENTATION* ✅
+- **Status**: Basic system implemented
+- **Existing files**:
   - `/agno/memory/memory.go` ✅
   - `/agno/memory/sqlite/sqlite.go` ✅
   - `/agno/memory/contracts.go` ✅
 
 ```go
-// JÁ FUNCIONA:
+// ALREADY WORKS:
 memory := memory.NewMemory(db, model)
 agent.EnableUserMemories = true
 agent.EnableSessionSummaries = true
 agent.Memory = memory
 ```
 
-**Funcionalidades implementadas**:
-- **User Memories**: Extração automática de fatos sobre usuários ✅
-- **Session Summaries**: Resumos automáticos de conversas ✅
-- **SQLite Storage**: Persistência básica ✅
+**Implemented features**:
+- **User Memories**: Automatic extraction of facts about users ✅
+- **Session Summaries**: Automatic conversation summaries ✅
+- **SQLite Storage**: Basic persistence ✅
 
-#### 2.3 **Knowledge System** - *IMPLEMENTADO COM RAG COMPLETO* ✅
-- **Status**: Infraestrutura completa, integração com agent totalmente implementada
-- **Implementado**:
+#### 2.3 **Knowledge System** - *FULLY IMPLEMENTED WITH RAG* ✅
+- **Status**: Complete infrastructure, agent integration fully implemented
+- **Implemented**:
   - Vector Storage: Qdrant, PostgreSQL/pgvector ✅
   - Document Processing: PDF, chunking, parallel loading ✅
   - Embeddings: OpenAI, Ollama ✅
-  - Semantic Search: Funcional ✅
-  - RAG Integration: Completo ✅
-  - Agent Knowledge wrapper: Opcional (já implementado em `/agno/agent/knowledge_agent.go`) ✅
-  - Auto-context injection: Completo (no método `prepareMessages` do Agent) ✅
+  - Semantic Search: Functional ✅
+  - RAG Integration: Complete ✅
+  - Agent Knowledge wrapper: Optional (already implemented in `/agno/agent/knowledge_agent.go`) ✅
+  - Auto-context injection: Complete (in Agent's `prepareMessages` method) ✅
 
 ---
 
-### 🤝 **FASE 3: Multi-Agent Systems** (Level 4)
+### 🤝 **PHASE 3: Multi-Agent Systems** (Level 4)
 ```
 🎯 Level 4: Agent Teams that can reason and collaborate
 ```
 
-#### 3.1 **Agent Teams** - *IMPLEMENTADO BÁSICO* ✅
-- **Status**: Estrutura básica implementada
-- **Arquivos existentes**:
+#### 3.1 **Agent Teams** - *BASIC IMPLEMENTATION* ✅
+- **Status**: Basic structure implemented
+- **Existing files**:
   - `/agno/team/team.go` ✅
   - Storage integration ✅
   - Memory integration ✅
 
-**Modos implementados**:
+**Implemented modes**:
 - Team coordination ✅
 - Multi-agent workflows ✅  
 - Shared memory ✅
 
-**Melhorias necessárias**:
+**Needed improvements**:
 - Advanced reasoning ⏳
 - Dynamic agent assignment ⏳
 - Performance optimization ⏳
 
 ---
 
-### 🚀 **FASE 4: Workflows & Production** (Level 5)
+### 🚀 **PHASE 4: Workflows & Production** (Level 5)
 ```
 🎯 Level 5: Agentic Workflows with state and determinism
 ```
 
-#### 4.1 **Workflow System** - *ESTRUTURA BÁSICA* 🔄
+#### 4.1 **Workflow System** - *BASIC STRUCTURE* 🔄
     Model: openai.GPT4o(),
     SuccessCriteria: "Comprehensive report...",
 }
 ```
 
 #### 3.2 **Reasoning System**
-- **Chain-of-Thought**: Raciocínio passo a passo
-- **ReasoningTools**: Ferramentas específicas de raciocínio
-- **Analysis Framework**: Sistema de análise estruturada
+- **Chain-of-Thought**: Step-by-step reasoning
+- **ReasoningTools**: Specific reasoning tools
+- **Analysis Framework**: Structured analysis system
 
 ---
 
-### 🔀 **FASE 4: Workflows** (Level 5)
+### 🔀 **PHASE 4: Workflows** (Level 5)
 ```
 🎯 Level 5: Agentic Workflows with state and determinism
 ```
 
 #### 4.1 **Workflow Engine**
-- **Baseado em**: [docs.agno.com/workflows](https://docs.agno.com/workflows)
-- **Características**:
-  - **Pure Go**: Lógica em Go puro (como Python puro no original)
-  - **Stateful**: Gerenciamento de estado integrado
-  - **Deterministic**: Resultados reproduzíveis
-  - **Caching**: Cache automático de resultados intermediários
+- **Based on**: [docs.agno.com/workflows](https://docs.agno.com/workflows)
+- **Features**:
+  - **Pure Go**: Logic in pure Go (like pure Python in original)
+  - **Stateful**: Integrated state management
+  - **Deterministic**: Reproducible results
+  - **Caching**: Automatic caching of intermediate results
 
 ```go
 type Workflow struct {
@@ -180,43 +177,43 @@ type Workflow struct {
 }
 
 func (w *Workflow) Run(input string) Iterator[RunResponse] {
-    // Lógica do workflow em Go puro
+    // Pure Go workflow logic
 }
 ```
 
 #### 4.2 **Background Processing**
-- **Async Execution**: Execução assíncrona
-- **Polling System**: Sistema de polling para resultados
-- **Timeout Management**: Gerenciamento de timeouts
+- **Async Execution**: Asynchronous execution
+- **Polling System**: Polling system for results
+- **Timeout Management**: Timeout management
 
 ---
 
-## 🏗️ **Arquitetura Expandida**
+## 🏗️ **Expanded Architecture**
 
-### Estrutura de Diretórios Futura
+### Future Directory Structure
 ```
 agno-golang/
 ├── agno/
-│   ├── agent/           # ✅ Sistema de agentes
-│   ├── models/          # ✅ Provedores de modelos
-│   ├── tools/           # ✅ Ferramentas (WebTool, FileTool, etc.)
-│   ├── storage/         # 🔄 Sistema de persistência
-│   ├── memory/          # 🔄 Sistema de memória
-│   ├── knowledge/       # ⏳ Base de conhecimento
-│   ├── vectordb/        # ⏳ Bancos de dados vetoriais
-│   ├── embedder/        # ⏳ Sistema de embeddings
-│   ├── reasoning/       # ⏳ Sistema de raciocínio
-│   ├── team/            # ⏳ Sistema multi-agente
-│   ├── workflow/        # ⏳ Engine de workflows
-│   ├── api/             # ⏳ APIs REST/GraphQL
-│   └── utils/           # ✅ Utilitários
+│   ├── agent/           # ✅ Agent system
+│   ├── models/          # ✅ Model providers
+│   ├── tools/           # ✅ Tools (WebTool, FileTool, etc.)
+│   ├── storage/         # 🔄 Persistence system
+│   ├── memory/          # 🔄 Memory system
+│   ├── knowledge/       # ⏳ Knowledge base
+│   ├── vectordb/        # ⏳ Vector databases
+│   ├── embedder/        # ⏳ Embedding system
+│   ├── reasoning/       # ⏳ Reasoning system
+│   ├── team/            # ⏳ Multi-agent system
+│   ├── workflow/       # ⏳ Workflow engine
+│   ├── api/             # ⏳ REST/GraphQL APIs
+│   └── utils/           # ✅ Utilities
 ```
 
 ---
 
-## 📅 **Timeline Atualizado**
+## 📅 **Updated Timeline**
 
-### **Q1 2025**: Completar Level 2 
+### **Q1 2025**: Complete Level 2 
 - [x] **Knowledge Base Infrastructure** ✅
 - [x] **Vector Database** ✅ 
 - [x] **Embeddings** ✅
@@ -237,105 +234,107 @@ agno-golang/
 
 ---
 
-## 🚨 **Ações Imediatas**
+## 🚨 **Immediate Actions**
 
-### **PRIORIDADE 1: RAG Integration**
-1. **Criar `AgentKnowledge` wrapper**
-   - Integrar agent + knowledge base
-   - Auto-search durante conversas
-   - Context injection automático
+### **PRIORITY 1: RAG Integration**
+1. **Create `AgentKnowledge` wrapper**
+   - Integrate agent + knowledge base
+   - Auto-search during conversations
+   - Automatic context injection
 
-2. **Implementar RAG pipeline**
+2. **Implement RAG pipeline**
    - Query → Search → Context → Response
    - Document relevance scoring
    - Context size management
 
-3. **Exemplo RAG completo**
+3. **Complete RAG example**
    - `examples/rag_complete/main.go`
    - Demo document Q&A
    - Performance benchmarks
 
-### **PRIORIDADE 2: Memory System Refinement**
-1. **Melhorar session management**
+### **PRIORITY 2: Memory System Refinement**
+1. **Improve session management**
 2. **Cross-session context**
 3. **Memory optimization**
 
-### **PRIORIDADE 3: Team System Enhancement**
+### **PRIORITY 3: Team System Enhancement**
 1. **Advanced reasoning patterns**
 2. **Dynamic collaboration modes**
 3. **Performance monitoring**
 
 ---
 
-## 🎯 **Análise do Status Real**
+## 🎯 **Real Status Analysis**
 
-### **✅ O que REALMENTE está implementado:**
-1. **Level 1**: Completo - Agent + 8 tools + streaming ✅
+### **✅ What's REALLY implemented:**
+1. **Level 1**: Complete - Agent + 8 tools + streaming ✅
 2. **Knowledge Base**: PDF processing, chunking, parallel loading ✅
-3. **Vector Storage**: Qdrant, PostgreSQL/pgvector completo ✅
-4. **Embeddings**: OpenAI, Ollama funcionais ✅
-5. **Memory System**: User memories, session summaries básico ✅
-6. **Team System**: Multi-agent coordination básico ✅
-7. **Session Storage**: SQLite implementado ✅
+3. **Vector Storage**: Qdrant, PostgreSQL/pgvector complete ✅
+4. **Embeddings**: OpenAI, Ollama functional ✅
+5. **Memory System**: User memories, session summaries basic ✅
+6. **Team System**: Multi-agent coordination basic ✅
+7. **Session Storage**: SQLite implemented ✅
 
-### **❌ Gaps críticos para Level 2:**
-1. **Document Q&A**: Sem interface para perguntas diretas
-2. **Advanced RAG Features**: Filtragem avançada por score, gerenciamento de tamanho de contexto
-3. **AgentKnowledge Wrapper**: Implementação opcional para funcionalidades avançadas
-
-### **🔍 Evidência - Exemplo atual:**
-- `examples/pdf_qdrant_agent/main.go`: Faz busca manual, não RAG
-- Agente responde sem contexto dos documentos
-- Integração knowledge + agent ausente
+### **❌ Critical gaps for Level 2:**
+1. **Document Q&A**: No interface for direct questions
+2. **Advanced RAG Features**: Advanced filtering by score, context size management
+3. **AgentKnowledge Wrapper**: Optional implementation for advanced features
 
 ---
 
 ## 🚀 **Call to Action**
 
-### **Próximos Passos Imediatos**
-1. **Aprimorar RAG Integration** (completar Level 2)
-2. **Melhorar AgentKnowledge wrapper**
-3. **Criar exemplo RAG completo**
-4. **Melhorar memory cross-session**
+### **Immediate Next Steps**
+1. **Enhance RAG Integration** (complete Level 2)
+2. **Improve AgentKnowledge wrapper**
+3. **Create complete RAG example**
+4. **Improve cross-session memory**
 
-### **Performance Features** (Manter vantagem Go)
+### **Performance Features** (Maintain Go advantage)
 1. **~3μs Agent instantiation** (vs Python)
 2. **~6.5KB memory footprint** (vs Python)
-3. **Native concurrency** (vantagem do Go)
-4. **Binary distribution** (vantagem do Go)
+3. **Native concurrency** (Go advantage)
+4. **Binary distribution** (Go advantage)
 
 ---
 
-## 💡 **Diferenciais do Agno-Golang**
+## **Comparison: Agno-Golang vs. Python Agno**
 
-### **Vantagens sobre Python**
-- **Performance**: 10-100x mais rápido
-- **Memory**: Footprint muito menor
-- **Deployment**: Binário único, sem dependências
-- **Concurrency**: Goroutines nativas
-- **Type Safety**: Sistema de tipos forte
+### **COMPLETE PARITY + ADVANTAGES**
+- **Performance**: 10-100x faster
+- **Memory**: Much smaller footprint
+- **Deployment**: Single binary, no dependencies
+- **Concurrency**: Native goroutines
+- **Type Safety**: Strong type system
 
-### **Compatibilidade**
-- **API Similar**: Manter API familiar ao Python Agno
-- **Conceitos Idênticos**: Agents, Tools, Memory, etc.
-- **Migration Path**: Facilitar migração de Python
+### **Advantages over Python**
+- **Performance**: 10-100x faster
+- **Memory**: Much smaller footprint
+- **Deployment**: Single binary, no dependencies
+- **Concurrency**: Native goroutines
+- **Type Safety**: Strong type system
+
+### **Compatibility**
+- **Similar API**: Maintain familiar API to Python Agno
+- **Identical Concepts**: Agents, Tools, Memory, etc.
+- **Migration Path**: Facilitate migration from Python
 
 ---
 
 ## 🚀 **Call to Action**
 
-### **Próximos Passos Imediatos**
-1. **Implementar Session Storage** (SQLite primeiro)
-2. **Criar sistema de Memory básico**  
-3. **Adicionar histórico de conversação**
-4. **Testar persistência entre execuções**
+### **Immediate Next Steps**
+1. **Implement Session Storage** (SQLite first)
+2. **Create basic Memory system**  
+3. **Add conversation history**
+4. **Test persistence between executions**
 
-### **Contribuições Esperadas**
+### **Expected Contributions**
 - Storage drivers (Postgres, MongoDB, Redis)
 - Vector database integrations  
 - Reasoning tools
-- Documentation e exemplos
+- Documentation and examples
 
 ---
 
-**🎯 Meta Final**: Criar o framework de agentes de IA mais performático e completo do ecossistema, combinando a simplicidade do Python Agno com a performance superior do Go.
+**🎯 Final Goal**: Create the most performant and complete AI agent framework in the ecosystem, combining the simplicity of Python Agno with Go's superior performance.

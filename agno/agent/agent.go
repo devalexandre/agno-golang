@@ -1,6 +1,3 @@
-// ✅ Fixed file: Pure Golang, no mixing, ready to run main.go
-// agent.go updated for dynamic streaming with dual panel, compilable Go code
-
 package agent
 
 import (
@@ -12,6 +9,9 @@ import (
 	"github.com/devalexandre/agno-golang/agno/knowledge"
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/reasoning"
+	"github.com/pterm/pterm"
+
 	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/devalexandre/agno-golang/agno/utils"
@@ -33,6 +33,13 @@ type AgentConfig struct {
 	Markdown       bool
 	ShowToolsCall  bool
 	Debug          bool
+	//--- Agent Reasoning ---
+	// Enable reasoning by working through the problem step by step.
+	Reasoning         bool
+	ReasoningModel    models.AgnoModelInterface
+	ReasoningAgent    models.AgentInterface
+	ReasoningMinSteps int
+	ReasoningMaxSteps int
 
 	// Memory and Storage Configuration
 	Memory                 memory.MemoryManager
@@ -83,18 +90,36 @@ type Agent struct {
 	messages []models.Message
 	runs     []*storage.AgentRun
 
-	//knowledge
+	// Knowledge
 	knowledge knowledge.Knowledge
+
+	// Reasoning
+	reasoning         bool
+	reasoningModel    models.AgnoModelInterface
+	reasoningAgent    models.AgentInterface
+	reasoningMinSteps int
+	reasoningMaxSteps int
 }
 
 func NewAgent(config AgentConfig) (*Agent, error) {
 	config.Context = context.WithValue(config.Context, models.DebugKey, config.Debug)
 	config.Context = context.WithValue(config.Context, models.ShowToolsCallKey, config.ShowToolsCall)
+	if config.Reasoning {
+		config.Context = context.WithValue(config.Context, "reasoning", true)
+	}
 
 	// Generate session ID if not provided
 	sessionID := config.SessionID
 	if sessionID == "" {
 		sessionID = uuid.New().String()
+	}
+
+	//set mim and max for steps
+	if config.ReasoningMinSteps <= 0 {
+		config.ReasoningMinSteps = 1
+	}
+	if config.ReasoningMaxSteps <= 0 {
+		config.ReasoningMaxSteps = 3
 	}
 
 	agent := &Agent{
@@ -131,6 +156,13 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 
 		//knowledge
 		knowledge: config.Knowledge,
+
+		// Reasoning
+		reasoning:         config.Reasoning,
+		reasoningModel:    config.ReasoningModel,
+		reasoningAgent:    config.ReasoningAgent,
+		reasoningMinSteps: config.ReasoningMinSteps,
+		reasoningMaxSteps: config.ReasoningMaxSteps,
 	}
 
 	// Load existing session if storage is provided
@@ -158,16 +190,72 @@ func (a *Agent) GetRole() string {
 }
 
 func (a *Agent) Run(prompt string) (models.RunResponse, error) {
-	messages := a.prepareMessages(prompt)
+	var messages []models.Message
 
-	bx := utils.ThinkingPanel(prompt)
+	// Add system message and history normally
+	baseMessages := a.prepareMessages(prompt)
+	for _, msg := range baseMessages {
+		if msg.Role == models.TypeUserRole {
+			messages = append(messages, msg)
+		} else {
+			messages = append([]models.Message{msg}, messages...)
+		}
+	}
+
+	//hide if reasoning
+	var bx *pterm.SpinnerPrinter
+	if !a.reasoning {
+		bx = utils.ThinkingPanel(prompt)
+	}
+
+	// use default reasoning agent
+	if a.reasoningAgent == nil && a.reasoning && a.reasoningModel != nil {
+		a.reasoningAgent = NewReasoningAgent(a.ctx, a.reasoningModel, a.tools, a.reasoningMinSteps, a.reasoningMaxSteps)
+	}
+	// Reasoning: insert each step as "assistant" message before user prompt
+	if a.reasoning && a.reasoningModel != nil && a.reasoningAgent != nil {
+		reasoningInterface, ok := a.reasoningAgent.(interface {
+			Reason(prompt string) ([]models.ReasoningStep, error)
+		})
+		if ok {
+			reasoningSteps, err := reasoningInterface.Reason(prompt)
+			if err == nil && len(reasoningSteps) > 0 {
+				var allStepsMsg string
+				for _, step := range reasoningSteps {
+					stepMsg := ""
+					if step.Title != "" {
+						stepMsg += "**" + step.Title + "**\n"
+					}
+					if step.Reasoning != "" {
+						stepMsg += step.Reasoning + "\n"
+					}
+					if step.Action != "" {
+						stepMsg += "Action: " + step.Action + "\n"
+					}
+					if step.Result != "" {
+						stepMsg += "Result: " + step.Result + "\n"
+					}
+					allStepsMsg += stepMsg + "\n"
+				}
+				messages = append(messages, models.Message{
+					Role:    "assistant",
+					Content: allStepsMsg,
+				})
+				//reasoningContent = allStepsMsg
+				//utils.ReasoningPanel(reasoningContent)
+			}
+		}
+	}
 
 	resp, err := a.model.Invoke(a.ctx, messages, models.WithTools(a.tools))
+
 	if err != nil {
 		return models.RunResponse{}, err
 	}
 
-	utils.ResponsePanel(resp.Content, bx, time.Now(), a.markdown)
+	if !a.reasoning {
+		utils.ResponsePanel(resp.Content, bx, time.Now(), a.markdown)
+	}
 
 	// Save run to storage if enabled
 	if a.storage != nil {
@@ -209,94 +297,14 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 		Event:       "RunResponse",
 		Messages: []models.Message{
 			{
-				Role:    models.Role(resp.Role),
-				Content: resp.Content,
+				Role:     models.Role(resp.Role),
+				Content:  resp.Content,
+				Thinking: resp.Thinking,
 			},
 		},
 		Model:     resp.Model,
 		CreatedAt: time.Now().Unix(),
 	}, nil
-}
-
-func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
-	start := time.Now()
-	messages := a.prepareMessages(prompt)
-	//get debug
-	debugmod := a.ctx.Value(models.DebugKey)
-
-	spinnerResponse := utils.ThinkingPanel(prompt)
-	contentChan := utils.StartSimplePanel(spinnerResponse, start, a.markdown)
-	defer close(contentChan)
-
-	// Thinking
-	contentChan <- utils.ContentUpdateMsg{
-		PanelName: "Thinking",
-		Content:   prompt,
-	}
-
-	// Collect streaming content for memory processing
-	var fullResponse strings.Builder
-
-	opts := []models.Option{
-		models.WithTools(a.tools),
-		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-			// Collect content for memory processing
-			fullResponse.Write(chunk)
-
-			if debugmod != nil && debugmod.(bool) {
-				contentChan <- utils.ContentUpdateMsg{
-					PanelName: "Response",
-					Content:   fmt.Sprintf("Response (%.1fs)\n\n%s", time.Since(start).Seconds(), string(chunk)),
-				}
-			}
-
-			return fn(chunk)
-		}),
-	}
-
-	err := a.model.InvokeStream(a.ctx, messages, opts...)
-
-	// After streaming is complete, process memory and storage
-	if err == nil {
-		responseContent := fullResponse.String()
-
-		// Save run to storage if enabled
-		if a.storage != nil {
-			if saveErr := a.saveRun(prompt, responseContent, messages); saveErr != nil && a.debug {
-				fmt.Printf("Warning: Failed to save run: %v\n", saveErr)
-			}
-		}
-
-		// Process memories if enabled
-		if a.memory != nil {
-			if memErr := a.processMemories(prompt, responseContent); memErr != nil && a.debug {
-				fmt.Printf("Warning: Failed to process memories: %v\n", memErr)
-			}
-		}
-
-		// Update message history for next interaction
-		if a.addHistoryToMessages {
-			a.messages = append(a.messages, models.Message{
-				Role:    "user",
-				Content: prompt,
-			})
-			a.messages = append(a.messages, models.Message{
-				Role:    "assistant",
-				Content: responseContent,
-			})
-
-			// Keep only recent messages based on history limit
-			if a.numHistoryRuns > 0 {
-				maxMessages := a.numHistoryRuns * 2 // user + assistant per run
-				if len(a.messages) > maxMessages {
-					a.messages = a.messages[len(a.messages)-maxMessages:]
-				}
-			}
-		}
-	}
-
-	return err
-
 }
 
 // create Print with stream func is optional
@@ -382,7 +390,7 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 			// Verificar se devemos fazer flush do buffer
 			shouldFlush := false
 
-			// Flush se encontrar ponto final, exclamação ou interrogação
+			// Flush if finding period, exclamation or question mark
 			if strings.Contains(streamBuffer, ".") ||
 				strings.Contains(streamBuffer, "!") ||
 				strings.Contains(streamBuffer, "?") {
@@ -395,7 +403,7 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 			}
 
 			if shouldFlush {
-				// Enviar conteúdo acumulado
+				// Send accumulated content
 				contentChan <- utils.ContentUpdateMsg{
 					PanelName: "Response",
 					Content:   streamBuffer,
@@ -413,7 +421,7 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 		return
 	}
 
-	// Flush qualquer conteúdo restante no buffer
+	// Flush any remaining content in buffer
 	if streamBuffer != "" {
 		contentChan <- utils.ContentUpdateMsg{
 			PanelName: "Response",
@@ -683,4 +691,99 @@ func (a *Agent) processMemories(userMessage, agentResponse string) error {
 	}
 
 	return nil
+}
+
+func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
+	start := time.Now()
+	messages := a.prepareMessages(prompt)
+	//get debug
+	debugmod := a.ctx.Value(models.DebugKey)
+
+	spinnerResponse := utils.ThinkingPanel(prompt)
+	contentChan := utils.StartSimplePanel(spinnerResponse, start, a.markdown)
+	defer close(contentChan)
+
+	// Thinking
+	contentChan <- utils.ContentUpdateMsg{
+		PanelName: "Thinking",
+		Content:   prompt,
+	}
+
+	// Collect streaming content for memory processing
+	var fullResponse strings.Builder
+
+	opts := []models.Option{
+		models.WithTools(a.tools),
+		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+			// Collect content for memory processing
+			fullResponse.Write(chunk)
+
+			if debugmod != nil && debugmod.(bool) {
+				contentChan <- utils.ContentUpdateMsg{
+					PanelName: "Response",
+					Content:   fmt.Sprintf("Response (%.1fs)\n\n%s", time.Since(start).Seconds(), string(chunk)),
+				}
+			}
+
+			return fn(chunk)
+		}),
+	}
+
+	err := a.model.InvokeStream(a.ctx, messages, opts...)
+
+	// After streaming is complete, process memory and storage
+	if err == nil {
+		responseContent := fullResponse.String()
+
+		// Save run to storage if enabled
+		if a.storage != nil {
+			if saveErr := a.saveRun(prompt, responseContent, messages); saveErr != nil && a.debug {
+				fmt.Printf("Warning: Failed to save run: %v\n", saveErr)
+			}
+		}
+
+		// Process memories if enabled
+		if a.memory != nil {
+			if memErr := a.processMemories(prompt, responseContent); memErr != nil && a.debug {
+				fmt.Printf("Warning: Failed to process memories: %v\n", memErr)
+			}
+		}
+
+		// Update message history for next interaction
+		if a.addHistoryToMessages {
+			a.messages = append(a.messages, models.Message{
+				Role:    "user",
+				Content: prompt,
+			})
+			a.messages = append(a.messages, models.Message{
+				Role:    "assistant",
+				Content: responseContent,
+			})
+
+			// Keep only recent messages based on history limit
+			if a.numHistoryRuns > 0 {
+				maxMessages := a.numHistoryRuns * 2 // user + assistant per run
+				if len(a.messages) > maxMessages {
+					a.messages = a.messages[len(a.messages)-maxMessages:]
+				}
+			}
+		}
+	}
+
+	return err
+
+}
+
+// Reason executa o reasoning chain usando o modelo configurado.
+func (a *Agent) Reason(prompt string) ([]models.ReasoningStep, error) {
+	// The model needs to implement the Invoke method.
+	invoker := func(ctx context.Context, msgs []string) (string, error) {
+		resp, err := a.Run(prompt)
+		if err != nil {
+			return "", err
+		}
+		return resp.Messages[0].Thinking, nil
+	}
+
+	return reasoning.ReasoningChain(a.ctx, invoker, prompt, a.reasoningMinSteps, a.reasoningMaxSteps)
 }
