@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/devalexandre/agno-golang/agno/models"
@@ -44,21 +45,31 @@ func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, opti
 	if err != nil {
 		return nil, err
 	}
-	var toolCalls []tools.ToolCall
-	for _, tc := range resp.Message.ToolCalls {
-		toolCalls = append(toolCalls, tools.ToolCall{
-			ID:   tc.ID,
-			Type: tc.Type,
-			Function: tools.FunctionCall{
-				Name:      tc.Function.Name,
-				Arguments: string(tc.Function.Arguments),
-			},
-		})
+	
+	// Check if resp is nil
+	if resp == nil {
+		return nil, fmt.Errorf("received nil response from ollama client")
 	}
+	
+	var toolCalls []tools.ToolCall
+	if resp.Message.ToolCalls != nil {
+		for _, tc := range resp.Message.ToolCalls {
+			toolCalls = append(toolCalls, tools.ToolCall{
+				ID:   tc.ID,
+				Type: tc.Type,
+				Function: tools.FunctionCall{
+					Name:      tc.Function.Name,
+					Arguments: string(tc.Function.Arguments),
+				},
+			})
+		}
+	}
+	
 	return &models.MessageResponse{
 		Model:     o.id,
 		Role:      resp.Message.Role,
 		Content:   resp.Message.Content,
+		Thinking:  resp.Message.Thinking,
 		ToolCalls: toolCalls,
 	}, nil
 }
