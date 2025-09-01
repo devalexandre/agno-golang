@@ -15,6 +15,7 @@ type OpenAIRequest struct {
 	ToolChoice          string                 `json:"tool_choice,omitempty"`           // External tool call.
 	Store               *bool                  `json:"store,omitempty"`                 // Store the output.
 	ReasoningEffort     *string                `json:"reasoning_effort,omitempty"`      // Reasoning effort.
+	Verbosity           *string                `json:"verbosity,omitempty"`             // Verbosity level.
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`              // Additional metadata.
 	FrequencyPenalty    *float32               `json:"frequency_penalty,omitempty"`     // Frequency penalty.
 	LogitBias           map[string]float32     `json:"logit_bias,omitempty"`            // Token logits bias.
@@ -67,6 +68,7 @@ type CompletionResponse struct {
 	Choices []Choices `json:"choices"`
 	Usage   Usage     `json:"usage"`
 }
+
 
 // ClientInterface defines the interface for communication with the OpenAI API.
 type ClientInterface interface {

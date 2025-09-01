@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	mkdown "github.com/MichaelMure/go-term-markdown"
@@ -61,6 +62,87 @@ func ThinkingPanel(content string) *pterm.SpinnerPrinter {
 
 	return spinnerResponse
 
+}
+
+// Reasoning Panel Yellow
+func ReasoningPanel(content string) {
+	// Get terminal width to prevent overflow
+	terminalWidth := pterm.GetTerminalWidth()
+
+	// Ensure minimum width to prevent negative calculations
+	if terminalWidth < 30 {
+		terminalWidth = 80 // Default fallback
+	}
+
+	// Use a fixed width that works well for most terminals
+	panelWidth := 75
+	if terminalWidth < panelWidth {
+		panelWidth = terminalWidth - 4
+	}
+
+	// Calculate available content width (account for borders and padding)
+	maxContentWidth := panelWidth - 4 // "│ " + " │"
+
+	// Process content lines
+	lines := strings.Split(content, "\n")
+	var processedLines []string
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			processedLines = append(processedLines, "")
+			continue
+		}
+
+		// Wrap long lines
+		for len(line) > maxContentWidth {
+			processedLines = append(processedLines, line[:maxContentWidth])
+			line = line[maxContentWidth:]
+		}
+		if len(line) > 0 {
+			processedLines = append(processedLines, line)
+		}
+	}
+
+	// Create borders with fixed width
+	title := " Reasoning... "
+	titleLen := len(title)
+	remainingWidth := panelWidth - titleLen - 4 // 4 for "┌─" and "─┐"
+	if remainingWidth < 0 {
+		remainingWidth = 0
+	}
+
+	leftPadding := remainingWidth / 2
+	rightPadding := remainingWidth - leftPadding
+
+	topBorder := "┌─" + strings.Repeat("─", leftPadding) + title + strings.Repeat("─", rightPadding) + "─┐"
+	bottomBorder := "└" + strings.Repeat("─", panelWidth-2) + "┘"
+
+	// Print the panel
+	fmt.Printf("\n%s\n", pterm.LightYellow(topBorder))
+
+	// Add empty line for spacing
+	emptyPadding := strings.Repeat(" ", maxContentWidth)
+	fmt.Printf("%s %s %s\n", pterm.LightYellow("│"), emptyPadding, pterm.LightYellow("│"))
+
+	for _, line := range processedLines {
+		fmt.Println(line)
+		// Pad line to fit exactly within borders
+		padding := maxContentWidth - len(line)
+		if padding < 0 {
+			padding = 0
+			line = line[:maxContentWidth]
+		}
+		fmt.Printf("%s %s%s %s\n",
+			pterm.LightYellow("│"),
+			line,
+			strings.Repeat(" ", padding),
+			pterm.LightYellow("│"))
+	}
+
+	// Add empty line for spacing
+	fmt.Printf("%s %s %s\n", pterm.LightYellow("│"), emptyPadding, pterm.LightYellow("│"))
+
+	fmt.Printf("%s\n\n", pterm.LightYellow(bottomBorder))
 }
 
 // Debug Panel

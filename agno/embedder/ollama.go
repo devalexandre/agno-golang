@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// OllamaEmbedder embedder usando Ollama (local)
+// OllamaEmbedder embedder using Ollama (local)
 type OllamaEmbedder struct {
 	BaseEmbedder
 	Host       string
@@ -27,13 +27,13 @@ type OllamaEmbeddingRequest struct {
 	Options map[string]interface{} `json:"options,omitempty"`
 }
 
-// OllamaEmbeddingResponse estrutura da resposta do Ollama
+// OllamaEmbeddingResponse Ollama response structure
 type OllamaEmbeddingResponse struct {
 	Embeddings [][]float64 `json:"embeddings"`
 	Model      string      `json:"model"`
 }
 
-// NewOllamaEmbedder cria um novo embedder Ollama
+// NewOllamaEmbedder creates a new Ollama embedder
 func NewOllamaEmbedder(options ...func(*OllamaEmbedder)) *OllamaEmbedder {
 	embedder := &OllamaEmbedder{
 		BaseEmbedder: BaseEmbedder{
@@ -43,7 +43,7 @@ func NewOllamaEmbedder(options ...func(*OllamaEmbedder)) *OllamaEmbedder {
 		Host:       "http://localhost:11434",
 		Model:      "nomic-embed-text",
 		HTTPClient: &http.Client{},
-		Timeout:    60 * time.Second, // Embeddings podem demorar mais
+		Timeout:    60 * time.Second, // Embeddings can take longer
 	}
 
 	// Apply options
@@ -51,20 +51,20 @@ func NewOllamaEmbedder(options ...func(*OllamaEmbedder)) *OllamaEmbedder {
 		option(embedder)
 	}
 
-	// Configurar timeout no client HTTP
+	// Configure timeout on HTTP client
 	embedder.HTTPClient.Timeout = embedder.Timeout
 
 	return embedder
 }
 
-// WithOllamaHost configura o host do Ollama
+// WithOllamaHost configures the Ollama host
 func WithOllamaHost(host string) func(*OllamaEmbedder) {
 	return func(e *OllamaEmbedder) {
 		e.Host = host
 	}
 }
 
-// WithOllamaModel configura o modelo
+// WithOllamaModel configures the model
 func WithOllamaModel(model string, dimensions int) func(*OllamaEmbedder) {
 	return func(e *OllamaEmbedder) {
 		e.Model = model
@@ -73,7 +73,7 @@ func WithOllamaModel(model string, dimensions int) func(*OllamaEmbedder) {
 	}
 }
 
-// WithOllamaTimeout configura o timeout
+// WithOllamaTimeout configures the timeout
 func WithOllamaTimeout(timeout time.Duration) func(*OllamaEmbedder) {
 	return func(e *OllamaEmbedder) {
 		e.Timeout = timeout
@@ -141,7 +141,7 @@ func (e *OllamaEmbedder) GetEmbedding(text string) ([]float64, error) {
 
 	embedding := response.Embeddings[0]
 
-	// Validar dimensões
+	// Validate dimensions
 	if len(embedding) != e.Dimensions {
 		return nil, fmt.Errorf("%w: expected %d, got %d", ErrInvalidDimension, e.Dimensions, len(embedding))
 	}
@@ -156,7 +156,7 @@ func (e *OllamaEmbedder) GetEmbeddingAndUsage(text string) ([]float64, map[strin
 		return nil, nil, err
 	}
 
-	// Ollama não fornece informações de uso detalhadas
+	// Ollama doesn't provide detailed usage information
 	usage := map[string]interface{}{
 		"model":      e.Model,
 		"dimensions": len(embedding),

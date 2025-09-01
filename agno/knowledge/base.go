@@ -12,37 +12,37 @@ import (
 	"github.com/devalexandre/agno-golang/agno/vectordb"
 )
 
-// Knowledge é a interface base para bases de conhecimento
+// Knowledge is the base interface for knowledge bases
 type Knowledge interface {
-	// Load carrega documentos na base de conhecimento
+	// Load loads documents into the knowledge base
 	Load(ctx context.Context, recreate bool) error
 
-	// LoadDocument carrega um documento específico
+	// LoadDocument loads a specific document
 	LoadDocument(ctx context.Context, doc document.Document) error
 
-	// Search busca documentos na base de conhecimento
+	// Search searches for documents in the knowledge base
 	Search(ctx context.Context, query string, numDocuments int) ([]*SearchResult, error)
 
-	// Drop remove todos os documentos da base
+	// Drop removes all documents from the base
 	Drop(ctx context.Context) error
 
-	// Exists verifica se a base de conhecimento existe
+	// Exists checks if the knowledge base exists
 	Exists(ctx context.Context) (bool, error)
 
-	// GetCount retorna o número de documentos na base
+	// GetCount returns the number of documents in the base
 	GetCount(ctx context.Context) (int64, error)
 
-	// GetInfo retorna informações sobre a base de conhecimento
+	// GetInfo returns information about the knowledge base
 	GetInfo() KnowledgeInfo
 }
 
-// VectorDB é uma alias para vectordb.VectorDB para compatibilidade nativa como no Agno Python
+// VectorDB is an alias for vectordb.VectorDB for native compatibility like in Python Agno
 type VectorDB = vectordb.VectorDB
 
-// SearchResult é uma alias para vectordb.SearchResult para compatibilidade nativa
+// SearchResult is an alias for vectordb.SearchResult for native compatibility
 type SearchResult = vectordb.SearchResult
 
-// KnowledgeInfo contém informações sobre a base de conhecimento
+// KnowledgeInfo contains information about the knowledge base
 type KnowledgeInfo struct {
 	Name        string                 `json:"name"`
 	Type        string                 `json:"type"`
@@ -52,13 +52,13 @@ type KnowledgeInfo struct {
 	Metadata    map[string]interface{} `json:"metadata"`
 }
 
-// SearchFilters define filtros para busca
+// SearchFilters define filters for search
 type SearchFilters struct {
 	Include map[string]interface{} `json:"include,omitempty"`
 	Exclude map[string]interface{} `json:"exclude,omitempty"`
 }
 
-// BaseKnowledge implementação base para bases de conhecimento
+// BaseKnowledge base implementation for knowledge bases
 type BaseKnowledge struct {
 	Name         string
 	VectorDB     VectorDB
@@ -69,7 +69,7 @@ type BaseKnowledge struct {
 	Metadata     map[string]interface{}
 }
 
-// NewBaseKnowledge cria uma nova instância de BaseKnowledge
+// NewBaseKnowledge creates a new BaseKnowledge instance
 func NewBaseKnowledge(name string, vectorDB VectorDB) *BaseKnowledge {
 	return &BaseKnowledge{
 		Name:         name,
@@ -79,7 +79,7 @@ func NewBaseKnowledge(name string, vectorDB VectorDB) *BaseKnowledge {
 	}
 }
 
-// GetInfo retorna informações sobre a base de conhecimento
+// GetInfo returns information about the knowledge base
 func (k *BaseKnowledge) GetInfo() KnowledgeInfo {
 	return KnowledgeInfo{
 		Name:        k.Name,
@@ -91,7 +91,7 @@ func (k *BaseKnowledge) GetInfo() KnowledgeInfo {
 	}
 }
 
-// SearchDocuments busca documentos com filtros
+// SearchDocuments searches documents with filters
 func (k *BaseKnowledge) SearchDocuments(ctx context.Context, query string, numDocuments int, filters map[string]interface{}) ([]document.Document, error) {
 	if k.VectorDB == nil {
 		return nil, fmt.Errorf("vector database not configured")
@@ -111,25 +111,25 @@ func (k *BaseKnowledge) SearchDocuments(ctx context.Context, query string, numDo
 	return docs, nil
 }
 
-// LoadDocuments carrega documentos na base de conhecimento
+// LoadDocuments loads documents into the knowledge base
 func (k *BaseKnowledge) LoadDocuments(ctx context.Context, docs []document.Document, recreate bool) error {
 	if k.VectorDB == nil {
 		return fmt.Errorf("vector database not configured")
 	}
 
-	// Verificar se deve recriar
+	// Check if should recreate
 	if recreate {
 		if err := k.VectorDB.Drop(ctx); err != nil {
-			// Ignorar erro se não existir
+			// Ignore error if doesn't exist
 		}
 	}
 
-	// Criar tabela se não existir
+	// Create table if doesn't exist
 	if err := k.VectorDB.Create(ctx); err != nil {
 		fmt.Println("There was VecctorDb skip create")
 	}
 
-	// Inserir documentos
+	// Insert documents
 	if len(docs) > 0 {
 		// Convert []document.Document to []*document.Document
 		docPtrs := make([]*document.Document, len(docs))
@@ -156,7 +156,7 @@ func (k *BaseKnowledge) Search(ctx context.Context, query string, numDocuments i
 	return k.SearchDocuments(ctx, query, numDocuments, filters)
 }
 
-// Add adiciona documentos à base de conhecimento
+// Add adds documents to the knowledge base
 func (k *BaseKnowledge) Add(ctx context.Context, documents []document.Document) error {
 	if k.VectorDB == nil {
 		return fmt.Errorf("vector database not configured")
@@ -171,7 +171,7 @@ func (k *BaseKnowledge) Add(ctx context.Context, documents []document.Document) 
 	return k.VectorDB.Insert(ctx, docPtrs, nil)
 }
 
-// Exists verifica se a base de conhecimento existe
+// Exists checks if the knowledge base exists
 func (k *BaseKnowledge) Exists(ctx context.Context) (bool, error) {
 	if k.VectorDB == nil {
 		return false, fmt.Errorf("vector database not configured")
@@ -180,7 +180,7 @@ func (k *BaseKnowledge) Exists(ctx context.Context) (bool, error) {
 	return k.VectorDB.Exists(ctx)
 }
 
-// Drop remove a base de conhecimento
+// Drop removes the knowledge base
 func (k *BaseKnowledge) Drop(ctx context.Context) error {
 	if k.VectorDB == nil {
 		return fmt.Errorf("vector database not configured")
@@ -189,19 +189,19 @@ func (k *BaseKnowledge) Drop(ctx context.Context) error {
 	return k.VectorDB.Drop(ctx)
 }
 
-// Load implementa Knowledge interface
+// Load implements Knowledge interface
 func (k *BaseKnowledge) Load(ctx context.Context, recreate bool) error {
-	// Implementação padrão vazia - deve ser sobrescrita pelas subclasses
+	// Empty default implementation - should be overridden by subclasses
 	return nil
 }
 
-// SetEmbedder configura o embedder
+// SetEmbedder configures the embedder
 func (k *BaseKnowledge) SetEmbedder(emb embedder.Embedder) {
 	k.Embedder = emb
 	// Note: VectorDB implementation should handle embedder internally
 }
 
-// GetEmbedder retorna o embedder configurado
+// GetEmbedder returns the configured embedder
 func (k *BaseKnowledge) GetEmbedder() embedder.Embedder {
 	if k.Embedder != nil {
 		return k.Embedder
@@ -212,7 +212,7 @@ func (k *BaseKnowledge) GetEmbedder() embedder.Embedder {
 	return nil
 }
 
-// ValidateDocuments valida documentos antes de processar
+// ValidateDocuments validates documents before processing
 func ValidateDocuments(docs []document.Document) error {
 	if len(docs) == 0 {
 		return fmt.Errorf("no documents to process")
@@ -230,21 +230,21 @@ func ValidateDocuments(docs []document.Document) error {
 	return nil
 }
 
-// SanitizeFileName sanitiza nome de arquivo para usar como nome de coleção/tabela
+// SanitizeFileName sanitizes filename to use as collection/table name
 func SanitizeFileName(filename string) string {
-	// Remover extensão
+	// Remove extension
 	name := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
 
-	// Substituir caracteres especiais por underscore
+	// Replace special characters with underscore
 	name = strings.ReplaceAll(name, "-", "_")
 	name = strings.ReplaceAll(name, " ", "_")
 	name = strings.ReplaceAll(name, ".", "_")
 
-	// Garantir que começa com letra
+	// Ensure it starts with a letter
 	if len(name) > 0 && !((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z')) {
 		name = "kb_" + name
 	}
 
-	// Converter para minúsculas
+	// Convert to lowercase
 	return strings.ToLower(name)
 }
