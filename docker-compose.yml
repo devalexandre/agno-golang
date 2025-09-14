@@ -1,0 +1,7 @@
+services:
+  agentos:
+    image: your-org/agentos:latest
+    environment:
+      - OS_SECURITY_KEY=OSK_YoGeUTkrWv4DHjIwxAdZ
+    ports:
+      - "8000:8000"
