@@ -252,6 +252,10 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 	router.GET("/config", os.configHandler)
 	router.HEAD("/config", os.configHandler)
 
+	// Models endpoint - public (same as Python)
+	router.GET("/models", os.modelsHandler)
+	router.HEAD("/models", os.modelsHandler)
+
 	// Agent and Team operations - needed by UI
 	router.POST("/agents/:id/runs", os.agentRunsHandler)
 	router.POST("/teams/:id/runs", os.teamRunsHandler)
@@ -264,9 +268,6 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 	protected := router.Group("/")
 	protected.Use(os.authMiddleware())
 	{
-		// Models endpoint
-		protected.GET("/models", os.modelsHandler)
-
 		// Version endpoint
 		protected.GET("/version", os.versionHandler)
 	}
@@ -335,9 +336,15 @@ func (os *AgentOS) Serve() error {
 		cloudEndpoint = "https://os-stg.agno.com/"
 	}
 
+	// Determine protocol
+	protocol := "http"
+	if os.settings.EnableTLS {
+		protocol = "https"
+	}
+
 	log.Printf("🚀 AgentOS '%s' starting on %s:%d", os.name, os.settings.Host, os.settings.Port)
-	log.Printf("📊 Dashboard: http://%s:%d", os.settings.Host, os.settings.Port)
-	log.Printf("⚙️  Configuration: http://%s:%d/config", os.settings.Host, os.settings.Port)
+	log.Printf("📊 Dashboard: %s://%s:%d", protocol, os.settings.Host, os.settings.Port)
+	log.Printf("⚙️  Configuration: %s://%s:%d/config", protocol, os.settings.Host, os.settings.Port)
 	log.Printf("☁️  Cloud Platform: %s", cloudEndpoint)
 	log.Printf("🔑 Security Key: %s", func() string {
 		if os.settings.SecurityKey != "" {
@@ -349,6 +356,15 @@ func (os *AgentOS) Serve() error {
 	// Note: Cloud will auto-discover this AgentOS instance
 	// Same as Python AgentOS - no manual registration needed
 
+	// Start server with TLS if enabled
+	if os.settings.EnableTLS {
+		if os.settings.CertFile == "" || os.settings.KeyFile == "" {
+			return fmt.Errorf("TLS enabled but cert_file or key_file not provided")
+		}
+		log.Printf("🔒 Starting HTTPS server with TLS certificate: %s", os.settings.CertFile)
+		return os.server.ListenAndServeTLS(os.settings.CertFile, os.settings.KeyFile)
+	}
+	
 	return os.server.ListenAndServe()
 }
 
