@@ -906,15 +906,15 @@ func (os *AgentOS) modelsHandler(c *gin.Context) {
 	if os.config != nil && len(os.config.AvailableModels) > 0 {
 		for _, modelID := range os.config.AvailableModels {
 			models = append(models, Model{
-				ID:       modelID,
-				Provider: "unknown", // We don't have provider info in config
+				ID:       &modelID,
+				Provider: stringPtr("unknown"), // We don't have provider info in config
 			})
 		}
 	} else {
 		// Return some default models as examples
 		models = []Model{
-			{ID: "gpt-4", Provider: "openai"},
-			{ID: "gpt-3.5-turbo", Provider: "openai"},
+			{ID: stringPtr("gpt-4"), Provider: stringPtr("openai")},
+			{ID: stringPtr("gpt-3.5-turbo"), Provider: stringPtr("openai")},
 		}
 	}
 

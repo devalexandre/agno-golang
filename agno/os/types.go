@@ -8,12 +8,6 @@ import (
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
 
-// Model represents a model configuration
-type Model struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-}
-
 // DomainConfig represents the base configuration for any AgentOS domain
 type DomainConfig struct {
 	DisplayName *string `json:"display_name,omitempty" yaml:"display_name,omitempty"`
@@ -117,6 +111,10 @@ type AgentOSSettings struct {
 	EnableMCP   bool          `json:"enable_mcp" yaml:"enable_mcp" default:"false"`
 	Telemetry   bool          `json:"telemetry" yaml:"telemetry" default:"false"`
 	SecurityKey string        `json:"security_key,omitempty" yaml:"security_key,omitempty"`
+	// TLS Configuration
+	EnableTLS bool   `json:"enable_tls" yaml:"enable_tls" default:"false"`
+	CertFile  string `json:"cert_file,omitempty" yaml:"cert_file,omitempty"`
+	KeyFile   string `json:"key_file,omitempty" yaml:"key_file,omitempty"`
 }
 
 // AgentOSOptions represents all options for creating an AgentOS instance
