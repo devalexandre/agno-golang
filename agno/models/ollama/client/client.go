@@ -83,14 +83,14 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		if len(resp.Message.ToolCalls) == 0 {
 			return nil
 		}
-		
+
 		// Add assistant message with tool calls first
 		responseTools = append(responseTools, api.Message{
 			Role:      resp.Message.Role,
 			Content:   resp.Message.Content,
 			ToolCalls: resp.Message.ToolCalls,
 		})
-		
+
 		// Process each tool call and add their responses
 		for _, tc := range resp.Message.ToolCalls {
 			if tool, ok := maptools[tc.Function.Name]; ok {
@@ -168,7 +168,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		if ctx.Value("reasoning") == true {
 			// Use all messages including tool responses for reasoning
 			reasoningMsgs := req.Messages
-			
+
 			// Make a second request with thinking enabled
 			thinkingReq := &api.ChatRequest{
 				Model:    c.model,
@@ -468,27 +468,25 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 			}
 
 			// Define parameters in the format expected by Ollama
-			parameters := struct {
-				Type       string   `json:"type"`
-				Required   []string `json:"required"`
-				Properties map[string]struct {
-					Type        string   `json:"type"`
-					Description string   `json:"description"`
-					Enum        []string `json:"enum,omitempty"`
-				} `json:"properties"`
-			}{
-				Type:       "object",
-				Required:   requiredFields,
-				Properties: ollamaProps,
-			}
-
 			// Add the tool to the list
 			apiTools = append(apiTools, api.Tool{
 				Type: "function",
 				Function: api.ToolFunction{
 					Name:        methodName,
 					Description: tool.GetDescription(),
-					Parameters:  parameters,
+					Parameters: struct {
+						Type       string   `json:"type"`
+						Required   []string `json:"required"`
+						Properties map[string]struct {
+							Type        string   `json:"type"`
+							Description string   `json:"description"`
+							Enum        []string `json:"enum,omitempty"`
+						} `json:"properties"`
+					}{
+						Type:       "object",
+						Required:   requiredFields,
+						Properties: ollamaProps,
+					},
 				},
 			})
 
