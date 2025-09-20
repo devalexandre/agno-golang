@@ -10,7 +10,6 @@ import (
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/reasoning"
-	"github.com/pterm/pterm"
 
 	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
@@ -202,12 +201,6 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 		}
 	}
 
-	//hide if reasoning
-	var bx *pterm.SpinnerPrinter
-	if !a.reasoning {
-		bx = utils.ThinkingPanel(prompt)
-	}
-
 	// use default reasoning agent
 	if a.reasoningAgent == nil && a.reasoning && a.reasoningModel != nil {
 		a.reasoningAgent = NewReasoningAgent(a.ctx, a.reasoningModel, a.tools, a.reasoningMinSteps, a.reasoningMaxSteps)
@@ -251,10 +244,6 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 
 	if err != nil {
 		return models.RunResponse{}, err
-	}
-
-	if !a.reasoning {
-		utils.ResponsePanel(resp.Content, bx, time.Now(), a.markdown)
 	}
 
 	// Save run to storage if enabled
@@ -694,20 +683,7 @@ func (a *Agent) processMemories(userMessage, agentResponse string) error {
 }
 
 func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
-	start := time.Now()
 	messages := a.prepareMessages(prompt)
-	//get debug
-	debugmod := a.ctx.Value(models.DebugKey)
-
-	spinnerResponse := utils.ThinkingPanel(prompt)
-	contentChan := utils.StartSimplePanel(spinnerResponse, start, a.markdown)
-	defer close(contentChan)
-
-	// Thinking
-	contentChan <- utils.ContentUpdateMsg{
-		PanelName: "Thinking",
-		Content:   prompt,
-	}
 
 	// Collect streaming content for memory processing
 	var fullResponse strings.Builder
@@ -717,13 +693,6 @@ func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			// Collect content for memory processing
 			fullResponse.Write(chunk)
-
-			if debugmod != nil && debugmod.(bool) {
-				contentChan <- utils.ContentUpdateMsg{
-					PanelName: "Response",
-					Content:   fmt.Sprintf("Response (%.1fs)\n\n%s", time.Since(start).Seconds(), string(chunk)),
-				}
-			}
 
 			return fn(chunk)
 		}),
