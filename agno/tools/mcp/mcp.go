@@ -30,34 +30,14 @@ type MCPTool struct {
 	logger         *slog.Logger
 
 	// State management
-	mu          sync.RWMutex
-	connected   bool
-	initialized bool
-	cancelFunc  context.CancelFunc
+	mu         sync.RWMutex
+	connected  bool
+	cancelFunc context.CancelFunc
 }
 
-// Parameters for different MCP operations
-type ListDirectoryParams struct {
-	Path string `json:"path" description:"Directory path to list files and subdirectories"`
-}
-
-type ReadFileParams struct {
-	Path string `json:"path" description:"File path to read"`
-	Head int    `json:"head,omitempty" description:"Number of lines from beginning (optional)"`
-	Tail int    `json:"tail,omitempty" description:"Number of lines from end (optional)"`
-}
-
-type WriteFileParams struct {
-	Path    string `json:"path" description:"File path to write"`
-	Content string `json:"content" description:"Content to write to file"`
-}
-
-type DirectoryTreeParams struct {
-	Path string `json:"path" description:"Directory path to show tree structure"`
-}
-
-type GetFileInfoParams struct {
-	Path string `json:"path" description:"File path to get information about"`
+// GenericParams represents parameters for any MCP tool call
+type GenericParams struct {
+	Args map[string]interface{} `json:"args" description:"Arguments for the MCP tool"`
 }
 
 // NewMCPTool creates a new MCP tool instance
@@ -72,8 +52,8 @@ func NewMCPTool(command string, timeoutSeconds int) (*MCPTool, error) {
 
 	// Initialize toolkit
 	tk := toolkit.NewToolkit()
-	tk.Name = "MCPFilesystem"
-	tk.Description = "MCP filesystem tools for file and directory operations using Model Context Protocol"
+	tk.Name = "MCP"
+	tk.Description = "MCP (Model Context Protocol) tools - dynamically loaded from MCP server"
 
 	tool := &MCPTool{
 		Toolkit:        tk,
@@ -82,17 +62,11 @@ func NewMCPTool(command string, timeoutSeconds int) (*MCPTool, error) {
 		logger:         logger,
 	}
 
-	// Register MCP methods following the same pattern as WeatherTool
-	tool.Toolkit.Register("ListDirectory", tool, tool.ListDirectory, ListDirectoryParams{})
-	tool.Toolkit.Register("ReadFile", tool, tool.ReadFile, ReadFileParams{})
-	tool.Toolkit.Register("WriteFile", tool, tool.WriteFile, WriteFileParams{})
-	tool.Toolkit.Register("DirectoryTree", tool, tool.DirectoryTree, DirectoryTreeParams{})
-	tool.Toolkit.Register("GetFileInfo", tool, tool.GetFileInfo, GetFileInfoParams{})
-
+	// Note: Tools will be registered dynamically after connection via registerDynamicTools()
 	return tool, nil
 }
 
-// Connect establishes connection to MCP server
+// Connect establishes connection to MCP server and registers dynamic tools
 func (m *MCPTool) Connect(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -100,8 +74,6 @@ func (m *MCPTool) Connect(ctx context.Context) error {
 	if m.connected {
 		return nil
 	}
-
-	m.logger.Info("Connecting to MCP server", "command", m.command)
 
 	// Create context with cancel for cleanup
 	ctx, cancel := context.WithCancel(ctx)
@@ -119,7 +91,7 @@ func (m *MCPTool) Connect(ctx context.Context) error {
 
 	// Create MCP transport using CommandTransport
 	transport := &mcp.CommandTransport{Command: cmd}
-	
+
 	// Start MCP session
 	session, err := m.client.Connect(ctx, transport, nil)
 	if err != nil {
@@ -129,52 +101,130 @@ func (m *MCPTool) Connect(ctx context.Context) error {
 	m.session = session
 	m.connected = true
 
-	m.logger.Info("Successfully connected to MCP server")
+	// Register dynamic tools from the MCP server
+	if err := m.registerDynamicTools(ctx); err != nil {
+		m.logger.Error("Failed to register dynamic tools", "error", err)
+		// Don't fail the connection, but log the error
+	}
+
 	return nil
 }
 
-// ListDirectory lists files in a directory
-func (m *MCPTool) ListDirectory(params ListDirectoryParams) (interface{}, error) {
-	return m.callMCPTool("list_directory", map[string]interface{}{
-		"path": params.Path,
-	})
-}
-
-// ReadFile reads content from a file
-func (m *MCPTool) ReadFile(params ReadFileParams) (interface{}, error) {
-	args := map[string]interface{}{
-		"path": params.Path,
+// registerDynamicTools queries the MCP server for available tools and registers them dynamically
+func (m *MCPTool) registerDynamicTools(ctx context.Context) error {
+	if !m.connected || m.session == nil {
+		return errors.New("not connected to MCP server")
 	}
-	if params.Head > 0 {
-		args["head"] = params.Head
+
+	// List available tools from MCP server
+	toolsResponse, err := m.session.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		return fmt.Errorf("failed to list tools from MCP server: %w", err)
 	}
-	if params.Tail > 0 {
-		args["tail"] = params.Tail
+
+	// Register each tool dynamically
+	for _, tool := range toolsResponse.Tools {
+		// Create a wrapper function for this specific MCP tool
+		toolName := tool.Name
+		toolFunc := m.createToolWrapper(toolName)
+
+		// Generate parameter struct based on tool schema
+		paramStruct := m.generateParamStruct(tool)
+
+		// Register the tool with the toolkit
+		m.Toolkit.Register(tool.Name, m, toolFunc, paramStruct)
 	}
-	return m.callMCPTool("read_file", args)
+
+	return nil
 }
 
-// WriteFile writes content to a file
-func (m *MCPTool) WriteFile(params WriteFileParams) (interface{}, error) {
-	return m.callMCPTool("write_file", map[string]interface{}{
-		"path":    params.Path,
-		"content": params.Content,
-	})
+// createToolWrapper creates a wrapper function for a specific MCP tool
+func (m *MCPTool) createToolWrapper(toolName string) interface{} {
+	// Return different wrapper functions based on tool type
+	switch toolName {
+	case "list_directory":
+		return func(params struct {
+			Path string `json:"path" description:"Directory path to list files and subdirectories. Use empty string or '.' for current directory"`
+		}) (interface{}, error) {
+			args := map[string]interface{}{
+				"path": params.Path,
+			}
+			if params.Path == "" {
+				args["path"] = "."
+			}
+			return m.callMCPTool(toolName, args)
+		}
+	case "read_file", "read_text_file":
+		return func(params struct {
+			Path string `json:"path" description:"File path to read"`
+		}) (interface{}, error) {
+			args := map[string]interface{}{
+				"path": params.Path,
+			}
+			return m.callMCPTool(toolName, args)
+		}
+	case "write_file":
+		return func(params struct {
+			Path    string `json:"path" description:"File path to write"`
+			Content string `json:"content" description:"Content to write to file"`
+		}) (interface{}, error) {
+			args := map[string]interface{}{
+				"path":    params.Path,
+				"content": params.Content,
+			}
+			return m.callMCPTool(toolName, args)
+		}
+	default:
+		// Generic wrapper for unknown tools
+		return func(params GenericParams) (interface{}, error) {
+			args := params.Args
+			if args == nil {
+				args = make(map[string]interface{})
+			}
+			m.logger.Debug("Wrapper calling MCP tool", "tool", toolName, "args", args)
+			return m.callMCPTool(toolName, args)
+		}
+	}
 }
 
-// DirectoryTree shows directory tree structure
-func (m *MCPTool) DirectoryTree(params DirectoryTreeParams) (interface{}, error) {
-	return m.callMCPTool("directory_tree", map[string]interface{}{
-		"path": params.Path,
-	})
+// generateParamStruct creates a parameter structure based on MCP tool schema
+func (m *MCPTool) generateParamStruct(tool *mcp.Tool) interface{} {
+	// For common filesystem tools, create specific param structs
+	switch tool.Name {
+	case "list_directory":
+		return struct {
+			Path string `json:"path" description:"Directory path to list files and subdirectories. Use empty string or '.' for current directory"`
+		}{}
+	case "read_file", "read_text_file":
+		return struct {
+			Path string `json:"path" description:"File path to read"`
+		}{}
+	case "write_file":
+		return struct {
+			Path    string `json:"path" description:"File path to write"`
+			Content string `json:"content" description:"Content to write to file"`
+		}{}
+	case "create_directory":
+		return struct {
+			Path string `json:"path" description:"Directory path to create"`
+		}{}
+	case "search_files":
+		return struct {
+			Pattern string `json:"pattern" description:"Pattern to search for"`
+			Path    string `json:"path,omitempty" description:"Directory to search in (optional)"`
+		}{}
+	case "get_file_info":
+		return struct {
+			Path string `json:"path" description:"File or directory path to get info about"`
+		}{}
+	default:
+		// For unknown tools, return generic params
+		return GenericParams{}
+	}
 }
 
-// GetFileInfo gets information about a file
-func (m *MCPTool) GetFileInfo(params GetFileInfoParams) (interface{}, error) {
-	return m.callMCPTool("get_file_info", map[string]interface{}{
-		"path": params.Path,
-	})
-}
+// Note: Individual tool methods are no longer needed as they are registered dynamically
+// from the MCP server's tool list via registerDynamicTools()
 
 // callMCPTool executes an MCP tool with the given arguments
 func (m *MCPTool) callMCPTool(toolName string, args map[string]interface{}) (interface{}, error) {
@@ -192,8 +242,6 @@ func (m *MCPTool) callMCPTool(toolName string, args map[string]interface{}) (int
 	)
 	defer cancel()
 
-	m.logger.Debug("Calling MCP tool", "tool", toolName, "args", args)
-
 	// Call the tool
 	result, err := m.session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
@@ -206,7 +254,6 @@ func (m *MCPTool) callMCPTool(toolName string, args map[string]interface{}) (int
 
 	// Process result
 	if len(result.Content) == 0 {
-		m.logger.Debug("MCP tool returned empty content", "tool", toolName)
 		return "", nil
 	}
 
@@ -214,7 +261,6 @@ func (m *MCPTool) callMCPTool(toolName string, args map[string]interface{}) (int
 	firstContent := result.Content[0]
 	switch content := firstContent.(type) {
 	case *mcp.TextContent:
-		m.logger.Debug("MCP tool success", "tool", toolName, "content_length", len(content.Text))
 		return content.Text, nil
 	case *mcp.ImageContent:
 		return map[string]interface{}{
@@ -249,7 +295,5 @@ func (m *MCPTool) Close() error {
 	}
 
 	m.connected = false
-	m.logger.Info("MCP connection closed")
-
 	return nil
 }
