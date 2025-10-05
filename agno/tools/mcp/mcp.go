@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +17,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPTool implements the Tool interface for MCP filesystem operations
+// MCPTool implements the Tool interface for MCP operations
+// Follows the same pattern as Python agno-agi/agno implementation
 type MCPTool struct {
 	toolkit.Toolkit
 
@@ -35,12 +37,8 @@ type MCPTool struct {
 	cancelFunc context.CancelFunc
 }
 
-// GenericParams represents parameters for any MCP tool call
-type GenericParams struct {
-	Args map[string]interface{} `json:"args" description:"Arguments for the MCP tool"`
-}
-
 // NewMCPTool creates a new MCP tool instance
+// Follows the same initialization pattern as Python MCPTools class
 func NewMCPTool(command string, timeoutSeconds int) (*MCPTool, error) {
 	// Validate command
 	if command == "" {
@@ -50,7 +48,7 @@ func NewMCPTool(command string, timeoutSeconds int) (*MCPTool, error) {
 	// Create logger
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Initialize toolkit
+	// Initialize toolkit (no tools are registered at creation - they come from MCP server)
 	tk := toolkit.NewToolkit()
 	tk.Name = "MCP"
 	tk.Description = "MCP (Model Context Protocol) tools - dynamically loaded from MCP server"
@@ -62,11 +60,11 @@ func NewMCPTool(command string, timeoutSeconds int) (*MCPTool, error) {
 		logger:         logger,
 	}
 
-	// Note: Tools will be registered dynamically after connection via registerDynamicTools()
 	return tool, nil
 }
 
 // Connect establishes connection to MCP server and registers dynamic tools
+// Follows the same pattern as Python MCPTools.initialize() method
 func (m *MCPTool) Connect(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -101,132 +99,146 @@ func (m *MCPTool) Connect(ctx context.Context) error {
 	m.session = session
 	m.connected = true
 
-	// Register dynamic tools from the MCP server
-	if err := m.registerDynamicTools(ctx); err != nil {
-		m.logger.Error("Failed to register dynamic tools", "error", err)
-		// Don't fail the connection, but log the error
+	// Initialize the session (same as Python initialize)
+	if err := m.initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize MCP session: %w", err)
 	}
 
 	return nil
 }
 
-// registerDynamicTools queries the MCP server for available tools and registers them dynamically
-func (m *MCPTool) registerDynamicTools(ctx context.Context) error {
+// initialize registers tools from MCP server dynamically
+// This is the Go equivalent of Python's MCPTools.initialize() method
+func (m *MCPTool) initialize(ctx context.Context) error {
 	if !m.connected || m.session == nil {
-		return errors.New("not connected to MCP server")
+		return errors.New("session not connected")
 	}
 
-	// List available tools from MCP server
+	m.logger.Info("Initializing MCP session...")
+
+	// List available tools from MCP server (same as Python list_tools())
 	toolsResponse, err := m.session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
+		m.logger.Error("Failed to list tools from MCP server", "error", err)
 		return fmt.Errorf("failed to list tools from MCP server: %w", err)
 	}
 
-	// Register each tool dynamically
+	m.logger.Info("Found MCP tools", "count", len(toolsResponse.Tools))
+
+	// Register each tool dynamically (same as Python loop through filtered_tools)
 	for _, tool := range toolsResponse.Tools {
-		// Create a wrapper function for this specific MCP tool
-		toolName := tool.Name
-		toolFunc := m.createToolWrapper(toolName)
+		m.logger.Info("Registering MCP tool", "name", tool.Name, "description", tool.Description)
 
-		// Generate parameter struct based on tool schema
-		paramStruct := m.generateParamStruct(tool)
+		if err := m.registerToolFunction(tool); err != nil {
+			m.logger.Error("Failed to register tool", "tool", tool.Name, "error", err)
+			continue // Don't fail entire initialization for one tool
+		}
 
-		// Register the tool with the toolkit
-		m.Toolkit.Register(tool.Name, m, toolFunc, paramStruct)
+		m.logger.Info("Successfully registered tool", "name", tool.Name)
 	}
+
+	m.logger.Info("MCP toolkit initialized", "registered_tools", len(m.Toolkit.GetMethods()))
+	return nil
+}
+
+// registerToolFunction registers a single MCP tool as a Function
+// This is the Go equivalent of the Python tool registration loop
+func (m *MCPTool) registerToolFunction(tool *mcp.Tool) error {
+	// Create entrypoint for this tool (same as get_entrypoint_for_tool in Python)
+	entrypoint := m.createEntrypointForTool(tool)
+
+	// Log the schema we received
+	schemaBytes, _ := json.Marshal(tool.InputSchema)
+	m.logger.Info("Tool schema", "tool", tool.Name, "schema", string(schemaBytes))
+
+	// Create a generic parameter struct that can hold any fields
+	// This follows the same pattern as WeatherTool using WeatherParams{}
+	paramStruct := m.createParamStruct(tool)
+
+	// Register with toolkit using the exact same pattern as WeatherTool
+	m.Toolkit.Register(tool.Name, m, entrypoint, paramStruct)
 
 	return nil
 }
 
-// createToolWrapper creates a wrapper function for a specific MCP tool
-func (m *MCPTool) createToolWrapper(toolName string) interface{} {
-	// Return different wrapper functions based on tool type
-	switch toolName {
-	case "list_directory":
-		return func(params struct {
-			Path string `json:"path" description:"Directory path to list files and subdirectories. Use empty string or '.' for current directory"`
-		}) (interface{}, error) {
-			args := map[string]interface{}{
-				"path": params.Path,
-			}
-			if params.Path == "" {
-				args["path"] = "."
-			}
-			return m.callMCPTool(toolName, args)
+// createEntrypointForTool creates an entrypoint function for an MCP tool
+// This is the Go equivalent of get_entrypoint_for_tool function in Python
+func (m *MCPTool) createEntrypointForTool(tool *mcp.Tool) interface{} {
+	toolName := tool.Name
+
+	// Return a function that matches the expected signature
+	// The toolkit will call this function with parameters based on the inputSchema
+	return func(params interface{}) (interface{}, error) {
+		m.logger.Info("MCP tool called", "tool", toolName, "params_type", fmt.Sprintf("%T", params), "params_value", fmt.Sprintf("%+v", params))
+
+		// Convert params to map[string]interface{} for MCP call
+		args, err := m.paramsToMap(params)
+		if err != nil {
+			m.logger.Error("Failed to convert parameters", "tool", toolName, "error", err)
+			return nil, fmt.Errorf("failed to convert parameters: %w", err)
 		}
-	case "read_file", "read_text_file":
-		return func(params struct {
-			Path string `json:"path" description:"File path to read"`
-		}) (interface{}, error) {
-			args := map[string]interface{}{
-				"path": params.Path,
-			}
-			return m.callMCPTool(toolName, args)
-		}
-	case "write_file":
-		return func(params struct {
-			Path    string `json:"path" description:"File path to write"`
-			Content string `json:"content" description:"Content to write to file"`
-		}) (interface{}, error) {
-			args := map[string]interface{}{
-				"path":    params.Path,
-				"content": params.Content,
-			}
-			return m.callMCPTool(toolName, args)
-		}
-	default:
-		// Generic wrapper for unknown tools
-		return func(params GenericParams) (interface{}, error) {
-			args := params.Args
-			if args == nil {
-				args = make(map[string]interface{})
-			}
-			m.logger.Debug("Wrapper calling MCP tool", "tool", toolName, "args", args)
-			return m.callMCPTool(toolName, args)
-		}
+
+		m.logger.Info("Converted parameters", "tool", toolName, "args", args)
+
+		// Call the actual MCP tool (same as Python session.call_tool)
+		return m.callMCPTool(toolName, args)
 	}
 }
 
-// generateParamStruct creates a parameter structure based on MCP tool schema
-func (m *MCPTool) generateParamStruct(tool *mcp.Tool) interface{} {
-	// For common filesystem tools, create specific param structs
-	switch tool.Name {
-	case "list_directory":
-		return struct {
-			Path string `json:"path" description:"Directory path to list files and subdirectories. Use empty string or '.' for current directory"`
-		}{}
-	case "read_file", "read_text_file":
-		return struct {
-			Path string `json:"path" description:"File path to read"`
-		}{}
-	case "write_file":
-		return struct {
-			Path    string `json:"path" description:"File path to write"`
-			Content string `json:"content" description:"Content to write to file"`
-		}{}
-	case "create_directory":
-		return struct {
-			Path string `json:"path" description:"Directory path to create"`
-		}{}
-	case "search_files":
-		return struct {
-			Pattern string `json:"pattern" description:"Pattern to search for"`
-			Path    string `json:"path,omitempty" description:"Directory to search in (optional)"`
-		}{}
-	case "get_file_info":
-		return struct {
-			Path string `json:"path" description:"File or directory path to get info about"`
-		}{}
-	default:
-		// For unknown tools, return generic params
-		return GenericParams{}
+// paramsToMap converts any parameter type to map[string]interface{}
+// This handles the parameter conversion needed for MCP calls
+func (m *MCPTool) paramsToMap(params interface{}) (map[string]interface{}, error) {
+	if params == nil {
+		return map[string]interface{}{}, nil
 	}
+
+	// Use reflection to handle any parameter type
+	v := reflect.ValueOf(params)
+
+	// Handle pointer types
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return map[string]interface{}{}, nil
+		}
+		v = v.Elem()
+	}
+
+	// Convert via JSON for maximum compatibility
+	paramBytes, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal parameters: %w", err)
+	}
+
+	var args map[string]interface{}
+	if err := json.Unmarshal(paramBytes, &args); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal parameters: %w", err)
+	}
+
+	return args, nil
 }
 
-// Note: Individual tool methods are no longer needed as they are registered dynamically
-// from the MCP server's tool list via registerDynamicTools()
+// createParamStruct creates a parameter struct based on the MCP tool schema
+// This creates simple structs that the toolkit can use for parameter examples
+func (m *MCPTool) createParamStruct(tool *mcp.Tool) interface{} {
+	// For now, create a generic struct that can handle common MCP parameters
+	// In the future, this could parse the JSON schema and create dynamic structs
+
+	// Generic parameter struct that works for most MCP tools
+	type GenericParams struct {
+		Path        string `json:"path,omitempty" description:"File or directory path"`
+		Content     string `json:"content,omitempty" description:"Content for file operations"`
+		Pattern     string `json:"pattern,omitempty" description:"Search pattern"`
+		Source      string `json:"source,omitempty" description:"Source path"`
+		Destination string `json:"destination,omitempty" description:"Destination path"`
+		Head        int    `json:"head,omitempty" description:"Number of lines from head"`
+		Tail        int    `json:"tail,omitempty" description:"Number of lines from tail"`
+	}
+
+	return GenericParams{}
+}
 
 // callMCPTool executes an MCP tool with the given arguments
+// This is the Go equivalent of the Python call_tool function
 func (m *MCPTool) callMCPTool(toolName string, args map[string]interface{}) (interface{}, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -242,40 +254,53 @@ func (m *MCPTool) callMCPTool(toolName string, args map[string]interface{}) (int
 	)
 	defer cancel()
 
-	// Call the tool
-	result, err := m.session.CallTool(ctx, &mcp.CallToolParams{
+	m.logger.Info("Calling MCP tool", "tool", toolName, "args", args)
+
+	// Call the tool (same as Python session.call_tool(tool_name, kwargs))
+	callParams := &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
-	})
+	}
+
+	result, err := m.session.CallTool(ctx, callParams)
 	if err != nil {
 		m.logger.Error("MCP tool call failed", "tool", toolName, "error", err)
 		return nil, fmt.Errorf("failed to call MCP tool %s: %w", toolName, err)
 	}
 
-	// Process result
+	// Process result (same as Python result processing)
 	if len(result.Content) == 0 {
 		return "", nil
 	}
 
-	// Return first content item (most common case)
-	firstContent := result.Content[0]
-	switch content := firstContent.(type) {
-	case *mcp.TextContent:
-		return content.Text, nil
-	case *mcp.ImageContent:
-		return map[string]interface{}{
-			"type":     "image",
-			"data":     content.Data,
-			"mimeType": content.MIMEType,
-		}, nil
-	default:
-		// Try to marshal as JSON for other types
-		if data, err := json.Marshal(content); err == nil {
-			return string(data), nil
+	// Handle different content types (same as Python content processing)
+	var responseStr strings.Builder
+	for i, content := range result.Content {
+		switch c := content.(type) {
+		case *mcp.TextContent:
+			responseStr.WriteString(c.Text)
+			if i < len(result.Content)-1 {
+				responseStr.WriteString("\n")
+			}
+		case *mcp.ImageContent:
+			// Return structured image data (same as Python)
+			return map[string]interface{}{
+				"type":     "image",
+				"data":     c.Data,
+				"mimeType": c.MIMEType,
+			}, nil
+		default:
+			// Handle other content types
+			if data, err := json.Marshal(content); err == nil {
+				responseStr.WriteString(string(data))
+			} else {
+				responseStr.WriteString(fmt.Sprintf("%+v", content))
+			}
 		}
-		fallback := fmt.Sprintf("%+v", content)
-		return fallback, nil
 	}
+
+	m.logger.Info("MCP tool completed", "tool", toolName, "response_length", responseStr.Len())
+	return responseStr.String(), nil
 }
 
 // Close closes the MCP connection and cleans up resources
