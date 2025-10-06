@@ -8,6 +8,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.16
 	github.com/modelcontextprotocol/go-sdk v1.0.0
+	github.com/ollama/ollama v0.12.3
 	github.com/openai/openai-go v1.12.0
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/pterm/pterm v0.12.80
@@ -113,7 +114,6 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
-	github.com/ollama/ollama v0.6.5
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
