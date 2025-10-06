@@ -11,199 +11,123 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPTool implements the Tool interface for MCP operations
-// Follows the same pattern as Python agno-agi/agno implementation
+// MCPTool implementa a interface Tool usando apenas ClientSession
+// Descobre ferramentas dinamicamente e as expõe através da interface Tool
 type MCPTool struct {
-	toolkit.Toolkit
-
-	// Core MCP components
-	client  *mcp.Client
+	name    string
+	command string
 	session *mcp.ClientSession
+	client  *mcp.Client
+	logger  *slog.Logger
+	mu      sync.RWMutex
 
-	// Configuration
-	command        string
-	timeoutSeconds int
-	logger         *slog.Logger
-
-	// State management
-	mu         sync.RWMutex
-	connected  bool
-	cancelFunc context.CancelFunc
+	// Cache das ferramentas MCP descobertas dinamicamente
+	tools   map[string]*mcp.Tool
+	methods map[string]toolkit.Method
 }
 
-// NewMCPTool creates a new MCP tool instance
-// Follows the same initialization pattern as Python MCPTools class
-func NewMCPTool(command string, timeoutSeconds int) (*MCPTool, error) {
-	// Validate command
+// NewMCPTool cria uma nova instância MCPTool
+func NewMCPTool(name, command string) (*MCPTool, error) {
 	if command == "" {
 		return nil, errors.New("command cannot be empty")
 	}
 
-	// Create logger
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
 
-	// Initialize toolkit (no tools are registered at creation - they come from MCP server)
-	tk := toolkit.NewToolkit()
-	tk.Name = "MCP"
-	tk.Description = "MCP (Model Context Protocol) tools - dynamically loaded from MCP server"
-
-	tool := &MCPTool{
-		Toolkit:        tk,
-		command:        command,
-		timeoutSeconds: timeoutSeconds,
-		logger:         logger,
-	}
-
-	return tool, nil
+	return &MCPTool{
+		name:    name,
+		command: command,
+		logger:  logger,
+		tools:   make(map[string]*mcp.Tool),
+		methods: make(map[string]toolkit.Method),
+	}, nil
 }
 
-// Connect establishes connection to MCP server and registers dynamic tools
-// Follows the same pattern as Python MCPTools.initialize() method
+// Connect conecta ao servidor MCP e descobre as ferramentas
 func (m *MCPTool) Connect(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.connected {
-		return nil
-	}
-
-	// Create context with cancel for cleanup
-	ctx, cancel := context.WithCancel(ctx)
-	m.cancelFunc = cancel
-
-	// Create MCP client
+	// Criar cliente MCP
 	m.client = mcp.NewClient(&mcp.Implementation{
 		Name:    "agno-mcp-client",
 		Version: "1.0.0",
 	}, nil)
 
-	// Prepare command
+	// Preparar comando
 	parts := strings.Fields(m.command)
 	cmd := exec.Command(parts[0], parts[1:]...)
 
-	// Create MCP transport using CommandTransport
+	// Conectar usando CommandTransport
 	transport := &mcp.CommandTransport{Command: cmd}
-
-	// Start MCP session
 	session, err := m.client.Connect(ctx, transport, nil)
 	if err != nil {
-		return fmt.Errorf("failed to connect to MCP server: %w", err)
+		return fmt.Errorf("failed to connect to MCP: %w", err)
 	}
 
 	m.session = session
-	m.connected = true
 
-	// Initialize the session (same as Python initialize)
-	if err := m.initialize(ctx); err != nil {
-		return fmt.Errorf("failed to initialize MCP session: %w", err)
-	}
-
-	return nil
-}
-
-// initialize registers tools from MCP server dynamically
-// This is the Go equivalent of Python's MCPTools.initialize() method
-func (m *MCPTool) initialize(ctx context.Context) error {
-	if !m.connected || m.session == nil {
-		return errors.New("session not connected")
-	}
-
-	m.logger.Info("Initializing MCP session...")
-
-	// List available tools from MCP server (same as Python list_tools())
-	toolsResponse, err := m.session.ListTools(ctx, &mcp.ListToolsParams{})
+	// Descobrir ferramentas disponíveis usando ClientSession.ListTools
+	toolsResult, err := m.session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
-		m.logger.Error("Failed to list tools from MCP server", "error", err)
-		return fmt.Errorf("failed to list tools from MCP server: %w", err)
+		return fmt.Errorf("failed to list tools: %w", err)
 	}
 
-	m.logger.Info("Found MCP tools", "count", len(toolsResponse.Tools))
+	// Armazenar ferramentas e criar métodos dinamicamente
+	for _, tool := range toolsResult.Tools {
+		m.tools[tool.Name] = tool
 
-	// Register each tool dynamically (same as Python loop through filtered_tools)
-	for _, tool := range toolsResponse.Tools {
-		m.logger.Info("Registering MCP tool", "name", tool.Name, "description", tool.Description)
-
-		if err := m.registerToolFunction(tool); err != nil {
-			m.logger.Error("Failed to register tool", "tool", tool.Name, "error", err)
-			continue // Don't fail entire initialization for one tool
+		// Criar método para esta ferramenta
+		m.methods[tool.Name] = toolkit.Method{
+			Receiver:  m,
+			Function:  m.createToolFunction(tool),
+			ParamType: m.getParamType(tool),
 		}
-
-		m.logger.Info("Successfully registered tool", "name", tool.Name)
 	}
 
-	m.logger.Info("MCP toolkit initialized", "registered_tools", len(m.Toolkit.GetMethods()))
 	return nil
 }
 
-// registerToolFunction registers a single MCP tool as a Function
-// This is the Go equivalent of the Python tool registration loop
-func (m *MCPTool) registerToolFunction(tool *mcp.Tool) error {
-	// Create entrypoint for this tool (same as get_entrypoint_for_tool in Python)
-	entrypoint := m.createEntrypointForTool(tool)
-
-	// Log the schema we received
-	schemaBytes, _ := json.Marshal(tool.InputSchema)
-	m.logger.Info("Tool schema", "tool", tool.Name, "schema", string(schemaBytes))
-
-	// Create a generic parameter struct that can hold any fields
-	// This follows the same pattern as WeatherTool using WeatherParams{}
-	paramStruct := m.createParamStruct(tool)
-
-	// Register with toolkit using the exact same pattern as WeatherTool
-	m.Toolkit.Register(tool.Name, m, entrypoint, paramStruct)
-
-	return nil
-}
-
-// createEntrypointForTool creates an entrypoint function for an MCP tool
-// This is the Go equivalent of get_entrypoint_for_tool function in Python
-func (m *MCPTool) createEntrypointForTool(tool *mcp.Tool) interface{} {
+// createToolFunction cria uma função que chama a ferramenta MCP
+func (m *MCPTool) createToolFunction(tool *mcp.Tool) interface{} {
 	toolName := tool.Name
 
-	// Return a function that matches the expected signature
-	// The toolkit will call this function with parameters based on the inputSchema
+	// Retornar função que aceita qualquer struct e chama ClientSession.CallTool
 	return func(params interface{}) (interface{}, error) {
-		m.logger.Info("MCP tool called", "tool", toolName, "params_type", fmt.Sprintf("%T", params), "params_value", fmt.Sprintf("%+v", params))
-
-		// Convert params to map[string]interface{} for MCP call
+		// Converter params para map[string]interface{}
 		args, err := m.paramsToMap(params)
 		if err != nil {
-			m.logger.Error("Failed to convert parameters", "tool", toolName, "error", err)
 			return nil, fmt.Errorf("failed to convert parameters: %w", err)
 		}
 
-		m.logger.Info("Converted parameters", "tool", toolName, "args", args)
+		// Chamar ferramenta usando ClientSession.CallTool
+		result, err := m.session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      toolName,
+			Arguments: args,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("MCP tool call failed: %w", err)
+		}
 
-		// Call the actual MCP tool (same as Python session.call_tool)
-		return m.callMCPTool(toolName, args)
+		// Processar resultado
+		return m.processResult(result)
 	}
 }
 
-// paramsToMap converts any parameter type to map[string]interface{}
-// This handles the parameter conversion needed for MCP calls
+// paramsToMap converte qualquer struct em map[string]interface{}
 func (m *MCPTool) paramsToMap(params interface{}) (map[string]interface{}, error) {
 	if params == nil {
 		return map[string]interface{}{}, nil
 	}
 
-	// Use reflection to handle any parameter type
-	v := reflect.ValueOf(params)
-
-	// Handle pointer types
-	if v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return map[string]interface{}{}, nil
-		}
-		v = v.Elem()
-	}
-
-	// Convert via JSON for maximum compatibility
+	// Converter via JSON para máxima compatibilidade
 	paramBytes, err := json.Marshal(params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal parameters: %w", err)
@@ -217,108 +141,141 @@ func (m *MCPTool) paramsToMap(params interface{}) (map[string]interface{}, error
 	return args, nil
 }
 
-// createParamStruct creates a parameter struct based on the MCP tool schema
-// This creates simple structs that the toolkit can use for parameter examples
-func (m *MCPTool) createParamStruct(tool *mcp.Tool) interface{} {
-	// For now, create a generic struct that can handle common MCP parameters
-	// In the future, this could parse the JSON schema and create dynamic structs
-
-	// Generic parameter struct that works for most MCP tools
-	type GenericParams struct {
-		Path        string `json:"path,omitempty" description:"File or directory path"`
-		Content     string `json:"content,omitempty" description:"Content for file operations"`
-		Pattern     string `json:"pattern,omitempty" description:"Search pattern"`
-		Source      string `json:"source,omitempty" description:"Source path"`
-		Destination string `json:"destination,omitempty" description:"Destination path"`
-		Head        int    `json:"head,omitempty" description:"Number of lines from head"`
-		Tail        int    `json:"tail,omitempty" description:"Number of lines from tail"`
+// processResult processa o resultado da chamada MCP
+func (m *MCPTool) processResult(result *mcp.CallToolResult) (interface{}, error) {
+	if result.IsError {
+		// Processar os erros contidos no Content
+		errorMessages := []string{}
+		for _, content := range result.Content {
+			if textContent, ok := content.(*mcp.TextContent); ok {
+				errorMessages = append(errorMessages, textContent.Text)
+			}
+		}
+		errorMsg := strings.Join(errorMessages, "; ")
+		m.logger.Error("MCP tool returned error", "message", errorMsg)
+		return nil, fmt.Errorf("MCP tool error: %s", errorMsg)
 	}
 
-	return GenericParams{}
-}
-
-// callMCPTool executes an MCP tool with the given arguments
-// This is the Go equivalent of the Python call_tool function
-func (m *MCPTool) callMCPTool(toolName string, args map[string]interface{}) (interface{}, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if !m.connected || m.session == nil {
-		return nil, errors.New("not connected to MCP server")
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		time.Duration(m.timeoutSeconds)*time.Second,
-	)
-	defer cancel()
-
-	m.logger.Info("Calling MCP tool", "tool", toolName, "args", args)
-
-	// Call the tool (same as Python session.call_tool(tool_name, kwargs))
-	callParams := &mcp.CallToolParams{
-		Name:      toolName,
-		Arguments: args,
-	}
-
-	result, err := m.session.CallTool(ctx, callParams)
-	if err != nil {
-		m.logger.Error("MCP tool call failed", "tool", toolName, "error", err)
-		return nil, fmt.Errorf("failed to call MCP tool %s: %w", toolName, err)
-	}
-
-	// Process result (same as Python result processing)
 	if len(result.Content) == 0 {
 		return "", nil
 	}
 
-	// Handle different content types (same as Python content processing)
-	var responseStr strings.Builder
+	var response strings.Builder
 	for i, content := range result.Content {
 		switch c := content.(type) {
 		case *mcp.TextContent:
-			responseStr.WriteString(c.Text)
+			response.WriteString(c.Text)
 			if i < len(result.Content)-1 {
-				responseStr.WriteString("\n")
+				response.WriteString("\n")
 			}
 		case *mcp.ImageContent:
-			// Return structured image data (same as Python)
-			return map[string]interface{}{
-				"type":     "image",
-				"data":     c.Data,
-				"mimeType": c.MIMEType,
-			}, nil
+			response.WriteString("Image content received\n")
 		default:
-			// Handle other content types
+			// Try to extract text from unknown content types
 			if data, err := json.Marshal(content); err == nil {
-				responseStr.WriteString(string(data))
+				response.WriteString(string(data))
 			} else {
-				responseStr.WriteString(fmt.Sprintf("%+v", content))
+				response.WriteString(fmt.Sprintf("Unknown content type: %T", content))
 			}
 		}
 	}
 
-	m.logger.Info("MCP tool completed", "tool", toolName, "response_length", responseStr.Len())
-	return responseStr.String(), nil
+	return response.String(), nil
 }
 
-// Close closes the MCP connection and cleans up resources
+// getParamType retorna o tipo de parâmetro baseado no schema da ferramenta
+func (m *MCPTool) getParamType(tool *mcp.Tool) reflect.Type {
+	// Retornar tipo genérico que pode aceitar qualquer campo JSON
+	return reflect.TypeOf(map[string]interface{}{})
+}
+
+// Close fecha a conexão MCP
 func (m *MCPTool) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.cancelFunc != nil {
-		m.cancelFunc()
-	}
-
 	if m.session != nil {
-		if err := m.session.Close(); err != nil {
-			m.logger.Error("Failed to close MCP session", "error", err)
+		return m.session.Close()
+	}
+	return nil
+}
+
+// Implementação da interface Tool
+
+func (m *MCPTool) GetName() string {
+	return m.name
+}
+
+func (m *MCPTool) GetDescription() string {
+	return fmt.Sprintf("MCP integration for %s", m.name)
+}
+
+func (m *MCPTool) GetParameterStruct(methodName string) map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Retornar schema baseado na ferramenta MCP
+	if tool, exists := m.tools[methodName]; exists && tool.InputSchema != nil {
+		if schema, ok := tool.InputSchema.(map[string]interface{}); ok {
+			return schema
 		}
-		m.session = nil
 	}
 
-	m.connected = false
+	// Fallback para schema genérico
+	return map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}
+}
+
+func (m *MCPTool) GetMethods() map[string]toolkit.Method {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Retornar cópia dos métodos descobertos
+	result := make(map[string]toolkit.Method)
+	for name, method := range m.methods {
+		result[name] = method
+	}
+	return result
+}
+
+func (m *MCPTool) GetFunction(methodName string) interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if method, exists := m.methods[methodName]; exists {
+		return method.Function
+	}
 	return nil
+}
+
+func (m *MCPTool) Execute(methodName string, input json.RawMessage) (interface{}, error) {
+	m.mu.RLock()
+	tool, toolExists := m.tools[methodName]
+	m.mu.RUnlock()
+
+	if !toolExists {
+		return nil, fmt.Errorf("tool %s not found", methodName)
+	}
+
+	// Converter JSON input para map
+	var params map[string]interface{}
+	if len(input) > 0 {
+		if err := json.Unmarshal(input, &params); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal input: %w", err)
+		}
+	}
+
+	// Chamar ferramenta usando ClientSession.CallTool
+	result, err := m.session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      tool.Name,
+		Arguments: params,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("MCP tool call failed: %w", err)
+	}
+
+	// Processar resultado
+	return m.processResult(result)
 }
