@@ -107,7 +107,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 				// Convert back to JSON
 				argsJSON, err := json.Marshal(args)
 				if err != nil {
-					return fmt.Errorf("Error converting arguments to JSON: %v", err)
+					return fmt.Errorf("error converting arguments to JSON: %v", err)
 				}
 
 				// Execute the tool with the corrected arguments
@@ -297,7 +297,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 					if showToolsCall != nil && showToolsCall.(bool) {
 						// Tool call start panel
 						argsJsonPanel, _ := json.MarshalIndent(args, "", "  ")
-						startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", tc.Function.Name)
+						startTool := fmt.Sprintf("🚀 Running tool %s with args:", tc.Function.Name)
 						utils.ToolCallPanel(startTool)
 						utils.ToolCallPanel(string(argsJsonPanel))
 					}
@@ -305,7 +305,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 					// Convert back to JSON
 					argsJSON, err := json.Marshal(args)
 					if err != nil {
-						return fmt.Errorf("Error converting arguments to JSON: %w", err)
+						return fmt.Errorf("error converting arguments to JSON: %w", err)
 					}
 
 					// Execute the tool with the corrected arguments
@@ -424,11 +424,7 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 			}
 
 			// Build properties map for Ollama
-			ollamaProps := make(map[string]struct {
-				Type        string   `json:"type"`
-				Description string   `json:"description"`
-				Enum        []string `json:"enum,omitempty"`
-			})
+			ollamaProps := make(map[string]api.ToolProperty)
 
 			for propName, propValue := range propsMap {
 				propObj, ok := propValue.(map[string]interface{})
@@ -447,21 +443,13 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 					description = d
 				}
 
-				enumVals := []string{}
+				var enumVals []any
 				if e, ok := propObj["enum"].([]interface{}); ok {
-					for _, val := range e {
-						if strVal, ok := val.(string); ok {
-							enumVals = append(enumVals, strVal)
-						}
-					}
+					enumVals = e
 				}
 
-				ollamaProps[propName] = struct {
-					Type        string   `json:"type"`
-					Description string   `json:"description"`
-					Enum        []string `json:"enum,omitempty"`
-				}{
-					Type:        typeStr,
+				ollamaProps[propName] = api.ToolProperty{
+					Type:        api.PropertyType([]string{typeStr}),
 					Description: description,
 					Enum:        enumVals,
 				}
@@ -474,15 +462,7 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 				Function: api.ToolFunction{
 					Name:        methodName,
 					Description: tool.GetDescription(),
-					Parameters: struct {
-						Type       string   `json:"type"`
-						Required   []string `json:"required"`
-						Properties map[string]struct {
-							Type        string   `json:"type"`
-							Description string   `json:"description"`
-							Enum        []string `json:"enum,omitempty"`
-						} `json:"properties"`
-					}{
+					Parameters: api.ToolFunctionParameters{
 						Type:       "object",
 						Required:   requiredFields,
 						Properties: ollamaProps,
