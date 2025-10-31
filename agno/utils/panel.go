@@ -162,6 +162,11 @@ func DebugPanel(content string) {
 
 // tools Panel
 func ToolCallPanel(content string) {
+	// Avoid panic when content is too small for pterm box
+	if len(content) < 3 {
+		content = "   " + content + "   "
+	}
+	
 	paddedBox := pterm.DefaultBox.
 		WithLeftPadding(4).
 		WithRightPadding(4).

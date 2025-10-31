@@ -83,14 +83,14 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		if len(resp.Message.ToolCalls) == 0 {
 			return nil
 		}
-		
+
 		// Add assistant message with tool calls first
 		responseTools = append(responseTools, api.Message{
 			Role:      resp.Message.Role,
 			Content:   resp.Message.Content,
 			ToolCalls: resp.Message.ToolCalls,
 		})
-		
+
 		// Process each tool call and add their responses
 		for _, tc := range resp.Message.ToolCalls {
 			if tool, ok := maptools[tc.Function.Name]; ok {
@@ -107,7 +107,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 				// Convert back to JSON
 				argsJSON, err := json.Marshal(args)
 				if err != nil {
-					return fmt.Errorf("Error converting arguments to JSON: %v", err)
+					return fmt.Errorf("error converting arguments to JSON: %v", err)
 				}
 
 				// Execute the tool with the corrected arguments
@@ -168,7 +168,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		if ctx.Value("reasoning") == true {
 			// Use all messages including tool responses for reasoning
 			reasoningMsgs := req.Messages
-			
+
 			// Make a second request with thinking enabled
 			thinkingReq := &api.ChatRequest{
 				Model:    c.model,
@@ -297,7 +297,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 					if showToolsCall != nil && showToolsCall.(bool) {
 						// Tool call start panel
 						argsJsonPanel, _ := json.MarshalIndent(args, "", "  ")
-						startTool := fmt.Sprintf("🚀 Running tool %s with args: %s", tc.Function.Name)
+						startTool := fmt.Sprintf("🚀 Running tool %s with args:", tc.Function.Name)
 						utils.ToolCallPanel(startTool)
 						utils.ToolCallPanel(string(argsJsonPanel))
 					}
@@ -305,7 +305,7 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 					// Convert back to JSON
 					argsJSON, err := json.Marshal(args)
 					if err != nil {
-						return fmt.Errorf("Error converting arguments to JSON: %w", err)
+						return fmt.Errorf("error converting arguments to JSON: %w", err)
 					}
 
 					// Execute the tool with the corrected arguments
@@ -424,11 +424,7 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 			}
 
 			// Build properties map for Ollama
-			ollamaProps := make(map[string]struct {
-				Type        string   `json:"type"`
-				Description string   `json:"description"`
-				Enum        []string `json:"enum,omitempty"`
-			})
+			ollamaProps := make(map[string]api.ToolProperty)
 
 			for propName, propValue := range propsMap {
 				propObj, ok := propValue.(map[string]interface{})
@@ -447,48 +443,30 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 					description = d
 				}
 
-				enumVals := []string{}
+				var enumVals []any
 				if e, ok := propObj["enum"].([]interface{}); ok {
-					for _, val := range e {
-						if strVal, ok := val.(string); ok {
-							enumVals = append(enumVals, strVal)
-						}
-					}
+					enumVals = e
 				}
 
-				ollamaProps[propName] = struct {
-					Type        string   `json:"type"`
-					Description string   `json:"description"`
-					Enum        []string `json:"enum,omitempty"`
-				}{
-					Type:        typeStr,
+				ollamaProps[propName] = api.ToolProperty{
+					Type:        api.PropertyType([]string{typeStr}),
 					Description: description,
 					Enum:        enumVals,
 				}
 			}
 
 			// Define parameters in the format expected by Ollama
-			parameters := struct {
-				Type       string   `json:"type"`
-				Required   []string `json:"required"`
-				Properties map[string]struct {
-					Type        string   `json:"type"`
-					Description string   `json:"description"`
-					Enum        []string `json:"enum,omitempty"`
-				} `json:"properties"`
-			}{
-				Type:       "object",
-				Required:   requiredFields,
-				Properties: ollamaProps,
-			}
-
 			// Add the tool to the list
 			apiTools = append(apiTools, api.Tool{
 				Type: "function",
 				Function: api.ToolFunction{
 					Name:        methodName,
 					Description: tool.GetDescription(),
-					Parameters:  parameters,
+					Parameters: api.ToolFunctionParameters{
+						Type:       "object",
+						Required:   requiredFields,
+						Properties: ollamaProps,
+					},
 				},
 			})
 
