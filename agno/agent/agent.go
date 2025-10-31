@@ -10,7 +10,6 @@ import (
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/reasoning"
-	"github.com/pterm/pterm"
 
 	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
@@ -42,16 +41,17 @@ type AgentConfig struct {
 	ReasoningMaxSteps int
 
 	// Memory and Storage Configuration
-	Memory                 memory.MemoryManager
-	Storage                storage.AgentStorage
-	SessionID              string
-	UserID                 string
-	AddHistoryToMessages   bool
-	NumHistoryRuns         int
-	EnableUserMemories     bool
-	EnableAgenticMemory    bool
-	EnableSessionSummaries bool
-	ReadChatHistory        bool
+	Memory                  memory.MemoryManager
+	Storage                 storage.AgentStorage
+	SessionID               string
+	UserID                  string
+	AddHistoryToMessages    bool
+	NumHistoryRuns          int
+	MaxToolCallsFromHistory int
+	EnableUserMemories      bool
+	EnableAgenticMemory     bool
+	EnableSessionSummaries  bool
+	ReadChatHistory         bool
 
 	//knowledge
 	Knowledge knowledge.Knowledge
@@ -75,16 +75,17 @@ type Agent struct {
 	debug                  bool
 
 	// Memory and Storage
-	memory                 memory.MemoryManager
-	storage                storage.AgentStorage
-	sessionID              string
-	userID                 string
-	addHistoryToMessages   bool
-	numHistoryRuns         int
-	enableUserMemories     bool
-	enableAgenticMemory    bool
-	enableSessionSummaries bool
-	readChatHistory        bool
+	memory                  memory.MemoryManager
+	storage                 storage.AgentStorage
+	sessionID               string
+	userID                  string
+	addHistoryToMessages    bool
+	numHistoryRuns          int
+	maxToolCallsFromHistory int
+	enableUserMemories      bool
+	enableAgenticMemory     bool
+	enableSessionSummaries  bool
+	readChatHistory         bool
 
 	// Session state
 	messages []models.Message
@@ -139,16 +140,17 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		debug:           config.Debug,
 
 		// Memory and Storage
-		memory:                 config.Memory,
-		storage:                config.Storage,
-		sessionID:              sessionID,
-		userID:                 config.UserID,
-		addHistoryToMessages:   config.AddHistoryToMessages,
-		numHistoryRuns:         config.NumHistoryRuns,
-		enableUserMemories:     config.EnableUserMemories,
-		enableAgenticMemory:    config.EnableAgenticMemory,
-		enableSessionSummaries: config.EnableSessionSummaries,
-		readChatHistory:        config.ReadChatHistory,
+		memory:                  config.Memory,
+		storage:                 config.Storage,
+		sessionID:               sessionID,
+		userID:                  config.UserID,
+		addHistoryToMessages:    config.AddHistoryToMessages,
+		numHistoryRuns:          config.NumHistoryRuns,
+		maxToolCallsFromHistory: config.MaxToolCallsFromHistory,
+		enableUserMemories:      config.EnableUserMemories,
+		enableAgenticMemory:     config.EnableAgenticMemory,
+		enableSessionSummaries:  config.EnableSessionSummaries,
+		readChatHistory:         config.ReadChatHistory,
 
 		// Initialize session state
 		messages: []models.Message{},
@@ -202,12 +204,6 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 		}
 	}
 
-	//hide if reasoning
-	var bx *pterm.SpinnerPrinter
-	if !a.reasoning {
-		bx = utils.ThinkingPanel(prompt)
-	}
-
 	// use default reasoning agent
 	if a.reasoningAgent == nil && a.reasoning && a.reasoningModel != nil {
 		a.reasoningAgent = NewReasoningAgent(a.ctx, a.reasoningModel, a.tools, a.reasoningMinSteps, a.reasoningMaxSteps)
@@ -253,10 +249,6 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 		return models.RunResponse{}, err
 	}
 
-	if !a.reasoning {
-		utils.ResponsePanel(resp.Content, bx, time.Now(), a.markdown)
-	}
-
 	// Save run to storage if enabled
 	if a.storage != nil {
 		if err := a.saveRun(prompt, resp.Content, messages); err != nil && a.debug {
@@ -278,8 +270,9 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 			Content: prompt,
 		})
 		a.messages = append(a.messages, models.Message{
-			Role:    "assistant",
-			Content: resp.Content,
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
 		})
 
 		// Keep only recent messages based on history limit
@@ -430,6 +423,55 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	}
 }
 
+// filterToolCallsFromHistory filters the tool calls from message history based on maxToolCallsFromHistory
+func (a *Agent) filterToolCallsFromHistory(messages []models.Message) []models.Message {
+	if a.maxToolCallsFromHistory <= 0 {
+		// If no limit is set, return all messages as is
+		return messages
+	}
+
+	// Count tool calls from the end of the messages (most recent first)
+	var filteredMessages []models.Message
+	toolCallCount := 0
+	limitReached := false
+
+	// Process messages in reverse order to count from most recent
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+
+		// Check if this message contains tool calls
+		if len(msg.ToolCalls) > 0 {
+			if limitReached {
+				// Skip messages with tool calls after limit is reached
+				continue
+			}
+
+			// Check if adding these tool calls would exceed the limit
+			if toolCallCount+len(msg.ToolCalls) > a.maxToolCallsFromHistory {
+				// Calculate how many tool calls we can still include
+				remainingSlots := a.maxToolCallsFromHistory - toolCallCount
+				if remainingSlots > 0 {
+					// Create a copy of the message with limited tool calls
+					limitedMsg := msg
+					limitedMsg.ToolCalls = msg.ToolCalls[len(msg.ToolCalls)-remainingSlots:]
+					filteredMessages = append([]models.Message{limitedMsg}, filteredMessages...)
+				}
+				// Mark that we've reached the limit
+				limitReached = true
+			} else {
+				// Add all tool calls from this message
+				filteredMessages = append([]models.Message{msg}, filteredMessages...)
+				toolCallCount += len(msg.ToolCalls)
+			}
+		} else {
+			// Message has no tool calls, always include it
+			filteredMessages = append([]models.Message{msg}, filteredMessages...)
+		}
+	}
+
+	return filteredMessages
+}
+
 func (a *Agent) prepareMessages(prompt string) []models.Message {
 	systemMessage := ""
 
@@ -510,7 +552,8 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 
 	// Add chat history if enabled
 	if a.addHistoryToMessages && len(a.messages) > 0 {
-		messages = append(messages, a.messages...)
+		historyMessages := a.filterToolCallsFromHistory(a.messages)
+		messages = append(messages, historyMessages...)
 	}
 
 	messages = append(messages, models.Message{
@@ -694,20 +737,7 @@ func (a *Agent) processMemories(userMessage, agentResponse string) error {
 }
 
 func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
-	start := time.Now()
 	messages := a.prepareMessages(prompt)
-	//get debug
-	debugmod := a.ctx.Value(models.DebugKey)
-
-	spinnerResponse := utils.ThinkingPanel(prompt)
-	contentChan := utils.StartSimplePanel(spinnerResponse, start, a.markdown)
-	defer close(contentChan)
-
-	// Thinking
-	contentChan <- utils.ContentUpdateMsg{
-		PanelName: "Thinking",
-		Content:   prompt,
-	}
 
 	// Collect streaming content for memory processing
 	var fullResponse strings.Builder
@@ -717,13 +747,6 @@ func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			// Collect content for memory processing
 			fullResponse.Write(chunk)
-
-			if debugmod != nil && debugmod.(bool) {
-				contentChan <- utils.ContentUpdateMsg{
-					PanelName: "Response",
-					Content:   fmt.Sprintf("Response (%.1fs)\n\n%s", time.Since(start).Seconds(), string(chunk)),
-				}
-			}
 
 			return fn(chunk)
 		}),

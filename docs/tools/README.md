@@ -218,6 +218,36 @@ params := map[string]interface{}{
 result, err := echoTool.Toolkit.Execute("EchoTool_Echo", params)
 ```
 
+### 9. **MCPTool** - Model Context Protocol
+- **Purpose**: Dynamic connection to MCP servers for external tool integration
+- **Methods**: Dynamically registered from MCP server (list_directory, read_text_file, write_file, etc.)
+- **Status**: ✅ Fully functional and tested
+- **Use Cases**: Filesystem operations, database access, git operations, API integrations
+- **Documentation**: [MCP Module Documentation](MCP.md)
+
+#### Usage Examples
+```go
+// Connect to filesystem MCP server
+command := "npx -y @modelcontextprotocol/server-filesystem /path/to/directory"
+mcpTool, err := mcp.NewMCPTool(command, 30)
+if err != nil {
+    log.Fatal(err)
+}
+defer mcpTool.Close()
+
+// Connect to MCP server
+ctx := context.Background()
+if err := mcpTool.Connect(ctx); err != nil {
+    log.Fatal(err)
+}
+
+// Tools are registered automatically and can be used by agents
+agent, _ := agent.NewAgent(agent.AgentConfig{
+    Model: model,
+    Tools: []toolkit.Tool{mcpTool},
+})
+```
+
 ## 📁 File Structure
 
 ```
@@ -233,10 +263,14 @@ agno/
 │   ├── exa/
 │   │   ├── client.go        # Exa API client
 │   │   └── exa_tool.go      # ExaTool - Advanced search
+│   ├── mcp/
+│   │   └── mcp.go           # MCPTool - Model Context Protocol
 │   └── toolkit/
 │       ├── toolkit.go       # Base toolkit system
 │       └── contracts.go     # Interfaces and contracts
 examples/
+├── mcp_agent/           # MCP filesystem agent example
+├── multi_agent/         # Multi-tool agent (MCP + Weather)
 ├── openai/
 │   ├── web_simple/      # Simple WebTool + OpenAI example
 │   ├── web_advanced/    # Advanced WebTool + OpenAI example
@@ -464,8 +498,8 @@ func TestAllToolsIntegration(t *testing.T) {
 
 ## 📈 Usage Statistics
 
-- **8 Complete Tools**: WebTool, FileTool, MathTool, ShellTool, WeatherTool, DuckDuckGoTool, ExaTool, EchoTool
-- **30+ Total Methods**: Distributed across the 8 tools
+- **9 Complete Tools**: WebTool, FileTool, MathTool, ShellTool, WeatherTool, DuckDuckGoTool, ExaTool, EchoTool, MCPTool
+- **40+ Total Methods**: Distributed across the 9 tools (MCPTool registers methods dynamically)
 - **1500+ Lines of Code**: Robust and complete implementation
 - **Cross-Platform**: Supports Windows, Linux, macOS
 - **Functional Examples**: Multiple tested examples
