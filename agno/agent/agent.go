@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/devalexandre/agno-golang/agno/utils"
 	"github.com/google/uuid"
+	gpt3encoder "github.com/samber/go-gpt-3-encoder"
 )
 
 type AgentConfig struct {
@@ -54,7 +56,14 @@ type AgentConfig struct {
 	ReadChatHistory         bool
 
 	//knowledge
-	Knowledge knowledge.Knowledge
+	Knowledge             knowledge.Knowledge
+	KnowledgeMaxDocuments int
+
+	//Enable Semantic Compression
+	EnableSemanticCompression bool
+	SemanticMaxTokens         int
+	SemanticModel             models.AgnoModelInterface
+	SemanticAgent             models.AgentInterface
 }
 
 type Agent struct {
@@ -92,7 +101,8 @@ type Agent struct {
 	runs     []*storage.AgentRun
 
 	// Knowledge
-	knowledge knowledge.Knowledge
+	knowledge             knowledge.Knowledge
+	knowledgeMaxDocuments int
 
 	// Reasoning
 	reasoning         bool
@@ -100,6 +110,12 @@ type Agent struct {
 	reasoningAgent    models.AgentInterface
 	reasoningMinSteps int
 	reasoningMaxSteps int
+
+	// Semantic Compression
+	semanticModel             models.AgnoModelInterface
+	semanticAgent             models.AgentInterface
+	semanticMaxTokens         int
+	enableSemanticCompression bool
 }
 
 func NewAgent(config AgentConfig) (*Agent, error) {
@@ -121,6 +137,10 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 	}
 	if config.ReasoningMaxSteps <= 0 {
 		config.ReasoningMaxSteps = 3
+	}
+
+	if config.KnowledgeMaxDocuments <= 0 {
+		config.KnowledgeMaxDocuments = 5
 	}
 
 	agent := &Agent{
@@ -157,7 +177,8 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		runs:     []*storage.AgentRun{},
 
 		//knowledge
-		knowledge: config.Knowledge,
+		knowledge:             config.Knowledge,
+		knowledgeMaxDocuments: config.KnowledgeMaxDocuments,
 
 		// Reasoning
 		reasoning:         config.Reasoning,
@@ -165,6 +186,16 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		reasoningAgent:    config.ReasoningAgent,
 		reasoningMinSteps: config.ReasoningMinSteps,
 		reasoningMaxSteps: config.ReasoningMaxSteps,
+
+		// Semantic Compression
+		semanticModel:             config.SemanticModel,
+		semanticAgent:             config.SemanticAgent,
+		semanticMaxTokens:         config.SemanticMaxTokens,
+		enableSemanticCompression: config.EnableSemanticCompression,
+	}
+
+	if agent.enableSemanticCompression && agent.semanticModel == nil && agent.semanticAgent == nil {
+		return nil, fmt.Errorf("semantic compression is enabled but no semantic model or agent provided")
 	}
 
 	// Load existing session if storage is provided
@@ -189,6 +220,16 @@ func (a *Agent) GetRole() string {
 		return a.role
 	}
 	return "Assistant"
+}
+
+// GetModel returns the agent's model
+func (a *Agent) GetModel() models.AgnoModelInterface {
+	return a.model
+}
+
+// GetKnowledge returns the agent's knowledge base
+func (a *Agent) GetKnowledge() knowledge.Knowledge {
+	return a.knowledge
 }
 
 func (a *Agent) Run(prompt string) (models.RunResponse, error) {
@@ -474,21 +515,27 @@ func (a *Agent) filterToolCallsFromHistory(messages []models.Message) []models.M
 
 func (a *Agent) prepareMessages(prompt string) []models.Message {
 	systemMessage := ""
+	originalSystemMessage := ""
+	originalPrompt := prompt
 
 	if a.goal != "" {
-		systemMessage += fmt.Sprintf("<goal>\n%s\n</goal>\n", a.goal)
+		systemMessage += fmt.Sprintf("<goal>\n%s\n</goal>\n", a.ApplySemanticCompression(a.goal))
+		originalSystemMessage += fmt.Sprintf("<goal>\n%s\n</goal>\n", a.goal)
 	}
 
 	if a.description != "" {
-		systemMessage += fmt.Sprintf("<description>\n%s\n</description>\n", a.description)
+		systemMessage += fmt.Sprintf("<description>\n%s\n</description>\n", a.ApplySemanticCompression(a.description))
+		originalSystemMessage += fmt.Sprintf("<description>\n%s\n</description>\n", a.description)
 	}
 
 	if a.instructions != "" {
-		systemMessage += fmt.Sprintf("<instructions>\n%s\n</instructions>\n", a.instructions)
+		systemMessage += fmt.Sprintf("<instructions>\n%s\n</instructions>\n", a.ApplySemanticCompression(a.instructions))
+		originalSystemMessage += fmt.Sprintf("<instructions>\n%s\n</instructions>\n", a.instructions)
 	}
 
 	if a.expected_output != "" {
-		systemMessage += fmt.Sprintf("<expected_output>\n%s\n</expected_output>\n", a.expected_output)
+		systemMessage += fmt.Sprintf("<expected_output>\n%s\n</expected_output>\n", a.ApplySemanticCompression(a.expected_output))
+		originalSystemMessage += fmt.Sprintf("<expected_output>\n%s\n</expected_output>\n", a.expected_output)
 	}
 
 	// Add user memories if enabled and available
@@ -505,6 +552,7 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 				memoryContent += fmt.Sprintf("- %s\n", memory.Memory)
 			}
 			systemMessage += fmt.Sprintf("<user_memories>\nWhat I know about the user:\n%s</user_memories>\n", memoryContent)
+			originalSystemMessage += fmt.Sprintf("<user_memories>\nWhat I know about the user:\n%s</user_memories>\n", memoryContent)
 		}
 	}
 
@@ -514,7 +562,7 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 
 	//if have Knowledge, search for relevant documents
 	if a.knowledge != nil {
-		relevantDocs, err := a.knowledge.Search(a.ctx, prompt, 5)
+		relevantDocs, err := a.knowledge.Search(a.ctx, prompt, a.knowledgeMaxDocuments)
 		if err == nil && len(relevantDocs) > 0 {
 			docContent := ""
 			for _, doc := range relevantDocs {
@@ -524,7 +572,8 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 				}
 				docContent += fmt.Sprintf("- %s\n", snippet)
 			}
-			systemMessage += fmt.Sprintf("<knowledge>\nRelevant information I found:\n%s</knowledge>\n", docContent)
+			systemMessage += fmt.Sprintf("<knowledge>\nRelevant information I found:\n%s</knowledge>\n", a.ApplySemanticCompression(docContent))
+			originalSystemMessage += fmt.Sprintf("<knowledge>\nRelevant information I found:\n%s</knowledge>\n", docContent)
 		}
 	}
 
@@ -534,7 +583,8 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 
 	if len(a.contextData) > 0 {
 		contextStr := utils.PrettyPrintMap(a.contextData)
-		systemMessage += fmt.Sprintf("<context>\n%s\n</context>\n", contextStr)
+		systemMessage += fmt.Sprintf("<context>\n%s\n</context>\n", a.ApplySemanticCompression(contextStr))
+		originalSystemMessage += fmt.Sprintf("<context>\n%s\n</context>\n", contextStr)
 	}
 
 	if a.debug {
@@ -556,9 +606,45 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 		messages = append(messages, historyMessages...)
 	}
 
+	compressedPrompt := a.ApplySemanticCompression(prompt)
+
+	if a.debug && a.enableSemanticCompression {
+		encoder, _ := gpt3encoder.NewEncoder()
+		// Check token length
+		tokensSemantic, err := encoder.Encode(systemMessage)
+		if err != nil {
+			log.Printf("ERROR: Token encoding tokensSemantic failed: %v\n", err)
+		}
+
+		tokensOriginal, err := encoder.Encode(originalSystemMessage)
+		if err != nil {
+			log.Printf("ERROR: Token encoding tokensOriginal failed: %v\n", err)
+		}
+
+		fmt.Println("--------------------------------------System Compression-------------------------------------------------------------")
+		fmt.Printf("DEBUG: Original Message System \n\n %s\n\n", originalSystemMessage)
+		fmt.Printf("DEBUG: Applying semantic compression original message tokens: %d \n", len(tokensOriginal))
+		// Check for token length reduction
+		fmt.Printf("DEBUG: Compressed Message \n\n %s \n\n", systemMessage)
+		fmt.Printf("DEBUG: Applying semantic compression compressed message tokens: %d\n", len(tokensSemantic))
+		fmt.Println("--------------------------------------------------------------------------------------------------------------------------")
+
+		tokensPromptSemantic, _ := encoder.Encode(compressedPrompt)
+		tokensPromptOriginal, _ := encoder.Encode(originalPrompt)
+
+		fmt.Println("--------------------------------------Prompt Compression-------------------------------------------------------------")
+		fmt.Printf("DEBUG: Original Prompt \n\n %s\n\n", originalPrompt)
+		fmt.Printf("DEBUG: Applying semantic compression original prompt tokens: %d \n", len(tokensPromptOriginal))
+		// Check for token length reduction
+		fmt.Printf("DEBUG: Compressed Prompt \n\n %s \n\n", compressedPrompt)
+		fmt.Printf("DEBUG: Applying semantic compression compressed prompt tokens: %d\n", len(tokensPromptSemantic))
+		fmt.Println("--------------------------------------------------------------------------------------------------------------------------")
+
+	}
+
 	messages = append(messages, models.Message{
 		Role:    models.TypeUserRole,
-		Content: prompt,
+		Content: compressedPrompt,
 	})
 
 	return messages
@@ -809,4 +895,67 @@ func (a *Agent) Reason(prompt string) ([]models.ReasoningStep, error) {
 	}
 
 	return reasoning.ReasoningChain(a.ctx, invoker, prompt, a.reasoningMinSteps, a.reasoningMaxSteps)
+}
+
+func (a *Agent) ApplySemanticCompression(message string) string {
+	if !a.enableSemanticCompression {
+		return message
+	}
+
+	encoder, _ := gpt3encoder.NewEncoder()
+	// Check token length
+	tokens, _ := encoder.Encode(message)
+	if a.debug {
+		fmt.Printf("DEBUG: Applying semantic compression to %d tokens\n", tokens)
+	}
+	if a.semanticMaxTokens == 0 || len(tokens) < a.semanticMaxTokens {
+		// No need to compress
+		return message
+	}
+	var semanticAgent *Agent
+	var err error
+	var msgcompressed string
+
+	if a.semanticModel != nil && a.semanticAgent == nil {
+
+		semanticAgent, err = NewAgent(AgentConfig{
+			Context:      a.ctx,
+			Name:         "SemanticCompressor",
+			Description:  "Semantic text compression agent.",
+			Instructions: "Replace the input text with an ultra-concise version using abbreviations, technical notation, and minimal wording. Preserve all essential facts (dates, versions, IDs, deadlines). Return only the compressed result in the same language as the input. Do not add explanations or comments.",
+			Model:        a.semanticModel,
+			Markdown:     false,
+			Debug:        false,
+		})
+
+		if err != nil {
+			log.Fatalf("Failed to create assistant agent: %v", err)
+		}
+	}
+
+	if a.semanticAgent != nil && a.semanticModel == nil {
+
+		newmsg, err := a.semanticAgent.Run(message)
+		if err != nil {
+			if a.debug {
+				fmt.Printf("Warning: Semantic compression failed for message: %v\n", err)
+			}
+
+		}
+		msgcompressed = newmsg.Messages[0].Content
+	}
+
+	if a.semanticModel != nil && a.semanticAgent == nil {
+
+		newmsg, err := semanticAgent.Run(message)
+		if err != nil {
+			if a.debug {
+				fmt.Printf("Warning: Semantic compression failed for message: %v\n", err)
+			}
+
+		}
+		msgcompressed = newmsg.Messages[0].Content
+	}
+
+	return msgcompressed
 }

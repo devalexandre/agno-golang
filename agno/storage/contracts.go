@@ -75,6 +75,9 @@ type AgentRun struct {
 
 // Storage defines the universal interface for session storage (Python compatible)
 type Storage interface {
+	// GetID returns the unique identifier for this storage instance
+	GetID() string
+
 	// Create the storage (tables, etc.)
 	Create() error
 
