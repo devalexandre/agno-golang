@@ -26,15 +26,15 @@ func TestNewAgentOS(t *testing.T) {
 			name: "valid options",
 			options: AgentOSOptions{
 				OSID:        "test-os",
-				Name:        stringPtr("Test OS"),
-				Description: stringPtr("Test Description"),
+				Name:        StringPtr("Test OS"),
+				Description: StringPtr("Test Description"),
 			},
 			wantErr: false,
 		},
 		{
 			name: "missing OS ID",
 			options: AgentOSOptions{
-				Name: stringPtr("Test OS"),
+				Name: StringPtr("Test OS"),
 			},
 			wantErr: true,
 		},
@@ -107,8 +107,8 @@ func TestAgentOS_HealthHandler(t *testing.T) {
 	var response map[string]interface{}
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Equal(t, "healthy", response["status"])
-	assert.Contains(t, response, "version")
+	assert.Equal(t, "ok", response["status"])
+	// Health endpoint doesn't include version (matches Python AgentOS)
 }
 
 func TestAgentOS_ConfigHandler(t *testing.T) {
@@ -117,9 +117,9 @@ func TestAgentOS_ConfigHandler(t *testing.T) {
 	// Create AgentOS instance
 	os, err := NewAgentOS(AgentOSOptions{
 		OSID:        "test-os",
-		Name:        stringPtr("Test OS"),
-		Description: stringPtr("Test Description"),
-		Version:     stringPtr("1.0.0"),
+		Name:        StringPtr("Test OS"),
+		Description: StringPtr("Test Description"),
+		Version:     StringPtr("1.0.0"),
 	})
 	require.NoError(t, err)
 
@@ -187,12 +187,9 @@ func TestAgentOS_ListAgentsHandler(t *testing.T) {
 	// Check response
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err = json.Unmarshal(w.Body.Bytes(), &response)
+	var agents []interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &agents)
 	assert.NoError(t, err)
-
-	agents, ok := response["agents"].([]interface{})
-	assert.True(t, ok)
 	assert.Len(t, agents, 2)
 }
 
@@ -281,7 +278,4 @@ func TestAgentOSSettings_DefaultValues(t *testing.T) {
 	assert.Equal(t, true, settings.EnableCORS)
 }
 
-// Helper function for tests
-func stringPtr(s string) *string {
-	return &s
-}
+// Helper function is now in conversions.go
