@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
+	"github.com/devalexandre/agno-golang/agno/knowledge"
 	"github.com/devalexandre/agno-golang/agno/team"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
@@ -32,6 +33,7 @@ type AgentOS struct {
 	agents    []*agent.Agent
 	teams     []*team.Team
 	workflows []*v2.Workflow
+	knowledge []interface{} // Direct knowledge bases passed to AgentOS (like Python)
 
 	// Configuration and settings
 	config   *AgentOSConfig
@@ -53,12 +55,29 @@ type AgentOS struct {
 	telemetry  bool
 	middleware []interface{}
 
+	// Database storage (like Python's self.dbs and self.knowledge_dbs)
+	dbs          map[string]interface{} // All databases from agents/teams/workflows
+	knowledgeDbs map[string]interface{} // Databases specifically used for knowledge
+
 	// Knowledge base storage
-	knowledgeDocs map[string]*KnowledgeDocument
-	knowledgeByDB map[string][]*KnowledgeDocument
+	knowledgeDocs      map[string]*KnowledgeDocument
+	knowledgeByDB      map[string][]*KnowledgeDocument
+	knowledgeInstances []*KnowledgeInstance // Auto-discovered knowledge instances from agents/teams/direct
 
 	// WebSocket upgrader for real-time communication
 	upgrader websocket.Upgrader
+}
+
+// knowledgeToInterface converts []knowledge.Knowledge to []interface{}
+func knowledgeToInterface(knowledge []knowledge.Knowledge) []interface{} {
+	if knowledge == nil {
+		return nil
+	}
+	result := make([]interface{}, len(knowledge))
+	for i, k := range knowledge {
+		result[i] = k
+	}
+	return result
 }
 
 // NewAgentOS creates a new AgentOS instance
@@ -73,7 +92,7 @@ func NewAgentOS(options AgentOSOptions) (*AgentOS, error) {
 	settings := options.Settings
 	if settings == nil {
 		settings = &AgentOSSettings{
-			Port:       7777,
+			Port:       8080,
 			Host:       "0.0.0.0",
 			Reload:     false,
 			Debug:      false,
@@ -107,25 +126,29 @@ func NewAgentOS(options AgentOSOptions) (*AgentOS, error) {
 	}
 
 	os := &AgentOS{
-		osID:          options.OSID,
-		name:          name,
-		description:   description,
-		version:       version,
-		agents:        options.Agents,
-		teams:         options.Teams,
-		workflows:     options.Workflows,
-		config:        config,
-		settings:      settings,
-		sessions:      make(map[string]*Session),
-		events:        make([]Event, 0),
-		interfaces:    options.Interfaces,
-		ctx:           ctx,
-		cancel:        cancel,
-		enableMCP:     options.EnableMCP,
-		telemetry:     options.Telemetry,
-		middleware:    options.Middleware,
-		knowledgeDocs: make(map[string]*KnowledgeDocument),
-		knowledgeByDB: make(map[string][]*KnowledgeDocument),
+		osID:               options.OSID,
+		name:               name,
+		description:        description,
+		version:            version,
+		agents:             options.Agents,
+		teams:              options.Teams,
+		workflows:          options.Workflows,
+		knowledge:          knowledgeToInterface(options.Knowledge), // Store direct knowledge bases
+		config:             config,
+		settings:           settings,
+		sessions:           make(map[string]*Session),
+		events:             make([]Event, 0),
+		interfaces:         options.Interfaces,
+		ctx:                ctx,
+		cancel:             cancel,
+		enableMCP:          options.EnableMCP,
+		telemetry:          options.Telemetry,
+		middleware:         options.Middleware,
+		dbs:                make(map[string]interface{}), // Initialize databases map
+		knowledgeDbs:       make(map[string]interface{}), // Initialize knowledge databases map
+		knowledgeDocs:      make(map[string]*KnowledgeDocument),
+		knowledgeByDB:      make(map[string][]*KnowledgeDocument),
+		knowledgeInstances: make([]*KnowledgeInstance, 0),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for now
@@ -193,7 +216,209 @@ func (os *AgentOS) initialize() error {
 	}
 	os.templates = templates
 
+	// Auto-discover databases from agents, teams, workflows, and knowledge (like Python)
+	os.autoDiscoverDatabases()
+
+	// Auto-discover knowledge instances from agents, teams, and direct OS knowledge
+	os.autoDiscoverKnowledgeInstances()
+
 	return nil
+}
+
+// autoDiscoverKnowledgeInstances discovers knowledge instances from agents, teams, and direct OS knowledge
+// This matches Python's _auto_discover_knowledge_instances() behavior
+func (os *AgentOS) autoDiscoverKnowledgeInstances() {
+	seen := make(map[string]bool) // Track by DB ID to avoid duplicates
+
+	// Helper function to add knowledge if not duplicate
+	addKnowledgeIfNotDuplicate := func(k knowledge.Knowledge) {
+		if k == nil {
+			return
+		}
+
+		// Get ContentsDB - only add if it exists
+		contentsDB := k.GetContentsDB()
+		if contentsDB == nil {
+			return
+		}
+
+		// Get the DB ID
+		dbID := contentsDB.GetID()
+
+		// Skip if already seen (deduplicate)
+		if seen[dbID] {
+			return
+		}
+		seen[dbID] = true
+
+		// Add knowledge instance
+		os.knowledgeInstances = append(os.knowledgeInstances, &KnowledgeInstance{
+			Knowledge:  k,
+			ContentsDB: contentsDB,
+			DBID:       dbID,
+		})
+	}
+
+	// 1. Collect from agents
+	if os.agents != nil {
+		for _, agent := range os.agents {
+			agentKnowledge := agent.GetKnowledge()
+			if agentKnowledge != nil {
+				addKnowledgeIfNotDuplicate(agentKnowledge)
+			}
+		}
+	}
+
+	// 2. Collect from teams (future support)
+	if os.teams != nil {
+		for _, team := range os.teams {
+			// Teams don't have knowledge field yet in Go implementation
+			// But keeping for future compatibility
+			_ = team
+		}
+	}
+
+	// 3. Collect from direct OS knowledge (like Python: for knowledge_base in self.knowledge or [])
+	if os.knowledge != nil {
+		for _, kb := range os.knowledge {
+			// Type assert to knowledge.Knowledge interface
+			if k, ok := kb.(knowledge.Knowledge); ok {
+				addKnowledgeIfNotDuplicate(k)
+			}
+		}
+	}
+}
+
+// autoDiscoverDatabases auto-discovers databases from agents, teams, workflows, and knowledge
+// This matches Python's _auto_discover_databases() behavior
+func (os *AgentOS) autoDiscoverDatabases() {
+	dbs := make(map[string]interface{})
+	knowledgeDbs := make(map[string]interface{})
+
+	// Helper function to register DB with validation
+	registerDBWithValidation := func(registeredDBs map[string]interface{}, db interface{}) error {
+		// Get DB ID using type assertion
+		var dbID string
+		if dbWithID, ok := db.(interface{ GetID() string }); ok {
+			dbID = dbWithID.GetID()
+		} else {
+			return fmt.Errorf("database does not have GetID method")
+		}
+
+		// Check if DB with this ID already exists
+		if existingDB, exists := registeredDBs[dbID]; exists {
+			// Validate compatibility
+			if !os.areDBInstancesCompatible(existingDB, db) {
+				return fmt.Errorf(
+					"database ID conflict detected: two different database instances have the same ID '%s'. "+
+						"Database instances with the same ID must point to the same database with identical configuration",
+					dbID,
+				)
+			}
+		}
+
+		registeredDBs[dbID] = db
+		return nil
+	}
+
+	// 1. Collect from agents
+	if os.agents != nil {
+		for _, agent := range os.agents {
+			// Agent's knowledge ContentsDB
+			if agentKnowledge := agent.GetKnowledge(); agentKnowledge != nil {
+				if contentsDB := agentKnowledge.GetContentsDB(); contentsDB != nil {
+					if err := registerDBWithValidation(knowledgeDbs, contentsDB); err != nil {
+						log.Printf("Warning: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Collect from teams (future support)
+	// Teams don't have knowledge field yet in Go implementation
+
+	// 3. Collect from workflows (future support)
+	// Workflows don't have DB field exposed yet
+
+	// 4. Collect from direct OS knowledge (like Python: for knowledge_base in self.knowledge or [])
+	if os.knowledge != nil {
+		for _, kb := range os.knowledge {
+			if k, ok := kb.(knowledge.Knowledge); ok {
+				if contentsDB := k.GetContentsDB(); contentsDB != nil {
+					if err := registerDBWithValidation(knowledgeDbs, contentsDB); err != nil {
+						log.Printf("Warning: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	// 5. Collect from interfaces (future support)
+	// Interfaces don't have GetAgent/GetTeam methods exposed yet
+
+	os.dbs = dbs
+	os.knowledgeDbs = knowledgeDbs
+}
+
+// areDBInstancesCompatible checks if two database instances are compatible
+// This matches Python's _are_db_instances_compatible() behavior
+func (os *AgentOS) areDBInstancesCompatible(db1, db2 interface{}) bool {
+	// If they're the same object reference, they're compatible
+	if db1 == db2 {
+		return true
+	}
+
+	// Check if they're the same type
+	if fmt.Sprintf("%T", db1) != fmt.Sprintf("%T", db2) {
+		return false
+	}
+
+	// Check db_url if exists
+	type HasURL interface {
+		GetURL() string
+	}
+	if dbURL1, ok1 := db1.(HasURL); ok1 {
+		if dbURL2, ok2 := db2.(HasURL); ok2 {
+			if dbURL1.GetURL() != dbURL2.GetURL() {
+				return false
+			}
+		}
+	}
+
+	// Check db_file if exists
+	type HasFile interface {
+		GetFile() string
+	}
+	if dbFile1, ok1 := db1.(HasFile); ok1 {
+		if dbFile2, ok2 := db2.(HasFile); ok2 {
+			if dbFile1.GetFile() != dbFile2.GetFile() {
+				return false
+			}
+		}
+	}
+
+	// Check table names
+	type HasTableNames interface {
+		GetSessionTableName() string
+		GetMemoryTableName() string
+		GetMetricsTableName() string
+		GetEvalTableName() string
+		GetKnowledgeTableName() string
+	}
+	if db1Tables, ok1 := db1.(HasTableNames); ok1 {
+		if db2Tables, ok2 := db2.(HasTableNames); ok2 {
+			if db1Tables.GetSessionTableName() != db2Tables.GetSessionTableName() ||
+				db1Tables.GetMemoryTableName() != db2Tables.GetMemoryTableName() ||
+				db1Tables.GetMetricsTableName() != db2Tables.GetMetricsTableName() ||
+				db1Tables.GetEvalTableName() != db2Tables.GetEvalTableName() ||
+				db1Tables.GetKnowledgeTableName() != db2Tables.GetKnowledgeTableName() {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 // GetApp creates and returns the HTTP router/app
@@ -289,16 +514,25 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 		protected.GET("/version", os.versionHandler)
 	}
 
-	// Knowledge routes - compatible with Python API
-	router.GET("/knowledge/documents", os.listKnowledgeDocumentsHandler)
-	router.POST("/knowledge/documents", os.createKnowledgeDocumentHandler)
-	router.GET("/knowledge/documents/:document_id", os.getKnowledgeDocumentHandler)
-	router.PATCH("/knowledge/documents/:document_id", os.updateKnowledgeDocumentHandler)
-	router.DELETE("/knowledge/documents/:document_id", os.deleteKnowledgeDocumentHandler)
-	router.DELETE("/knowledge/documents", os.deleteAllKnowledgeDocumentsHandler)
-	router.GET("/knowledge/conversations", os.getKnowledgeConversationsHandler)
+	// Knowledge routes - compatible with Python API (uses /content not /documents)
+	router.GET("/knowledge/content", os.listKnowledgeContentHandler)
+	router.POST("/knowledge/content", os.createKnowledgeContentHandler)
+	router.GET("/knowledge/content/:content_id", os.getKnowledgeContentHandler)
+	router.PATCH("/knowledge/content/:content_id", os.updateKnowledgeContentHandler)
+	router.DELETE("/knowledge/content/:content_id", os.deleteKnowledgeContentHandler)
+	router.DELETE("/knowledge/content", os.deleteAllKnowledgeContentHandler)
+	router.GET("/knowledge/content/:content_id/status", os.getKnowledgeContentStatusHandler)
+	router.GET("/knowledge/config", os.getKnowledgeConfigHandler)
 	router.POST("/knowledge/search", os.searchKnowledgeHandler)
-	router.GET("/knowledge/search/:search_id", os.getKnowledgeSearchResultHandler)
+
+	// Legacy knowledge/documents endpoints for backward compatibility
+	router.GET("/knowledge/documents", os.listKnowledgeContentHandler)
+	router.POST("/knowledge/documents", os.createKnowledgeContentHandler)
+	router.GET("/knowledge/documents/:document_id", os.getKnowledgeContentHandler)
+	router.PATCH("/knowledge/documents/:document_id", os.updateKnowledgeContentHandler)
+	router.DELETE("/knowledge/documents/:document_id", os.deleteKnowledgeContentHandler)
+	router.DELETE("/knowledge/documents", os.deleteAllKnowledgeContentHandler)
+	router.GET("/knowledge/conversations", os.getKnowledgeConversationsHandler)
 
 	// Memory routes - compatible with Python API
 	router.POST("/memory/add", os.addMemoryHandler)

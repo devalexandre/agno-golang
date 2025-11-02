@@ -71,16 +71,8 @@ func (os *AgentOS) vectorSearchHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, []gin.H{})
 }
 
-// getKnowledgeConfigHandler handles GET /knowledge/config
-func (os *AgentOS) getKnowledgeConfigHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"readers":    gin.H{},
-		"chunkers":   gin.H{},
-		"vector_dbs": []gin.H{},
-	})
-}
-
-// getContentHandler handles GET /knowledge/content/{content_id}
+// getContentHandler handles GET /knowledge/content/{content_id} - DEPRECATED, kept for compatibility
+// Use getKnowledgeContentHandler from additional_handlers.go instead
 func (os *AgentOS) getContentHandler(c *gin.Context) {
 	contentID := c.Param("content_id")
 	c.JSON(http.StatusOK, gin.H{

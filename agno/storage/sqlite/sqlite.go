@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/devalexandre/agno-golang/agno/storage"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 )
 
 // SqliteStorage implements the Storage interface with SQLite backend
 // Following the Python Agno implementation patterns
 type SqliteStorage struct {
+	id                string
 	tableName         string
 	dbURL             *string
 	dbFile            *string
@@ -28,6 +30,7 @@ type SqliteStorage struct {
 
 // SqliteStorageConfig holds configuration options
 type SqliteStorageConfig struct {
+	ID                string
 	TableName         string
 	DBURL             *string
 	DBFile            *string
@@ -47,7 +50,14 @@ func NewSqliteStorage(config SqliteStorageConfig) (*SqliteStorage, error) {
 		config.Mode = storage.AgentMode
 	}
 
+	// Generate ID if not provided (like Python's BaseDb)
+	id := config.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
+
 	s := &SqliteStorage{
+		id:                id,
 		tableName:         config.TableName,
 		dbURL:             config.DBURL,
 		dbFile:            config.DBFile,
@@ -219,6 +229,11 @@ func (s *SqliteStorage) TableExists() (bool, error) {
 		return false, fmt.Errorf("error checking if table exists: %w", err)
 	}
 	return true, nil
+}
+
+// GetID returns the unique identifier for this storage instance
+func (s *SqliteStorage) GetID() string {
+	return s.id
 }
 
 // Create creates the table and indexes if they don't exist
@@ -728,5 +743,292 @@ func (s *SqliteStorage) Close() error {
 	if s.db != nil {
 		return s.db.Close()
 	}
+	return nil
+}
+
+// Knowledge Content methods - compatible with Python's BaseDb
+
+// GetKnowledgeContent retrieves a single knowledge content by ID
+func (s *SqliteStorage) GetKnowledgeContent(id string) (*storage.KnowledgeRow, error) {
+	// Ensure knowledge table exists
+	if err := s.createKnowledgeTableIfNotExists(); err != nil {
+		return nil, err
+	}
+
+	query := `
+		SELECT id, name, description, metadata, type, size, linked_to, access_count,
+		       status, status_message, created_at, updated_at, external_id
+		FROM agno_knowledge
+		WHERE id = ?
+	`
+
+	row := s.db.QueryRow(query, id)
+
+	var kr storage.KnowledgeRow
+	var metadataStr sql.NullString
+	var typeVal, linkedTo, status, statusMessage, externalID sql.NullString
+	var size, accessCount sql.NullInt64
+	var createdAt, updatedAt sql.NullInt64
+
+	err := row.Scan(
+		&kr.ID, &kr.Name, &kr.Description, &metadataStr,
+		&typeVal, &size, &linkedTo, &accessCount,
+		&status, &statusMessage, &createdAt, &updatedAt, &externalID,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get knowledge content: %w", err)
+	}
+
+	// Parse metadata JSON
+	if metadataStr.Valid && metadataStr.String != "" {
+		if err := json.Unmarshal([]byte(metadataStr.String), &kr.Metadata); err != nil {
+			kr.Metadata = make(map[string]interface{})
+		}
+	} else {
+		kr.Metadata = make(map[string]interface{})
+	}
+
+	// Handle nullable fields
+	if typeVal.Valid {
+		kr.Type = &typeVal.String
+	}
+	if size.Valid {
+		sizeInt := int(size.Int64)
+		kr.Size = &sizeInt
+	}
+	if linkedTo.Valid {
+		kr.LinkedTo = &linkedTo.String
+	}
+	if accessCount.Valid {
+		countInt := int(accessCount.Int64)
+		kr.AccessCount = &countInt
+	}
+	if status.Valid {
+		kr.Status = &status.String
+	}
+	if statusMessage.Valid {
+		kr.StatusMessage = &statusMessage.String
+	}
+	if createdAt.Valid {
+		kr.CreatedAt = &createdAt.Int64
+	}
+	if updatedAt.Valid {
+		kr.UpdatedAt = &updatedAt.Int64
+	}
+	if externalID.Valid {
+		kr.ExternalID = &externalID.String
+	}
+
+	return &kr, nil
+}
+
+// GetKnowledgeContents retrieves all knowledge contents with pagination
+func (s *SqliteStorage) GetKnowledgeContents(limit, page *int, sortBy, sortOrder *string) ([]*storage.KnowledgeRow, int, error) {
+	// Ensure knowledge table exists
+	if err := s.createKnowledgeTableIfNotExists(); err != nil {
+		return nil, 0, err
+	}
+
+	// Count total records
+	var totalCount int
+	countQuery := "SELECT COUNT(*) FROM agno_knowledge"
+	if err := s.db.QueryRow(countQuery).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("failed to count knowledge contents: %w", err)
+	}
+
+	// Build query with sorting and pagination
+	query := `
+		SELECT id, name, description, metadata, type, size, linked_to, access_count,
+		       status, status_message, created_at, updated_at, external_id
+		FROM agno_knowledge
+	`
+
+	// Add sorting
+	sortCol := "updated_at"
+	sortDir := "DESC"
+	if sortBy != nil && *sortBy != "" {
+		sortCol = *sortBy
+	}
+	if sortOrder != nil && strings.ToUpper(*sortOrder) == "ASC" {
+		sortDir = "ASC"
+	}
+	query += fmt.Sprintf(" ORDER BY %s %s", sortCol, sortDir)
+
+	// Add pagination
+	if limit != nil && *limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", *limit)
+		if page != nil && *page > 1 {
+			offset := (*page - 1) * (*limit)
+			query += fmt.Sprintf(" OFFSET %d", offset)
+		}
+	}
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query knowledge contents: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*storage.KnowledgeRow
+	for rows.Next() {
+		var kr storage.KnowledgeRow
+		var metadataStr sql.NullString
+		var typeVal, linkedTo, status, statusMessage, externalID sql.NullString
+		var size, accessCount sql.NullInt64
+		var createdAt, updatedAt sql.NullInt64
+
+		err := rows.Scan(
+			&kr.ID, &kr.Name, &kr.Description, &metadataStr,
+			&typeVal, &size, &linkedTo, &accessCount,
+			&status, &statusMessage, &createdAt, &updatedAt, &externalID,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan knowledge row: %w", err)
+		}
+
+		// Parse metadata
+		if metadataStr.Valid && metadataStr.String != "" {
+			if err := json.Unmarshal([]byte(metadataStr.String), &kr.Metadata); err != nil {
+				kr.Metadata = make(map[string]interface{})
+			}
+		} else {
+			kr.Metadata = make(map[string]interface{})
+		}
+
+		// Handle nullable fields
+		if typeVal.Valid {
+			kr.Type = &typeVal.String
+		}
+		if size.Valid {
+			sizeInt := int(size.Int64)
+			kr.Size = &sizeInt
+		}
+		if linkedTo.Valid {
+			kr.LinkedTo = &linkedTo.String
+		}
+		if accessCount.Valid {
+			countInt := int(accessCount.Int64)
+			kr.AccessCount = &countInt
+		}
+		if status.Valid {
+			kr.Status = &status.String
+		}
+		if statusMessage.Valid {
+			kr.StatusMessage = &statusMessage.String
+		}
+		if createdAt.Valid {
+			kr.CreatedAt = &createdAt.Int64
+		}
+		if updatedAt.Valid {
+			kr.UpdatedAt = &updatedAt.Int64
+		}
+		if externalID.Valid {
+			kr.ExternalID = &externalID.String
+		}
+
+		results = append(results, &kr)
+	}
+
+	return results, totalCount, nil
+}
+
+// UpsertKnowledgeContent inserts or updates a knowledge content
+func (s *SqliteStorage) UpsertKnowledgeContent(row *storage.KnowledgeRow) (*storage.KnowledgeRow, error) {
+	// Ensure knowledge table exists
+	if err := s.createKnowledgeTableIfNotExists(); err != nil {
+		return nil, err
+	}
+
+	// Marshal metadata to JSON
+	metadataJSON, err := json.Marshal(row.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Prepare values
+	now := time.Now().Unix()
+	if row.UpdatedAt == nil {
+		row.UpdatedAt = &now
+	}
+	if row.CreatedAt == nil {
+		row.CreatedAt = &now
+	}
+
+	query := `
+		INSERT INTO agno_knowledge (
+			id, name, description, metadata, type, size, linked_to, access_count,
+			status, status_message, created_at, updated_at, external_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			description = excluded.description,
+			metadata = excluded.metadata,
+			type = excluded.type,
+			size = excluded.size,
+			linked_to = excluded.linked_to,
+			access_count = excluded.access_count,
+			status = excluded.status,
+			status_message = excluded.status_message,
+			updated_at = excluded.updated_at,
+			external_id = excluded.external_id
+	`
+
+	_, err = s.db.Exec(query,
+		row.ID, row.Name, row.Description, string(metadataJSON),
+		row.Type, row.Size, row.LinkedTo, row.AccessCount,
+		row.Status, row.StatusMessage, row.CreatedAt, row.UpdatedAt, row.ExternalID,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to upsert knowledge content: %w", err)
+	}
+
+	return row, nil
+}
+
+// DeleteKnowledgeContent deletes a knowledge content by ID
+func (s *SqliteStorage) DeleteKnowledgeContent(id string) error {
+	// Ensure knowledge table exists
+	if err := s.createKnowledgeTableIfNotExists(); err != nil {
+		return err
+	}
+
+	query := "DELETE FROM agno_knowledge WHERE id = ?"
+	_, err := s.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete knowledge content: %w", err)
+	}
+
+	return nil
+}
+
+// createKnowledgeTableIfNotExists creates the agno_knowledge table if it doesn't exist
+func (s *SqliteStorage) createKnowledgeTableIfNotExists() error {
+	query := `
+		CREATE TABLE IF NOT EXISTS agno_knowledge (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			metadata TEXT,
+			type TEXT,
+			size INTEGER,
+			linked_to TEXT,
+			access_count INTEGER DEFAULT 0,
+			status TEXT,
+			status_message TEXT,
+			created_at INTEGER,
+			updated_at INTEGER,
+			external_id TEXT
+		)
+	`
+
+	if _, err := s.db.Exec(query); err != nil {
+		return fmt.Errorf("failed to create knowledge table: %w", err)
+	}
+
 	return nil
 }

@@ -270,7 +270,7 @@ func TestAgentOSSettings_DefaultValues(t *testing.T) {
 	require.NoError(t, err)
 
 	settings := os.GetSettings()
-	assert.Equal(t, 7777, settings.Port)
+	assert.Equal(t, 8080, settings.Port) // Python uses 8080 by default
 	assert.Equal(t, "0.0.0.0", settings.Host)
 	assert.Equal(t, false, settings.Reload)
 	assert.Equal(t, false, settings.Debug)
