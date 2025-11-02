@@ -32,6 +32,11 @@ func NewGemini(options ...models.OptionClient) (models.AgnoModelInterface, error
 	}, nil
 }
 
+// GetClientOptions returns the client options for this Gemini model
+func (g *Gemini) GetClientOptions() *models.ClientOptions {
+	return g.opts
+}
+
 // Invoke sends a chat completion request and parses the response into a MessageResponse.
 func (g *Gemini) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
 

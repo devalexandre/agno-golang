@@ -34,6 +34,11 @@ func NewOpenAIChat(options ...models.OptionClient) (models.AgnoModelInterface, e
 	}, nil
 }
 
+// GetClientOptions returns the client options for this OpenAI model
+func (o *OpenAIChat) GetClientOptions() *models.ClientOptions {
+	return o.opts
+}
+
 // ChatCompletion performs a chat completion request.
 func (o *OpenAIChat) ChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*client.ChatCompletionResponse, error) {
 	return o.client.CreateChatCompletion(ctx, messages, options...)

@@ -39,18 +39,23 @@ func NewOllamaChat(options ...models.OptionClient) (models.AgnoModelInterface, e
 	}, nil
 }
 
+// GetClientOptions returns the client options for this Ollama model
+func (o *OllamaChat) GetClientOptions() *models.ClientOptions {
+	return o.opts
+}
+
 // Invoke executes a synchronous call to the Ollama model
 func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
 	resp, err := o.client.CreateChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check if resp is nil
 	if resp == nil {
 		return nil, fmt.Errorf("received nil response from ollama client")
 	}
-	
+
 	var toolCalls []tools.ToolCall
 	if resp.Message.ToolCalls != nil {
 		for _, tc := range resp.Message.ToolCalls {
@@ -64,7 +69,7 @@ func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, opti
 			})
 		}
 	}
-	
+
 	return &models.MessageResponse{
 		Model:     o.id,
 		Role:      resp.Message.Role,
