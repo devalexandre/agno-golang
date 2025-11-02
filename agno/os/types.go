@@ -153,7 +153,25 @@ type Session struct {
 	CreatedAt time.Time              `json:"created_at"`
 	UpdatedAt time.Time              `json:"updated_at"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	State     map[string]interface{} `json:"state,omitempty"`
 	Active    bool                   `json:"active"`
+	Runs      []*SessionRun          `json:"runs,omitempty"`
+}
+
+// SessionRun represents a run within a session
+type SessionRun struct {
+	ID        string                 `json:"id"`     // Também conhecido como run_id
+	RunID     string                 `json:"run_id"` // Alias para compatibilidade
+	AgentID   string                 `json:"agent_id,omitempty"`
+	UserID    string                 `json:"user_id,omitempty"`
+	SessionID string                 `json:"session_id,omitempty"`
+	Status    string                 `json:"status"`
+	Content   string                 `json:"content,omitempty"`   // Resposta completa do agente
+	RunInput  string                 `json:"run_input,omitempty"` // Mensagem original do usuário
+	Messages  []interface{}          `json:"messages,omitempty"`
+	Metrics   map[string]interface{} `json:"metrics,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // Message represents a message in a session

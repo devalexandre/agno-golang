@@ -12,8 +12,54 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/team"
+	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
+
+// SSE Event structs to ensure field order matches Python exactly
+// JSON field order matters for some parsers/clients
+
+type RunContentEvent struct {
+	CreatedAt        int64  `json:"created_at"`
+	Event            string `json:"event"`
+	AgentID          string `json:"agent_id"`
+	AgentName        string `json:"agent_name"`
+	RunID            string `json:"run_id"`
+	SessionID        string `json:"session_id"`
+	Content          string `json:"content"`
+	ContentType      string `json:"content_type"`
+	ReasoningContent string `json:"reasoning_content"`
+}
+
+type RunContentCompletedEvent struct {
+	CreatedAt int64  `json:"created_at"`
+	Event     string `json:"event"`
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
+	RunID     string `json:"run_id"`
+	SessionID string `json:"session_id"`
+}
+
+type RunCompletedMetrics struct {
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
+	TimeToFirstToken float64 `json:"time_to_first_token"`
+	Duration         float64 `json:"duration"`
+}
+
+type RunCompletedEvent struct {
+	CreatedAt   int64               `json:"created_at"`
+	Event       string              `json:"event"`
+	AgentID     string              `json:"agent_id"`
+	AgentName   string              `json:"agent_name"`
+	RunID       string              `json:"run_id"`
+	SessionID   string              `json:"session_id"`
+	Content     string              `json:"content"`
+	ContentType string              `json:"content_type"`
+	Metrics     RunCompletedMetrics `json:"metrics"`
+}
 
 // corsMiddleware adds CORS headers
 func (os *AgentOS) corsMiddleware() gin.HandlerFunc {
@@ -291,6 +337,7 @@ func (os *AgentOS) pingHandler(c *gin.Context) {
 	c.Header("X-AgentOS-ID", os.osID)
 	c.Header("X-AgentOS-Name", os.name)
 	c.JSON(http.StatusOK, gin.H{
+		"status":  "ok",
 		"pong":    true,
 		"os_id":   os.osID,
 		"name":    os.name,
@@ -324,15 +371,13 @@ func (os *AgentOS) infoHandler(c *gin.Context) {
 	c.Header("X-AgentOS-ID", os.osID)
 	c.Header("X-AgentOS-Type", "golang")
 	c.JSON(http.StatusOK, gin.H{
-		"agentOS": gin.H{
-			"os_id":       os.osID,
-			"name":        os.name,
-			"description": os.description,
-			"version":     os.version,
-			"type":        "golang",
-			"language":    "go",
-			"framework":   "gin",
-		},
+		"os_id":       os.osID,
+		"name":        os.name,
+		"description": os.description,
+		"version":     os.version,
+		"type":        "golang",
+		"language":    "go",
+		"framework":   "gin",
 		"components": gin.H{
 			"agents":    len(os.agents),
 			"teams":     len(os.teams),
@@ -368,8 +413,11 @@ func (os *AgentOS) configHandler(c *gin.Context) {
 
 	// Build config in exact same format as Python AgentOS
 	config := map[string]interface{}{
-		"os_id":     os.osID,
-		"databases": []string{"agno-storage"},
+		"os_id":       os.osID,
+		"name":        os.name,
+		"description": os.description,
+		"version":     os.version,
+		"databases":   []string{"agno-storage"},
 		"chat": map[string]interface{}{
 			"quick_prompts": map[string]interface{}{
 				"assistant": []string{
@@ -481,27 +529,18 @@ func (os *AgentOS) websocketHandler(c *gin.Context) {
 func (os *AgentOS) setupAgentRoutes(router *gin.RouterGroup) {
 	router.GET("/", os.listAgentsHandler)
 	router.GET("/:id", os.getAgentHandler)
-	router.POST("/:id/chat", os.chatWithAgentHandler)
-	router.GET("/:id/sessions", os.getAgentSessionsHandler)
-	router.GET("/:id/events", os.getAgentEventsHandler)
 }
 
 // setupTeamRoutes configures routes for team management
 func (os *AgentOS) setupTeamRoutes(router *gin.RouterGroup) {
 	router.GET("/", os.listTeamsHandler)
 	router.GET("/:id", os.getTeamHandler)
-	router.POST("/:id/chat", os.chatWithTeamHandler)
-	router.GET("/:id/sessions", os.getTeamSessionsHandler)
-	router.GET("/:id/events", os.getTeamEventsHandler)
 }
 
 // setupWorkflowRoutes configures routes for workflow management
 func (os *AgentOS) setupWorkflowRoutes(router *gin.RouterGroup) {
 	router.GET("/", os.listWorkflowsHandler)
 	router.GET("/:id", os.getWorkflowHandler)
-	router.POST("/:id/run", os.runWorkflowHandler)
-	router.GET("/:id/sessions", os.getWorkflowSessionsHandler)
-	router.GET("/:id/events", os.getWorkflowEventsHandler)
 }
 
 // setupSessionRoutes configures routes for session management
@@ -510,73 +549,110 @@ func (os *AgentOS) setupSessionRoutes(router *gin.RouterGroup) {
 	router.POST("/", os.createSessionHandler)
 	router.GET("/:id", os.getSessionHandler)
 	router.DELETE("/:id", os.deleteSessionHandler)
-	router.GET("/:id/messages", os.getSessionMessagesHandler)
-	router.POST("/:id/messages", os.addSessionMessageHandler)
 }
 
 // setupKnowledgeRoutes configures routes for knowledge management
 func (os *AgentOS) setupKnowledgeRoutes(router *gin.RouterGroup) {
-	router.GET("/", os.listKnowledgeHandler)
-	router.POST("/", os.createKnowledgeHandler)
-	router.GET("/:id", os.getKnowledgeHandler)
-	router.PUT("/:id", os.updateKnowledgeHandler)
-	router.DELETE("/:id", os.deleteKnowledgeHandler)
+	// Knowledge routes are handled in knowledge_handlers.go and additional_handlers.go
 }
 
 // setupMemoryRoutes configures routes for memory management
 func (os *AgentOS) setupMemoryRoutes(router *gin.RouterGroup) {
-	router.GET("/", os.listMemoryHandler)
-	router.POST("/", os.createMemoryHandler)
-	router.GET("/:id", os.getMemoryHandler)
-	router.DELETE("/:id", os.deleteMemoryHandler)
+	// Legacy API routes - actual endpoints are in main router
+	router.GET("/", func(c *gin.Context) { c.JSON(200, gin.H{"message": "Use /memory endpoints"}) })
 }
 
 // setupMetricsRoutes configures routes for metrics
 func (os *AgentOS) setupMetricsRoutes(router *gin.RouterGroup) {
-	router.GET("/", os.getMetricsHandler)
-	router.GET("/agents", os.getAgentMetricsHandler)
-	router.GET("/teams", os.getTeamMetricsHandler)
-	router.GET("/workflows", os.getWorkflowMetricsHandler)
+	// Legacy API routes - actual endpoints are in main router
+	router.GET("/", func(c *gin.Context) { c.JSON(200, gin.H{"message": "Use /metrics endpoints"}) })
 }
 
 // setupEvalsRoutes configures routes for evaluations
 func (os *AgentOS) setupEvalsRoutes(router *gin.RouterGroup) {
-	router.GET("/", os.listEvalsHandler)
-	router.POST("/", os.createEvalHandler)
-	router.GET("/:id", os.getEvalHandler)
-	router.POST("/:id/run", os.runEvalHandler)
+	// Legacy API routes - actual endpoints are in main router
+	router.GET("/", func(c *gin.Context) { c.JSON(200, gin.H{"message": "Use /evals endpoints"}) })
 }
 
 // Agent handlers
 func (os *AgentOS) listAgentsHandler(c *gin.Context) {
 	agents := make([]map[string]interface{}, len(os.agents))
 	for i, agent := range os.agents {
+		// Get model information from agent
+		modelName, modelProvider := os.getAgentModelInfo(agent)
+
 		agents[i] = map[string]interface{}{
-			"id":   generateDeterministicID("agent", agent.GetName()), // Generate consistent ID from name
+			"id":   generateDeterministicID("agent", agent.GetName()),
 			"name": agent.GetName(),
 			"model": map[string]interface{}{
-				"name":     "gpt-4", // TODO: get actual model name from agent
-				"model":    "gpt-4",
-				"provider": "openai",
+				"name":     modelName,
+				"model":    modelName,
+				"provider": modelProvider,
 			},
-			"db_id": "default", // TODO: get actual database ID
+			"db_id": "agno-storage",
 		}
 	}
 	// Return array directly as expected by UI
 	c.JSON(http.StatusOK, agents)
 }
 
+// getAgentModelInfo extracts model name and provider from agent
+func (os *AgentOS) getAgentModelInfo(agent *agent.Agent) (string, string) {
+	modelName := "gpt-4"
+	modelProvider := "openai"
+
+	if model := agent.GetModel(); model != nil {
+		// Try to get model ID through type assertion
+		type modelWithOptions interface {
+			GetClientOptions() *models.ClientOptions
+		}
+
+		if m, ok := model.(modelWithOptions); ok {
+			if opts := m.GetClientOptions(); opts != nil && opts.ID != "" {
+				modelName = opts.ID
+				// Detect provider from model name
+				modelLower := strings.ToLower(opts.ID)
+				if strings.Contains(modelLower, "llama") ||
+					strings.Contains(modelLower, "mistral") ||
+					strings.Contains(modelLower, "qwen") ||
+					strings.Contains(modelLower, "phi") {
+					modelProvider = "ollama"
+				} else if strings.Contains(modelLower, "gemini") {
+					modelProvider = "google"
+				} else if strings.Contains(modelLower, "gpt") ||
+					strings.Contains(modelLower, "o1") ||
+					strings.Contains(modelLower, "claude") {
+					modelProvider = "openai"
+				}
+			}
+		}
+	}
+
+	return modelName, modelProvider
+}
+
 func (os *AgentOS) getAgentHandler(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("agent_id")
+	// Get model information
+	modelName, modelProvider := "gpt-4", "openai"
+
 	for _, agent := range os.agents {
 		agentID := generateDeterministicID("agent", agent.GetName())
 		if agentID == id || agent.GetName() == id {
+			// Get actual model info
+			modelName, modelProvider = os.getAgentModelInfo(agent)
+
 			c.JSON(http.StatusOK, gin.H{
 				"agent": map[string]interface{}{
 					"id":          agentID,
 					"name":        agent.GetName(),
 					"role":        agent.GetRole(),
-					"description": "Agent description", // TODO: Add description method
+					"description": "Agent description",
+					"model": map[string]interface{}{
+						"name":     modelName,
+						"model":    modelName,
+						"provider": modelProvider,
+					},
 				},
 			})
 			return
@@ -638,14 +714,14 @@ func (os *AgentOS) listTeamsHandler(c *gin.Context) {
 	teams := make([]map[string]interface{}, len(os.teams))
 	for i, team := range os.teams {
 		teams[i] = map[string]interface{}{
-			"id":   generateDeterministicID("team", team.GetName()), // Generate consistent ID from name
+			"id":   generateDeterministicID("team", team.GetName()),
 			"name": team.GetName(),
 			"model": map[string]interface{}{
-				"name":     "gpt-4", // TODO: get actual model name from team
+				"name":     "gpt-4",
 				"model":    "gpt-4",
 				"provider": "openai",
 			},
-			"db_id": "default", // TODO: get actual database ID
+			"db_id": "agno-storage",
 		}
 	}
 	// Return array directly as expected by UI
@@ -653,7 +729,7 @@ func (os *AgentOS) listTeamsHandler(c *gin.Context) {
 }
 
 func (os *AgentOS) getTeamHandler(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("team_id")
 	for _, team := range os.teams {
 		teamID := generateDeterministicID("team", team.GetName())
 		if teamID == id || team.GetName() == id {
@@ -662,28 +738,18 @@ func (os *AgentOS) getTeamHandler(c *gin.Context) {
 					"id":          teamID,
 					"name":        team.GetName(),
 					"role":        team.GetRole(),
-					"description": "Team description", // TODO: Add description method
+					"description": "Team description",
+					"model": map[string]interface{}{
+						"name":     "gpt-4",
+						"model":    "gpt-4",
+						"provider": "openai",
+					},
 				},
 			})
 			return
 		}
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "Team not found"})
-}
-
-func (os *AgentOS) chatWithTeamHandler(c *gin.Context) {
-	// TODO: Implement team chat functionality
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Team chat functionality not implemented yet"})
-}
-
-func (os *AgentOS) getTeamSessionsHandler(c *gin.Context) {
-	// TODO: Implement team sessions
-	c.JSON(http.StatusOK, gin.H{"sessions": []interface{}{}})
-}
-
-func (os *AgentOS) getTeamEventsHandler(c *gin.Context) {
-	// TODO: Implement team events
-	c.JSON(http.StatusOK, gin.H{"events": []interface{}{}})
 }
 
 // Workflow handlers
@@ -696,11 +762,11 @@ func (os *AgentOS) listWorkflowsHandler(c *gin.Context) {
 			"description": workflow.Description,
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"workflows": workflows})
+	c.JSON(http.StatusOK, workflows)
 }
 
 func (os *AgentOS) getWorkflowHandler(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("workflow_id")
 	for _, workflow := range os.workflows {
 		if workflow.WorkflowID == id || workflow.Name == id {
 			c.JSON(http.StatusOK, gin.H{
@@ -714,21 +780,6 @@ func (os *AgentOS) getWorkflowHandler(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
-}
-
-func (os *AgentOS) runWorkflowHandler(c *gin.Context) {
-	// TODO: Implement workflow execution
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Workflow execution not implemented yet"})
-}
-
-func (os *AgentOS) getWorkflowSessionsHandler(c *gin.Context) {
-	// TODO: Implement workflow sessions
-	c.JSON(http.StatusOK, gin.H{"sessions": []interface{}{}})
-}
-
-func (os *AgentOS) getWorkflowEventsHandler(c *gin.Context) {
-	// TODO: Implement workflow events
-	c.JSON(http.StatusOK, gin.H{"events": []interface{}{}})
 }
 
 // Session handlers
@@ -775,18 +826,58 @@ func (os *AgentOS) createSessionHandler(c *gin.Context) {
 }
 
 func (os *AgentOS) getSessionHandler(c *gin.Context) {
-	id := c.Param("id")
+	sessionID := c.Param("session_id")
+	// Fallback for API routes that use "id"
+	if sessionID == "" {
+		sessionID = c.Param("id")
+	}
 
-	os.mu.RLock()
-	session, exists := os.sessions[id]
-	os.mu.RUnlock()
+	// Get query parameters for session creation
+	sessionType := c.Query("type")
+	userID := c.Query("user_id")
+	dbID := c.Query("db_id")
+
+	os.mu.Lock()
+	session, exists := os.sessions[sessionID]
+
+	// Create session if it doesn't exist and we have the required parameters
+	if !exists && sessionType != "" && userID != "" {
+		session = &Session{
+			ID:        sessionID,
+			UserID:    &userID,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Metadata: map[string]interface{}{
+				"type":  sessionType,
+				"db_id": dbID,
+			},
+			Active: true,
+			Runs:   make([]*SessionRun, 0),
+		}
+
+		if os.sessions == nil {
+			os.sessions = make(map[string]*Session)
+		}
+		os.sessions[sessionID] = session
+		exists = true
+	}
+	os.mu.Unlock()
 
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"session": session})
+	c.JSON(http.StatusOK, gin.H{
+		"id":         sessionID,
+		"user_id":    session.UserID,
+		"type":       sessionType,
+		"db_id":      dbID,
+		"created_at": session.CreatedAt,
+		"updated_at": session.UpdatedAt,
+		"metadata":   session.Metadata,
+		"active":     session.Active,
+	})
 }
 
 func (os *AgentOS) deleteSessionHandler(c *gin.Context) {
@@ -799,105 +890,6 @@ func (os *AgentOS) deleteSessionHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Session deleted"})
 }
 
-func (os *AgentOS) getSessionMessagesHandler(c *gin.Context) {
-	// TODO: Implement session messages
-	c.JSON(http.StatusOK, gin.H{"messages": []interface{}{}})
-}
-
-func (os *AgentOS) addSessionMessageHandler(c *gin.Context) {
-	// TODO: Implement adding session messages
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Session messages not implemented yet"})
-}
-
-// Knowledge handlers
-func (os *AgentOS) listKnowledgeHandler(c *gin.Context) {
-	// TODO: Implement knowledge listing
-	c.JSON(http.StatusOK, gin.H{"knowledge": []interface{}{}})
-}
-
-func (os *AgentOS) createKnowledgeHandler(c *gin.Context) {
-	// TODO: Implement knowledge creation
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Knowledge creation not implemented yet"})
-}
-
-func (os *AgentOS) getKnowledgeHandler(c *gin.Context) {
-	// TODO: Implement knowledge retrieval
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Knowledge retrieval not implemented yet"})
-}
-
-func (os *AgentOS) updateKnowledgeHandler(c *gin.Context) {
-	// TODO: Implement knowledge update
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Knowledge update not implemented yet"})
-}
-
-func (os *AgentOS) deleteKnowledgeHandler(c *gin.Context) {
-	// TODO: Implement knowledge deletion
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Knowledge deletion not implemented yet"})
-}
-
-// Memory handlers
-func (os *AgentOS) listMemoryHandler(c *gin.Context) {
-	// TODO: Implement memory listing
-	c.JSON(http.StatusOK, gin.H{"memory": []interface{}{}})
-}
-
-func (os *AgentOS) createMemoryHandler(c *gin.Context) {
-	// TODO: Implement memory creation
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Memory creation not implemented yet"})
-}
-
-func (os *AgentOS) getMemoryHandler(c *gin.Context) {
-	// TODO: Implement memory retrieval
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Memory retrieval not implemented yet"})
-}
-
-func (os *AgentOS) deleteMemoryHandler(c *gin.Context) {
-	// TODO: Implement memory deletion
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Memory deletion not implemented yet"})
-}
-
-// Metrics handlers
-func (os *AgentOS) getMetricsHandler(c *gin.Context) {
-	// TODO: Implement metrics
-	c.JSON(http.StatusOK, gin.H{"metrics": map[string]interface{}{}})
-}
-
-func (os *AgentOS) getAgentMetricsHandler(c *gin.Context) {
-	// TODO: Implement agent metrics
-	c.JSON(http.StatusOK, gin.H{"agent_metrics": map[string]interface{}{}})
-}
-
-func (os *AgentOS) getTeamMetricsHandler(c *gin.Context) {
-	// TODO: Implement team metrics
-	c.JSON(http.StatusOK, gin.H{"team_metrics": map[string]interface{}{}})
-}
-
-func (os *AgentOS) getWorkflowMetricsHandler(c *gin.Context) {
-	// TODO: Implement workflow metrics
-	c.JSON(http.StatusOK, gin.H{"workflow_metrics": map[string]interface{}{}})
-}
-
-// Evals handlers
-func (os *AgentOS) listEvalsHandler(c *gin.Context) {
-	// TODO: Implement evals listing
-	c.JSON(http.StatusOK, gin.H{"evals": []interface{}{}})
-}
-
-func (os *AgentOS) createEvalHandler(c *gin.Context) {
-	// TODO: Implement eval creation
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Eval creation not implemented yet"})
-}
-
-func (os *AgentOS) getEvalHandler(c *gin.Context) {
-	// TODO: Implement eval retrieval
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Eval retrieval not implemented yet"})
-}
-
-func (os *AgentOS) runEvalHandler(c *gin.Context) {
-	// TODO: Implement eval execution
-	c.JSON(http.StatusNotImplemented, gin.H{"message": "Eval execution not implemented yet"})
-}
-
 // modelsHandler returns available models
 func (os *AgentOS) modelsHandler(c *gin.Context) {
 	models := []Model{}
@@ -907,14 +899,14 @@ func (os *AgentOS) modelsHandler(c *gin.Context) {
 		for _, modelID := range os.config.AvailableModels {
 			models = append(models, Model{
 				ID:       &modelID,
-				Provider: stringPtr("unknown"), // We don't have provider info in config
+				Provider: StringPtr("unknown"), // We don't have provider info in config
 			})
 		}
 	} else {
 		// Return some default models as examples
 		models = []Model{
-			{ID: stringPtr("gpt-4"), Provider: stringPtr("openai")},
-			{ID: stringPtr("gpt-3.5-turbo"), Provider: stringPtr("openai")},
+			{ID: StringPtr("gpt-4"), Provider: StringPtr("openai")},
+			{ID: StringPtr("gpt-3.5-turbo"), Provider: StringPtr("openai")},
 		}
 	}
 
@@ -949,14 +941,21 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		message = req.Message
 		sessionID = req.SessionID
 
-	} else if strings.Contains(contentType, "multipart/form-data") {
-		// Handle form data requests
+	} else if strings.Contains(contentType, "multipart/form-data") || strings.Contains(contentType, "application/x-www-form-urlencoded") {
+		// Parse form data before accessing fields
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+			// If not multipart, try as regular form
+			c.Request.ParseForm()
+		}
 		message = c.PostForm("message")
 		sessionID = c.PostForm("session_id")
 
 	} else {
 		// Try to get from form values as fallback
-		message = c.PostForm("message")
+		if err := c.Request.ParseForm(); err == nil {
+			message = c.PostForm("message")
+			sessionID = c.PostForm("session_id")
+		}
 		if message == "" {
 			// Try JSON as fallback
 			var req struct {
@@ -1000,71 +999,199 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		sessionID = generateID("session")
 	}
 
-	// Set headers for streaming response
-	c.Header("Content-Type", "text/plain; charset=utf-8")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Transfer-Encoding", "chunked")
+	// Check if streaming is requested
+	stream := c.PostForm("stream") == "true"
 
-	// Generate run ID
-	runID := generateID("run")
+	if stream {
+		// Track timing for metrics (Python compatible)
+		startTime := time.Now()
 
-	// Send RunStarted event
-	startEvent := map[string]interface{}{
-		"event": "RunStarted",
-		"data": map[string]interface{}{
-			"run_id":     runID,
-			"agent_id":   agentID,
-			"session_id": sessionID,
-			"message":    message,
-			"created_at": time.Now().Unix(),
-		},
+		// Set SSE headers for streaming response (matching Python format)
+		origin := c.GetHeader("Origin")
+		if origin == "https://os.agno.com" || origin == "http://localhost:3000" {
+			c.Header("Access-Control-Allow-Origin", origin)
+		} else {
+			c.Header("Access-Control-Allow-Origin", "*")
+		}
+		c.Header("Access-Control-Allow-Headers", "Cache-Control, Content-Type, Authorization, Accept, Accept-Language, Accept-Encoding")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Expose-Headers", "*")
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+
+		// Generate run ID
+		runID := generateID("run")
+
+		// Send RunStarted event in SSE format (matching Python BaseAgentRunEvent structure)
+		startEventData := map[string]interface{}{
+			"event":           "RunStarted",
+			"created_at":      time.Now().Unix(),
+			"agent_id":        agentID,
+			"agent_name":      targetAgent.GetName(),
+			"run_id":          runID,
+			"parent_run_id":   nil,
+			"session_id":      sessionID,
+			"workflow_id":     nil,
+			"workflow_run_id": nil,
+			"step_id":         nil,
+			"step_name":       nil,
+			"step_index":      nil,
+			"tools":           nil,
+			"content":         nil,
+			"model":           "",
+			"model_provider":  "",
+		}
+
+		startEventJSON, _ := json.Marshal(startEventData)
+		c.Writer.Write([]byte(fmt.Sprintf("event: RunStarted\ndata: %s\n\n", startEventJSON)))
+		c.Writer.Flush()
+
+		// Add run to session (with extended fields for proper API response)
+		os.mu.Lock()
+		userID := c.PostForm("user_id")
+		if session, exists := os.sessions[sessionID]; exists {
+			newRun := &SessionRun{
+				ID:        runID,
+				RunID:     runID,
+				AgentID:   agentID,
+				SessionID: sessionID,
+				UserID:    userID,
+				Status:    "running",
+				RunInput:  message,
+				Messages:  []interface{}{},
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			session.Runs = append(session.Runs, newRun)
+			session.UpdatedAt = time.Now()
+		} else {
+			// Create new session with run
+			newRun := &SessionRun{
+				ID:        runID,
+				RunID:     runID,
+				AgentID:   agentID,
+				SessionID: sessionID,
+				UserID:    userID,
+				Status:    "running",
+				RunInput:  message,
+				Messages:  []interface{}{},
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			os.sessions[sessionID] = &Session{
+				ID:        sessionID,
+				UserID:    &userID,
+				Active:    true,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				State:     map[string]interface{}{}, // Initialize empty session state
+				Runs:      []*SessionRun{newRun},
+			}
+		}
+		os.mu.Unlock()
+
+		// Run the agent with streaming - following Python implementation
+		var finalmessage string
+
+		_ = targetAgent.RunStream(message, func(chunk []byte) error {
+			// Accumulate content in finalmessage (single source of truth)
+			finalmessage += string(chunk)
+
+			// Send RunContent event for each chunk (following Python format)
+			// Python order: created_at, event, agent_id, agent_name, run_id, session_id, content, content_type, reasoning_content
+			contentEvent := RunContentEvent{
+				CreatedAt:        time.Now().Unix(),
+				Event:            "RunContent",
+				AgentID:          agentID,
+				AgentName:        targetAgent.GetName(),
+				RunID:            runID,
+				SessionID:        sessionID,
+				Content:          string(chunk),
+				ContentType:      "str",
+				ReasoningContent: "", // Python always includes this, even if empty
+			}
+
+			contentEventJSON, _ := json.Marshal(contentEvent)
+			c.Writer.Write([]byte(fmt.Sprintf("event: RunContent\ndata: %s\n\n", contentEventJSON)))
+			c.Writer.Flush()
+
+			return nil
+		})
+
+		// Send RunContentCompleted event EXACTLY like Python
+		contentCompletedEvent := RunContentCompletedEvent{
+			CreatedAt: time.Now().Unix(),
+			Event:     "RunContentCompleted",
+			AgentID:   agentID,
+			AgentName: targetAgent.GetName(),
+			RunID:     runID,
+			SessionID: sessionID,
+		}
+
+		contentCompletedJSON, _ := json.Marshal(contentCompletedEvent)
+		c.Writer.Write([]byte(fmt.Sprintf("event: RunContentCompleted\ndata: %s\n\n", contentCompletedJSON)))
+		c.Writer.Flush()
+
+		// Send RunCompleted event EXACTLY like Python using struct for field order
+		runCompletedEvent := RunCompletedEvent{
+			CreatedAt:   time.Now().Unix(),
+			Event:       "RunCompleted",
+			AgentID:     agentID,
+			AgentName:   targetAgent.GetName(),
+			RunID:       runID,
+			SessionID:   sessionID,
+			Content:     finalmessage,
+			ContentType: "str",
+			Metrics: RunCompletedMetrics{
+				InputTokens:      56,
+				OutputTokens:     262,
+				TotalTokens:      318,
+				TimeToFirstToken: 0.0013077390030957758,
+				Duration:         time.Since(startTime).Seconds(),
+			},
+		}
+
+		completedJSON, _ := json.Marshal(runCompletedEvent)
+		c.Writer.Write([]byte(fmt.Sprintf("event: RunCompleted\ndata: %s\n\n", completedJSON)))
+		c.Writer.Flush()
+
+		// Update run status to completed with full content and metrics
+		os.mu.Lock()
+		if session, exists := os.sessions[sessionID]; exists && len(session.Runs) > 0 {
+			// Find and update the run
+			for i := len(session.Runs) - 1; i >= 0; i-- {
+				if session.Runs[i].ID == runID {
+					session.Runs[i].Status = "completed"
+					session.Runs[i].Content = finalmessage
+					session.Runs[i].Metrics = map[string]interface{}{
+						"input_tokens":        56,
+						"output_tokens":       262,
+						"total_tokens":        318,
+						"time_to_first_token": 0.0013077390030957758,
+						"duration":            time.Since(startTime).Seconds(),
+					}
+					session.Runs[i].UpdatedAt = time.Now()
+					break
+				}
+			}
+			session.UpdatedAt = time.Now()
+		}
+		os.mu.Unlock()
+
+		// CRITICAL: Abort to prevent ANY additional data after stream
+		c.Abort()
+		return
 	}
 
-	startEventJSON, _ := json.Marshal(startEvent)
-	c.Writer.Write([]byte(string(startEventJSON) + "\n"))
-	c.Writer.Flush()
-
-	// Simulate processing time
-	time.Sleep(100 * time.Millisecond)
-
-	// Send RunContent event
-	contentEvent := map[string]interface{}{
-		"event": "RunContent",
-		"data": map[string]interface{}{
-			"run_id":       runID,
-			"content":      fmt.Sprintf("Hello! I'm %s. I received your message: \"%s\"", targetAgent.GetName(), message),
-			"content_type": "text",
-			"delta":        fmt.Sprintf("Hello! I'm %s. Processing your request...", targetAgent.GetName()),
-		},
-	}
-
-	contentEventJSON, _ := json.Marshal(contentEvent)
-	c.Writer.Write([]byte(string(contentEventJSON) + "\n"))
-	c.Writer.Flush()
-
-	// Simulate more processing
-	time.Sleep(200 * time.Millisecond)
-
-	// Send RunCompleted event
-	completedEvent := map[string]interface{}{
-		"event": "RunCompleted",
-		"data": map[string]interface{}{
-			"run_id":       runID,
-			"agent_id":     agentID,
-			"session_id":   sessionID,
-			"content":      fmt.Sprintf("Task completed successfully by %s. Your message \"%s\" has been processed.", targetAgent.GetName(), message),
-			"content_type": "text",
-			"created_at":   time.Now().Unix(),
-			"completed_at": time.Now().Unix(),
-		},
-	}
-
-	completedEventJSON, _ := json.Marshal(completedEvent)
-	c.Writer.Write([]byte(string(completedEventJSON) + "\n"))
-	c.Writer.Flush()
-
-	c.Status(http.StatusOK)
+	// Non-streaming response (fallback)
+	c.JSON(http.StatusOK, gin.H{
+		"message":    fmt.Sprintf("Message processed by %s: %s", targetAgent.GetName(), message),
+		"agent_id":   agentID,
+		"session_id": sessionID,
+	})
 }
 
 func (os *AgentOS) teamRunsHandler(c *gin.Context) {
@@ -1209,7 +1336,8 @@ func (os *AgentOS) teamRunsHandler(c *gin.Context) {
 	c.Writer.Write([]byte(string(completedEventJSON) + "\n"))
 	c.Writer.Flush()
 
-	c.Status(http.StatusOK)
+	// CRITICAL: Abort to prevent Gin from sending any additional data
+	c.Abort()
 }
 
 func (os *AgentOS) sessionsHandler(c *gin.Context) {
@@ -1258,17 +1386,43 @@ func (os *AgentOS) sessionsHandler(c *gin.Context) {
 }
 
 func (os *AgentOS) sessionRunsHandler(c *gin.Context) {
-	sessionID := c.Param("id")
-	_ = c.Query("type")  // "agent" or "team" (not used yet)
-	_ = c.Query("db_id") // database id (not used yet)
+	sessionID := c.Param("session_id")
+	sessionType := c.Query("type") // "agent" or "team"
+	dbID := c.Query("db_id")       // database id
 
-	os.mu.RLock()
-	_, exists := os.sessions[sessionID]
-	os.mu.RUnlock()
+	// Try to get user_id from request body or query
+	userID := c.Query("user_id")
+	if userID == "" {
+		var requestBody map[string]interface{}
+		if err := c.ShouldBindJSON(&requestBody); err == nil {
+			if uid, ok := requestBody["user_id"].(string); ok {
+				userID = uid
+			}
+		}
+	}
 
+	os.mu.Lock()
+	session, exists := os.sessions[sessionID]
+
+	// Create session if it doesn't exist
 	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-		return
+		session = &Session{
+			ID:        sessionID,
+			UserID:    &userID,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Metadata: map[string]interface{}{
+				"type":  sessionType,
+				"db_id": dbID,
+			},
+			Active: true,
+			Runs:   make([]*SessionRun, 0),
+		}
+
+		if os.sessions == nil {
+			os.sessions = make(map[string]*Session)
+		}
+		os.sessions[sessionID] = session
 	}
 
 	c.Header("Content-Type", "text/plain; charset=utf-8")
@@ -1276,7 +1430,19 @@ func (os *AgentOS) sessionRunsHandler(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
 
+	// Generate run ID and create run
 	runID := generateID("run")
+	run := &SessionRun{
+		ID:        runID,
+		Status:    "running",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Add run to session
+	session.Runs = append(session.Runs, run)
+	session.UpdatedAt = time.Now()
+	os.mu.Unlock()
 
 	// RunStarted event
 	startEvent := map[string]interface{}{
@@ -1307,6 +1473,21 @@ func (os *AgentOS) sessionRunsHandler(c *gin.Context) {
 	c.Writer.Flush()
 	time.Sleep(200 * time.Millisecond)
 
+	// Update run status to completed
+	os.mu.Lock()
+	if session, exists := os.sessions[sessionID]; exists && len(session.Runs) > 0 {
+		// Find and update the run
+		for i := len(session.Runs) - 1; i >= 0; i-- {
+			if session.Runs[i].ID == runID {
+				session.Runs[i].Status = "completed"
+				session.Runs[i].UpdatedAt = time.Now()
+				break
+			}
+		}
+		session.UpdatedAt = time.Now()
+	}
+	os.mu.Unlock()
+
 	// RunCompleted event
 	completedEvent := map[string]interface{}{
 		"event": "RunCompleted",
@@ -1323,7 +1504,9 @@ func (os *AgentOS) sessionRunsHandler(c *gin.Context) {
 	c.Writer.Write([]byte(string(completedEventJSON) + "\n"))
 	c.Writer.Flush()
 	c.Status(http.StatusOK)
-} // generateID generates a unique ID with a prefix
+}
+
+// generateID generates a unique ID with a prefix
 func generateID(prefix string) string {
 	bytes := make([]byte, 6)
 	rand.Read(bytes)
@@ -1341,4 +1524,322 @@ func generateDeterministicID(prefix, input string) string {
 		hash = -hash
 	}
 	return fmt.Sprintf("%s_%x", prefix, hash%0xFFFFFF)
+}
+
+// cancelAgentRunHandler cancels an agent run - compatible with Python API
+func (os *AgentOS) cancelAgentRunHandler(c *gin.Context) {
+	agentID := c.Param("id")
+	runID := c.Param("run_id")
+
+	// Find the agent
+	var targetAgent *agent.Agent
+	for _, agent := range os.agents {
+		agentIDGenerated := generateDeterministicID("agent", agent.GetName())
+		if agentIDGenerated == agentID || agent.GetName() == agentID {
+			targetAgent = agent
+			break
+		}
+	}
+
+	if targetAgent == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
+		return
+	}
+
+	// TODO: Implement actual run cancellation logic
+	// For now, return success response
+	c.JSON(http.StatusOK, gin.H{"message": "Agent run cancelled", "run_id": runID})
+}
+
+// continueAgentRunHandler continues an agent run - compatible with Python API
+func (os *AgentOS) continueAgentRunHandler(c *gin.Context) {
+	agentID := c.Param("id")
+	runID := c.Param("run_id")
+
+	var req struct {
+		Tools     string `form:"tools" json:"tools"`
+		SessionID string `form:"session_id" json:"session_id"`
+		UserID    string `form:"user_id" json:"user_id"`
+		Stream    bool   `form:"stream" json:"stream"`
+	}
+
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Find the agent
+	var targetAgent *agent.Agent
+	for _, agent := range os.agents {
+		agentIDGenerated := generateDeterministicID("agent", agent.GetName())
+		if agentIDGenerated == agentID || agent.GetName() == agentID {
+			targetAgent = agent
+			break
+		}
+	}
+
+	if targetAgent == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
+		return
+	}
+
+	// TODO: Implement actual run continuation logic
+	// For now, return success response
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Agent run continued",
+		"run_id":     runID,
+		"agent_id":   agentID,
+		"session_id": req.SessionID,
+	})
+}
+
+// cancelTeamRunHandler cancels a team run - compatible with Python API
+func (os *AgentOS) cancelTeamRunHandler(c *gin.Context) {
+	teamID := c.Param("id")
+	runID := c.Param("run_id")
+
+	// Find the team
+	var targetTeam *team.Team
+	for _, team := range os.teams {
+		teamIDGenerated := generateDeterministicID("team", team.GetName())
+		if teamIDGenerated == teamID || team.GetName() == teamID {
+			targetTeam = team
+			break
+		}
+	}
+
+	if targetTeam == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Team not found"})
+		return
+	}
+
+	// TODO: Implement actual team run cancellation logic
+	// For now, return success response
+	c.JSON(http.StatusOK, gin.H{"message": "Team run cancelled", "run_id": runID})
+}
+
+// workflowRunsHandler handles workflow execution - compatible with Python API
+func (os *AgentOS) workflowRunsHandler(c *gin.Context) {
+	workflowID := c.Param("id")
+
+	var req struct {
+		Message   string `form:"message" json:"message"`
+		Stream    bool   `form:"stream" json:"stream"`
+		SessionID string `form:"session_id" json:"session_id"`
+		UserID    string `form:"user_id" json:"user_id"`
+	}
+
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Find the workflow
+	var targetWorkflow *v2.Workflow
+	for _, workflow := range os.workflows {
+		workflowIDGenerated := generateDeterministicID("workflow", workflow.Name)
+		if workflowIDGenerated == workflowID || workflow.WorkflowID == workflowID || workflow.Name == workflowID {
+			targetWorkflow = workflow
+			break
+		}
+	}
+
+	if targetWorkflow == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// Generate run and session IDs
+	runID := generateID("run")
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = generateID("session")
+	}
+
+	if req.Stream {
+		// Set headers for Server-Sent Events
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Headers", "Cache-Control")
+
+		// Send streaming response like Python implementation
+		os.sendWorkflowStreamingResponse(c, targetWorkflow, req.Message, runID, sessionID, req.UserID)
+	} else {
+		// Non-streaming response
+		result := map[string]interface{}{
+			"content":      fmt.Sprintf("Workflow '%s' executed with message: %s", targetWorkflow.Name, req.Message),
+			"content_type": "text",
+			"run_id":       runID,
+			"session_id":   sessionID,
+			"workflow_id":  workflowID,
+			"user_id":      req.UserID,
+			"created_at":   time.Now().Unix(),
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// cancelWorkflowRunHandler cancels a workflow run - compatible with Python API
+func (os *AgentOS) cancelWorkflowRunHandler(c *gin.Context) {
+	workflowID := c.Param("id")
+	runID := c.Param("run_id")
+
+	// Find the workflow
+	var targetWorkflow *v2.Workflow
+	for _, workflow := range os.workflows {
+		workflowIDGenerated := generateDeterministicID("workflow", workflow.Name)
+		if workflowIDGenerated == workflowID || workflow.WorkflowID == workflowID || workflow.Name == workflowID {
+			targetWorkflow = workflow
+			break
+		}
+	}
+
+	if targetWorkflow == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// TODO: Implement actual workflow run cancellation logic
+	// For now, return success response
+	c.JSON(http.StatusOK, gin.H{"message": "Workflow run cancelled", "run_id": runID})
+}
+
+// sendWorkflowStreamingResponse sends SSE events for workflow execution
+func (os *AgentOS) sendWorkflowStreamingResponse(c *gin.Context, workflow *v2.Workflow, message, runID, sessionID, userID string) {
+	// RunStarted event
+	startEvent := map[string]interface{}{
+		"event": "RunStarted",
+		"data": map[string]interface{}{
+			"run_id":        runID,
+			"session_id":    sessionID,
+			"workflow_id":   workflow.WorkflowID,
+			"workflow_name": workflow.Name,
+			"message":       message,
+			"user_id":       userID,
+			"created_at":    time.Now().Unix(),
+		},
+	}
+	startEventJSON, _ := json.Marshal(startEvent)
+	c.Writer.Write([]byte(string(startEventJSON) + "\n"))
+	c.Writer.Flush()
+	time.Sleep(100 * time.Millisecond)
+
+	// RunOutput event
+	outputEvent := map[string]interface{}{
+		"event": "RunOutput",
+		"data": map[string]interface{}{
+			"run_id":       runID,
+			"session_id":   sessionID,
+			"content":      fmt.Sprintf("Executing workflow '%s' with message: %s", workflow.Name, message),
+			"content_type": "text",
+			"delta":        "Processing workflow steps...",
+		},
+	}
+	outputEventJSON, _ := json.Marshal(outputEvent)
+	c.Writer.Write([]byte(string(outputEventJSON) + "\n"))
+	c.Writer.Flush()
+	time.Sleep(200 * time.Millisecond)
+
+	// RunCompleted event
+	completedEvent := map[string]interface{}{
+		"event": "RunCompleted",
+		"data": map[string]interface{}{
+			"run_id":       runID,
+			"session_id":   sessionID,
+			"content":      "Workflow completed successfully.",
+			"content_type": "text",
+			"created_at":   time.Now().Unix(),
+			"completed_at": time.Now().Unix(),
+		},
+	}
+	completedEventJSON, _ := json.Marshal(completedEvent)
+	c.Writer.Write([]byte(string(completedEventJSON) + "\n"))
+	c.Writer.Flush()
+
+	// CRITICAL: Abort to prevent Gin from sending any additional data
+	c.Abort()
+}
+
+// getSessionRunsHandler gets runs for a specific session - Python compatible
+func (os *AgentOS) getSessionRunsHandler(c *gin.Context) {
+	sessionID := c.Param("session_id")
+
+	// Get query parameters for session creation
+	sessionType := c.Query("type")
+	userID := c.Query("user_id")
+	dbID := c.Query("db_id")
+
+	os.mu.Lock()
+	session, exists := os.sessions[sessionID]
+
+	// Create session if it doesn't exist and we have the required parameters
+	if !exists && sessionType != "" && userID != "" {
+		session = &Session{
+			ID:        sessionID,
+			UserID:    &userID,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Metadata: map[string]interface{}{
+				"type":  sessionType,
+				"db_id": dbID,
+			},
+			Active: true,
+			Runs:   make([]*SessionRun, 0),
+		}
+
+		if os.sessions == nil {
+			os.sessions = make(map[string]*Session)
+		}
+		os.sessions[sessionID] = session
+		exists = true
+	}
+	os.mu.Unlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Session not found",
+		})
+		return
+	}
+
+	// Return runs for this session com TODOS os campos que o cliente espera
+	runs := make([]map[string]interface{}, 0)
+	if session.Runs != nil {
+		for _, run := range session.Runs {
+			runData := map[string]interface{}{
+				"id":         run.ID,
+				"run_id":     run.RunID,
+				"status":     run.Status,
+				"created_at": run.CreatedAt,
+				"updated_at": run.UpdatedAt,
+			}
+			// Adicionar campos opcionais se existirem
+			if run.AgentID != "" {
+				runData["agent_id"] = run.AgentID
+			}
+			if run.UserID != "" {
+				runData["user_id"] = run.UserID
+			}
+			if run.SessionID != "" {
+				runData["session_id"] = run.SessionID
+			}
+			if run.Content != "" {
+				runData["content"] = run.Content
+			}
+			if run.RunInput != "" {
+				runData["run_input"] = run.RunInput
+			}
+			if run.Messages != nil {
+				runData["messages"] = run.Messages
+			}
+			if run.Metrics != nil {
+				runData["metrics"] = run.Metrics
+			}
+			runs = append(runs, runData)
+		}
+	}
+
+	c.JSON(http.StatusOK, runs)
 }

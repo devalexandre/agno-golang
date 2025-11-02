@@ -53,6 +53,10 @@ type AgentOS struct {
 	telemetry  bool
 	middleware []interface{}
 
+	// Knowledge base storage
+	knowledgeDocs map[string]*KnowledgeDocument
+	knowledgeByDB map[string][]*KnowledgeDocument
+
 	// WebSocket upgrader for real-time communication
 	upgrader websocket.Upgrader
 }
@@ -103,23 +107,25 @@ func NewAgentOS(options AgentOSOptions) (*AgentOS, error) {
 	}
 
 	os := &AgentOS{
-		osID:        options.OSID,
-		name:        name,
-		description: description,
-		version:     version,
-		agents:      options.Agents,
-		teams:       options.Teams,
-		workflows:   options.Workflows,
-		config:      config,
-		settings:    settings,
-		sessions:    make(map[string]*Session),
-		events:      make([]Event, 0),
-		interfaces:  options.Interfaces,
-		ctx:         ctx,
-		cancel:      cancel,
-		enableMCP:   options.EnableMCP,
-		telemetry:   options.Telemetry,
-		middleware:  options.Middleware,
+		osID:          options.OSID,
+		name:          name,
+		description:   description,
+		version:       version,
+		agents:        options.Agents,
+		teams:         options.Teams,
+		workflows:     options.Workflows,
+		config:        config,
+		settings:      settings,
+		sessions:      make(map[string]*Session),
+		events:        make([]Event, 0),
+		interfaces:    options.Interfaces,
+		ctx:           ctx,
+		cancel:        cancel,
+		enableMCP:     options.EnableMCP,
+		telemetry:     options.Telemetry,
+		middleware:    options.Middleware,
+		knowledgeDocs: make(map[string]*KnowledgeDocument),
+		knowledgeByDB: make(map[string][]*KnowledgeDocument),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for now
@@ -243,10 +249,16 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 	// Public endpoints for cloud platform compatibility (listing agents, teams, workflows)
 	router.GET("/agents", os.listAgentsHandler)
 	router.HEAD("/agents", os.listAgentsHandler)
+	router.GET("/agents/:agent_id", os.getAgentHandler) // Python compatible
+	router.HEAD("/agents/:agent_id", os.getAgentHandler)
 	router.GET("/teams", os.listTeamsHandler)
 	router.HEAD("/teams", os.listTeamsHandler)
+	router.GET("/teams/:team_id", os.getTeamHandler) // Python compatible
+	router.HEAD("/teams/:team_id", os.getTeamHandler)
 	router.GET("/workflows", os.listWorkflowsHandler)
 	router.HEAD("/workflows", os.listWorkflowsHandler)
+	router.GET("/workflows/:workflow_id", os.getWorkflowHandler) // Python compatible
+	router.HEAD("/workflows/:workflow_id", os.getWorkflowHandler)
 
 	// Configuration endpoint - public (same as Python)
 	router.GET("/config", os.configHandler)
@@ -256,15 +268,20 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 	router.GET("/models", os.modelsHandler)
 	router.HEAD("/models", os.modelsHandler)
 
-	// Agent and Team operations - needed by UI
+	// Agent and Team operations - needed by UI (compatible with Python API)
 	router.POST("/agents/:id/runs", os.agentRunsHandler)
+	router.POST("/agents/:id/runs/:run_id/cancel", os.cancelAgentRunHandler)
+	router.POST("/agents/:id/runs/:run_id/continue", os.continueAgentRunHandler)
 	router.POST("/teams/:id/runs", os.teamRunsHandler)
+	router.POST("/teams/:id/runs/:run_id/cancel", os.cancelTeamRunHandler)
+	router.POST("/workflows/:id/runs", os.workflowRunsHandler)
+	router.POST("/workflows/:id/runs/:run_id/cancel", os.cancelWorkflowRunHandler)
 
-	// Sessions - needed by UI
+	// Sessions - needed by UI and Python compatibility
 	router.GET("/sessions", os.sessionsHandler)
-	router.POST("/sessions/:id/runs", os.sessionRunsHandler)
-
-	// Protected endpoints that require authentication
+	router.GET("/sessions/:session_id", os.getSessionHandler) // Get individual session
+	router.POST("/sessions/:session_id/runs", os.sessionRunsHandler)
+	router.GET("/sessions/:session_id/runs", os.getSessionRunsHandler) // Get session runs
 	protected := router.Group("/")
 	protected.Use(os.authMiddleware())
 	{
@@ -272,51 +289,40 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 		protected.GET("/version", os.versionHandler)
 	}
 
-	// Base routes for agents, teams, workflows
-	api := router.Group("/api/v1")
-	api.Use(os.authMiddleware()) // Apply authentication to API routes
-	{
-		// Agent routes
-		if len(os.agents) > 0 {
-			agents := api.Group("/agents")
-			os.setupAgentRoutes(agents)
-		}
+	// Knowledge routes - compatible with Python API
+	router.GET("/knowledge/documents", os.listKnowledgeDocumentsHandler)
+	router.POST("/knowledge/documents", os.createKnowledgeDocumentHandler)
+	router.GET("/knowledge/documents/:document_id", os.getKnowledgeDocumentHandler)
+	router.PATCH("/knowledge/documents/:document_id", os.updateKnowledgeDocumentHandler)
+	router.DELETE("/knowledge/documents/:document_id", os.deleteKnowledgeDocumentHandler)
+	router.DELETE("/knowledge/documents", os.deleteAllKnowledgeDocumentsHandler)
+	router.GET("/knowledge/conversations", os.getKnowledgeConversationsHandler)
+	router.POST("/knowledge/search", os.searchKnowledgeHandler)
+	router.GET("/knowledge/search/:search_id", os.getKnowledgeSearchResultHandler)
 
-		// Team routes
-		if len(os.teams) > 0 {
-			teams := api.Group("/teams")
-			os.setupTeamRoutes(teams)
-		}
+	// Memory routes - compatible with Python API
+	router.POST("/memory/add", os.addMemoryHandler)
+	router.DELETE("/memory/:memory_id", os.deleteMemoryHandler)
+	router.DELETE("/memory", os.deleteAllMemoriesHandler)
+	router.GET("/memory", os.getMemoriesHandler)
+	router.GET("/memory/entities", os.getMemoryEntitiesHandler)
+	router.GET("/memory/conversations", os.getMemoryConversationsHandler)
+	router.PATCH("/memory/conversations/:conversation_id", os.updateMemoryConversationHandler)
+	router.GET("/memory/run_ids/:run_id", os.getMemoriesByRunIDHandler)
 
-		// Workflow routes
-		if len(os.workflows) > 0 {
-			workflows := api.Group("/workflows")
-			os.setupWorkflowRoutes(workflows)
-		}
+	// Metrics routes - compatible with Python API
+	router.GET("/metrics", os.getMetricsHandler)
+	router.POST("/metrics", os.createMetricsHandler)
 
-		// Session routes
-		sessions := api.Group("/sessions")
-		os.setupSessionRoutes(sessions)
+	// Evals routes - compatible with Python API
+	router.GET("/evals", os.listEvalsHandler)
+	router.POST("/evals", os.createEvalHandler)
+	router.GET("/evals/:eval_id", os.getEvalHandler)
+	router.POST("/evals/:eval_id/run", os.runEvalHandler)
 
-		// Knowledge routes
-		knowledge := api.Group("/knowledge")
-		os.setupKnowledgeRoutes(knowledge)
-
-		// Memory routes
-		memory := api.Group("/memory")
-		os.setupMemoryRoutes(memory)
-
-		// Metrics routes
-		metrics := api.Group("/metrics")
-		os.setupMetricsRoutes(metrics)
-
-		// Evals routes
-		evals := api.Group("/evals")
-		os.setupEvalsRoutes(evals)
-	}
-
-	// WebSocket endpoint
+	// WebSocket endpoints
 	router.GET("/ws", os.websocketHandler)
+	router.GET("/workflows/ws", os.websocketHandler) // Frontend compatibility
 }
 
 // Serve starts the AgentOS server
@@ -364,7 +370,7 @@ func (os *AgentOS) Serve() error {
 		log.Printf("🔒 Starting HTTPS server with TLS certificate: %s", os.settings.CertFile)
 		return os.server.ListenAndServeTLS(os.settings.CertFile, os.settings.KeyFile)
 	}
-	
+
 	return os.server.ListenAndServe()
 }
 

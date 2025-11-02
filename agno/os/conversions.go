@@ -4,11 +4,6 @@ import (
 	"github.com/devalexandre/agno-golang/agno/agent"
 )
 
-// Helper functions
-func stringPtr(s string) *string {
-	return &s
-}
-
 // FromAgent converts an agent.Agent to AgentResponse with all detailed configurations
 func (ar *AgentResponse) FromAgent(agent *agent.Agent) *AgentResponse {
 	if agent == nil {
@@ -23,9 +18,9 @@ func (ar *AgentResponse) FromAgent(agent *agent.Agent) *AgentResponse {
 	// Build model information
 	// TODO: Extract actual model information from agent
 	modelResponse := &ModelResponse{
-		Name:     stringPtr("gpt-4"),
-		Model:    stringPtr("gpt-4"),
-		Provider: stringPtr("openai"),
+		Name:     StringPtr("gpt-4"),
+		Model:    StringPtr("gpt-4"),
+		Provider: StringPtr("openai"),
 	}
 
 	// Build tools information (simplified for now)
@@ -39,8 +34,8 @@ func (ar *AgentResponse) FromAgent(agent *agent.Agent) *AgentResponse {
 	// Build sessions information
 	var sessionsInfo *map[string]interface{}
 	sessions := map[string]interface{}{
-		"session_table":           "agno_sessions",
-		"add_history_to_context":  true,
+		"session_table":          "agno_sessions",
+		"add_history_to_context": true,
 	}
 	sessionsInfo = &sessions
 
@@ -73,9 +68,9 @@ func (ar *AgentResponse) FromAgent(agent *agent.Agent) *AgentResponse {
 	// Build system message information
 	var systemMessageInfo *map[string]interface{}
 	systemMessage := map[string]interface{}{
-		"description":            agent.GetName(),
-		"instructions":           getAgentInstructions(agent),
-		"markdown":               true,
+		"description":             agent.GetName(),
+		"instructions":            getAgentInstructions(agent),
+		"markdown":                true,
 		"add_datetime_to_context": true,
 	}
 	systemMessageInfo = &systemMessage
@@ -83,8 +78,8 @@ func (ar *AgentResponse) FromAgent(agent *agent.Agent) *AgentResponse {
 	// Build streaming information
 	var streamingInfo *map[string]interface{}
 	streaming := map[string]interface{}{
-		"stream":                      true,
-		"stream_intermediate_steps":   true,
+		"stream":                    true,
+		"stream_intermediate_steps": true,
 	}
 	streamingInfo = &streaming
 
