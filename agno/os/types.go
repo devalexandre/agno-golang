@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
+	"github.com/devalexandre/agno-golang/agno/knowledge"
+	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/devalexandre/agno-golang/agno/team"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
@@ -101,7 +103,7 @@ type AgentOSInterface interface {
 
 // AgentOSSettings represents API settings for the AgentOS
 type AgentOSSettings struct {
-	Port        int           `json:"port" yaml:"port" default:"7777"`
+	Port        int           `json:"port" yaml:"port" default:"8080"`
 	Host        string        `json:"host" yaml:"host" default:"0.0.0.0"`
 	Reload      bool          `json:"reload" yaml:"reload" default:"false"`
 	Debug       bool          `json:"debug" yaml:"debug" default:"false"`
@@ -119,20 +121,21 @@ type AgentOSSettings struct {
 
 // AgentOSOptions represents all options for creating an AgentOS instance
 type AgentOSOptions struct {
-	OSID         string             `json:"os_id" yaml:"os_id"`
-	Name         *string            `json:"name,omitempty" yaml:"name,omitempty"`
-	Description  *string            `json:"description,omitempty" yaml:"description,omitempty"`
-	Version      *string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Agents       []*agent.Agent     `json:"agents,omitempty" yaml:"agents,omitempty"`
-	Teams        []*team.Team       `json:"teams,omitempty" yaml:"teams,omitempty"`
-	Workflows    []*v2.Workflow     `json:"workflows,omitempty" yaml:"workflows,omitempty"`
-	Interfaces   []AgentOSInterface `json:"interfaces,omitempty" yaml:"interfaces,omitempty"`
-	Config       *AgentOSConfig     `json:"config,omitempty" yaml:"config,omitempty"`
-	Settings     *AgentOSSettings   `json:"settings,omitempty" yaml:"settings,omitempty"`
-	EnableMCP    bool               `json:"enable_mcp" yaml:"enable_mcp" default:"false"`
-	Telemetry    bool               `json:"telemetry" yaml:"telemetry" default:"false"`
-	Middleware   []interface{}      `json:"middleware,omitempty" yaml:"middleware,omitempty"`
-	CustomRoutes []interface{}      `json:"custom_routes,omitempty" yaml:"custom_routes,omitempty"`
+	OSID         string                `json:"os_id" yaml:"os_id"`
+	Name         *string               `json:"name,omitempty" yaml:"name,omitempty"`
+	Description  *string               `json:"description,omitempty" yaml:"description,omitempty"`
+	Version      *string               `json:"version,omitempty" yaml:"version,omitempty"`
+	Agents       []*agent.Agent        `json:"agents,omitempty" yaml:"agents,omitempty"`
+	Teams        []*team.Team          `json:"teams,omitempty" yaml:"teams,omitempty"`
+	Workflows    []*v2.Workflow        `json:"workflows,omitempty" yaml:"workflows,omitempty"`
+	Knowledge    []knowledge.Knowledge `json:"knowledge,omitempty" yaml:"knowledge,omitempty"` // Direct knowledge bases (like Python)
+	Interfaces   []AgentOSInterface    `json:"interfaces,omitempty" yaml:"interfaces,omitempty"`
+	Config       *AgentOSConfig        `json:"config,omitempty" yaml:"config,omitempty"`
+	Settings     *AgentOSSettings      `json:"settings,omitempty" yaml:"settings,omitempty"`
+	EnableMCP    bool                  `json:"enable_mcp" yaml:"enable_mcp" default:"false"`
+	Telemetry    bool                  `json:"telemetry" yaml:"telemetry" default:"false"`
+	Middleware   []interface{}         `json:"middleware,omitempty" yaml:"middleware,omitempty"`
+	CustomRoutes []interface{}         `json:"custom_routes,omitempty" yaml:"custom_routes,omitempty"`
 }
 
 // Event represents an event in the AgentOS system
@@ -182,4 +185,12 @@ type Message struct {
 	Content   string                 `json:"content"`
 	Timestamp time.Time              `json:"timestamp"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// KnowledgeInstance represents a knowledge base with its associated database
+// This matches Python's knowledge instance structure
+type KnowledgeInstance struct {
+	Knowledge  knowledge.Knowledge `json:"knowledge"`
+	ContentsDB storage.Storage     `json:"contents_db"`
+	DBID       string              `json:"db_id"`
 }

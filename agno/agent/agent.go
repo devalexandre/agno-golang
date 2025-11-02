@@ -56,7 +56,8 @@ type AgentConfig struct {
 	ReadChatHistory         bool
 
 	//knowledge
-	Knowledge knowledge.Knowledge
+	Knowledge             knowledge.Knowledge
+	KnowledgeMaxDocuments int
 
 	//Enable Semantic Compression
 	EnableSemanticCompression bool
@@ -100,7 +101,8 @@ type Agent struct {
 	runs     []*storage.AgentRun
 
 	// Knowledge
-	knowledge knowledge.Knowledge
+	knowledge             knowledge.Knowledge
+	knowledgeMaxDocuments int
 
 	// Reasoning
 	reasoning         bool
@@ -137,6 +139,10 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		config.ReasoningMaxSteps = 3
 	}
 
+	if config.KnowledgeMaxDocuments <= 0 {
+		config.KnowledgeMaxDocuments = 5
+	}
+
 	agent := &Agent{
 		ctx:             config.Context,
 		model:           config.Model,
@@ -171,7 +177,8 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		runs:     []*storage.AgentRun{},
 
 		//knowledge
-		knowledge: config.Knowledge,
+		knowledge:             config.Knowledge,
+		knowledgeMaxDocuments: config.KnowledgeMaxDocuments,
 
 		// Reasoning
 		reasoning:         config.Reasoning,
@@ -218,6 +225,11 @@ func (a *Agent) GetRole() string {
 // GetModel returns the agent's model
 func (a *Agent) GetModel() models.AgnoModelInterface {
 	return a.model
+}
+
+// GetKnowledge returns the agent's knowledge base
+func (a *Agent) GetKnowledge() knowledge.Knowledge {
+	return a.knowledge
 }
 
 func (a *Agent) Run(prompt string) (models.RunResponse, error) {
@@ -550,7 +562,7 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 
 	//if have Knowledge, search for relevant documents
 	if a.knowledge != nil {
-		relevantDocs, err := a.knowledge.Search(a.ctx, prompt, 5)
+		relevantDocs, err := a.knowledge.Search(a.ctx, prompt, a.knowledgeMaxDocuments)
 		if err == nil && len(relevantDocs) > 0 {
 			docContent := ""
 			for _, doc := range relevantDocs {

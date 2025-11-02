@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/devalexandre/agno-golang/agno/document"
+	"github.com/devalexandre/agno-golang/agno/storage/sqlite"
 )
 
 // PDFConfig holds configuration for PDF processing
@@ -60,6 +61,28 @@ func NewPDFKnowledgeBase(name string, vectorDB VectorDB) *PDFKnowledgeBase {
 	base := NewBaseKnowledge(name, vectorDB)
 	base.Metadata["description"] = "PDF knowledge base"
 	base.Metadata["type"] = "pdf"
+
+	// Create a default SQLite ContentsDB if not provided
+	// This enables knowledge content management endpoints by default
+	if base.ContentsDB == nil {
+		// Create a default SQLite database for storing knowledge content metadata
+		dbFile := fmt.Sprintf("%s_knowledge.db", name)
+		contentsDB, err := sqlite.NewSqliteStorage(sqlite.SqliteStorageConfig{
+			ID:                "agno-storage", // Default ID expected by frontend
+			TableName:         "knowledge_contents",
+			DBFile:            &dbFile,
+			SchemaVersion:     1,
+			AutoUpgradeSchema: true,
+		})
+		if err == nil {
+			// Initialize the database
+			if err := contentsDB.Create(); err == nil {
+				base.ContentsDB = contentsDB
+			}
+		}
+		// If there's an error creating the DB, ContentsDB remains nil
+		// and knowledge endpoints will return 404 (which is fine)
+	}
 
 	kb := &PDFKnowledgeBase{
 		BaseKnowledge: base,
