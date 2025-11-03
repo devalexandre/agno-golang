@@ -142,7 +142,7 @@ type AgnoModelInterface interface {
 
 // AgentInterface define os métodos essenciais para agentes
 type AgentInterface interface {
-	Run(prompt string) (RunResponse, error)
+	Run(input interface{}) (RunResponse, error)
 	Reason(prompt string) ([]ReasoningStep, error)
 	RunStream(prompt string, fn func([]byte) error) error
 }
@@ -161,5 +161,22 @@ type RunResponse struct {
 	Tools              []map[string]interface{} `json:"tools,omitempty"`
 	FormattedToolCalls []string                 `json:"formatted_tool_calls,omitempty"`
 	CreatedAt          int64                    `json:"created_at,omitempty"`
+	ParsedOutput       interface{}              `json:"parsed_output,omitempty"` // Deprecated: Use Output instead
+	Output             interface{}              `json:"output,omitempty"`        // Structured output when using OutputSchema (already type-asserted)
 	// TODO: implement images, videos, audio, response_audio, citations, extra_data
+}
+
+// TypedRunResponse is a generic wrapper for RunResponse with typed Output
+type TypedRunResponse[T any] struct {
+	RunResponse
+	Output T `json:"output,omitempty"` // Typed output field
+}
+
+// GetOutput returns the output with the correct type (generic helper)
+// Usage: movieScript := run.GetOutput(MovieScript{})
+func (r *RunResponse) GetOutput(target interface{}) interface{} {
+	if r.Output == nil {
+		return target // Return zero value of type
+	}
+	return r.Output
 }

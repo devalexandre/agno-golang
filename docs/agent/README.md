@@ -2,7 +2,11 @@
 
 The Agent module provides AI agent implementations for Agno-Golang, supporting multiple AI model providers with tool integration, memory management, and knowledge base access.
 
-## 🚀 Features
+## � Documentation
+
+- **[Input/Output Schema Guide](./INPUT_OUTPUT_SCHEMA.md)** - Comprehensive guide for structured input and output using schemas
+
+## �🚀 Features
 
 ### ✅ Core Capabilities
 - **Multi-Model Support**: OpenAI, Ollama, Gemini, and custom model providers
@@ -12,6 +16,7 @@ The Agent module provides AI agent implementations for Agno-Golang, supporting m
 - **Streaming Support**: Real-time response streaming
 - **Role-Based Behavior**: Customizable agent roles and instructions
 - **Error Handling**: Robust error recovery and retry mechanisms
+- **Input/Output Schemas**: Structured input validation and typed output responses
 
 ## 🔧 Architecture
 
