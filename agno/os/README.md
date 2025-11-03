@@ -176,6 +176,51 @@ type AgentOSSettings struct {
 }
 ```
 
+### Production Mode
+
+**AgentOS runs in production mode by default** (`Debug: false`), which means:
+- Gin framework is set to `ReleaseMode` for optimal performance
+- **No HTTP request logs** - silent operation for better performance
+- Minimal output for production environments
+
+To enable debug mode, set `Debug: true` in `AgentOSSettings`:
+
+```go
+os, err := agentOS.NewAgentOS(agentOS.AgentOSOptions{
+    OSID: "my-os",
+    Settings: &agentOS.AgentOSSettings{
+        Debug: true,  // Enable debug mode
+        Port:  8080,
+    },
+})
+```
+
+#### Debug Mode Output
+
+When debug mode is enabled (`Debug: true`), you'll see:
+- Detailed Gin framework logs with route registrations
+- Request/response logs for every HTTP request
+- More verbose error messages
+- "AgentOS: Running in DEBUG mode" message on startup
+
+Example debug output:
+```
+2025/11/02 19:34:37 AgentOS: Running in DEBUG mode
+[GIN-debug] GET    /health                   --> handler
+[GIN] 2025/11/02 - 19:34:48 | 200 | 176.221µs | 127.0.0.1 | GET "/health"
+```
+
+#### Production Mode Output
+
+In production mode (default), you'll see:
+```
+2025/11/02 19:34:37 AgentOS: Running in PRODUCTION mode
+2025/11/02 19:34:37 🚀 AgentOS 'my-os' starting on 0.0.0.0:8080
+2025/11/02 19:34:37 📊 Dashboard: http://0.0.0.0:8080
+```
+
+No HTTP request logs will be shown, providing clean output and better performance.
+
 ## Advanced Features
 
 ### Domain Configuration
