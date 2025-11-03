@@ -72,8 +72,16 @@ type AgentConfig struct {
 	// Pass a struct instance to define the expected input structure
 	InputSchema interface{}
 	// OutputSchema forces the agent to return structured JSON matching the schema
-	// Pass a struct instance to define the expected output structure
+	// Pass a pointer to a struct to define the expected output structure
+	// The struct will be filled automatically with the parsed response
 	OutputSchema interface{}
+	// OutputModel is a separate AI model used specifically for parsing the output JSON
+	// This allows using a different model (e.g., faster/cheaper) for JSON generation
+	// Similar to how SemanticModel is used for compression
+	OutputModel models.AgnoModelInterface
+	// OutputModelPrompt allows customizing the prompt used by the OutputModel
+	// If not provided, a default prompt will be used
+	OutputModelPrompt string
 	// ParseResponse controls whether to parse the response into the OutputSchema
 	ParseResponse bool
 }
@@ -130,9 +138,11 @@ type Agent struct {
 	enableSemanticCompression bool
 
 	// Input/Output Schema
-	inputSchema   interface{}
-	outputSchema  interface{}
-	parseResponse bool
+	inputSchema       interface{}
+	outputSchema      interface{}
+	outputModel       models.AgnoModelInterface
+	outputModelPrompt string
+	parseResponse     bool
 }
 
 func NewAgent(config AgentConfig) (*Agent, error) {
@@ -211,9 +221,11 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		enableSemanticCompression: config.EnableSemanticCompression,
 
 		// Input/Output Schema
-		inputSchema:   config.InputSchema,
-		outputSchema:  config.OutputSchema,
-		parseResponse: config.ParseResponse,
+		inputSchema:       config.InputSchema,
+		outputSchema:      config.OutputSchema,
+		outputModel:       config.OutputModel,
+		outputModelPrompt: config.OutputModelPrompt,
+		parseResponse:     config.ParseResponse,
 	}
 
 	// Set default for ParseResponse
@@ -326,6 +338,13 @@ func (a *Agent) prepareInputWithSchema(input interface{}) (string, error) {
 
 // addOutputSchemaToPrompt adds output schema instructions to the system prompt
 func (a *Agent) addOutputSchemaToPrompt(systemPrompt string) (string, error) {
+	// If using OutputModel, don't add schema instructions to main model
+	// The OutputModel will handle JSON formatting
+	if a.outputModel != nil {
+		return systemPrompt, nil
+	}
+
+	// Only add schema instructions if OutputSchema is configured and no OutputModel
 	if a.outputSchema == nil {
 		return systemPrompt, nil
 	}
@@ -496,6 +515,162 @@ func (a *Agent) parseOutputWithSchema(response string) (interface{}, error) {
 	return result, nil
 }
 
+// ApplyOutputFormatting applies output formatting using OutputModel if configured
+// Similar to ApplySemanticCompression, this method handles the logic of using
+// a separate model for JSON formatting or falling back to direct parsing
+func (a *Agent) ApplyOutputFormatting(response string) (interface{}, error) {
+	if a.outputSchema == nil || !a.parseResponse {
+		return response, nil
+	}
+
+	// If OutputModel is configured, use it for JSON formatting
+	if a.outputModel != nil {
+		return a.formatWithOutputModel(response)
+	}
+
+	// Otherwise, parse directly from the response
+	return a.parseOutputWithSchema(response)
+}
+
+// formatWithOutputModel uses the OutputModel to convert response to structured JSON
+func (a *Agent) formatWithOutputModel(response string) (interface{}, error) {
+	if a.debug {
+		fmt.Printf("\n=== DEBUG: Using OutputModel for JSON formatting ===\n")
+		fmt.Printf("Original response length: %d\n", len(response))
+		fmt.Printf("OutputModel: %T\n", a.outputModel)
+		fmt.Printf("===================================================\n\n")
+	}
+
+	// Generate schema for the output model
+	schema, err := GenerateJSONSchema(a.outputSchema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate output schema: %w", err)
+	}
+
+	schemaJSON, err := schema.ToJSONString()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert schema to JSON: %w", err)
+	}
+
+	// Prepare prompt for the output model
+	var systemPrompt string
+	if a.outputModelPrompt != "" {
+		systemPrompt = a.outputModelPrompt
+	} else {
+		systemPrompt = fmt.Sprintf(`You are a JSON formatting assistant. Your task is to convert the provided text into valid JSON that matches the specified schema.
+
+Schema:
+%s
+
+CRITICAL RULES:
+- Return ONLY valid JSON matching the schema
+- Do NOT wrap in backticks or code blocks
+- Do NOT add any explanations
+- Extract relevant information from the text and structure it according to the schema
+- If information is missing, use reasonable defaults or empty values`, schemaJSON)
+	}
+
+	userPrompt := fmt.Sprintf("Convert the following text to JSON:\n\n%s", response)
+
+	messages := []models.Message{
+		{
+			Role:    models.TypeSystemRole,
+			Content: systemPrompt,
+		},
+		{
+			Role:    models.TypeUserRole,
+			Content: userPrompt,
+		},
+	}
+
+	// Invoke the output model
+	resp, err := a.outputModel.Invoke(a.ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("output model invocation failed: %w", err)
+	}
+
+	// Clean the JSON response
+	cleaned := strings.TrimSpace(resp.Content)
+
+	// Remove markdown code blocks if present
+	if strings.Contains(cleaned, "```") {
+		startIdx := strings.Index(cleaned, "```")
+		if startIdx != -1 {
+			cleaned = cleaned[startIdx+3:]
+			cleaned = strings.TrimPrefix(cleaned, "json")
+			cleaned = strings.TrimSpace(cleaned)
+
+			endIdx := strings.Index(cleaned, "```")
+			if endIdx != -1 {
+				cleaned = cleaned[:endIdx]
+			}
+		}
+	}
+
+	cleaned = strings.TrimSpace(cleaned)
+
+	if a.debug {
+		fmt.Printf("\n=== DEBUG: OutputModel Response ===\n")
+		fmt.Printf("Cleaned JSON length: %d\n", len(cleaned))
+		fmt.Printf("JSON preview (first 500 chars):\n%s\n", truncateString(cleaned, 500))
+		fmt.Printf("==================================\n\n")
+	}
+
+	// Parse the JSON into the output schema
+	return a.unmarshalIntoSchema(cleaned)
+}
+
+// unmarshalIntoSchema unmarshals JSON string into the output schema struct
+func (a *Agent) unmarshalIntoSchema(jsonStr string) (interface{}, error) {
+	// Get schema type
+	schemaType := reflect.TypeOf(a.outputSchema)
+	isPointer := schemaType.Kind() == reflect.Ptr
+
+	if isPointer {
+		schemaType = schemaType.Elem()
+	}
+
+	// Handle slice types
+	if schemaType.Kind() == reflect.Slice {
+		var result interface{}
+
+		if isPointer {
+			if err := json.Unmarshal([]byte(jsonStr), a.outputSchema); err != nil {
+				preview := truncateString(jsonStr, 500)
+				return nil, fmt.Errorf("failed to parse output model response (slice): %w\nResponse preview: %s", err, preview)
+			}
+			result = a.outputSchema
+		} else {
+			result = reflect.New(schemaType).Interface()
+			if err := json.Unmarshal([]byte(jsonStr), result); err != nil {
+				preview := truncateString(jsonStr, 500)
+				return nil, fmt.Errorf("failed to parse output model response (slice): %w\nResponse preview: %s", err, preview)
+			}
+		}
+
+		return result, nil
+	}
+
+	// Handle struct types
+	var result interface{}
+
+	if isPointer {
+		if err := json.Unmarshal([]byte(jsonStr), a.outputSchema); err != nil {
+			preview := truncateString(jsonStr, 500)
+			return nil, fmt.Errorf("failed to parse output model response: %w\nResponse preview: %s", err, preview)
+		}
+		result = a.outputSchema
+	} else {
+		result = reflect.New(schemaType).Interface()
+		if err := json.Unmarshal([]byte(jsonStr), result); err != nil {
+			preview := truncateString(jsonStr, 500)
+			return nil, fmt.Errorf("failed to parse output model response: %w\nResponse preview: %s", err, preview)
+		}
+	}
+
+	return result, nil
+}
+
 func (a *Agent) Run(input interface{}) (models.RunResponse, error) {
 	var messages []models.Message
 
@@ -595,28 +770,28 @@ func (a *Agent) Run(input interface{}) (models.RunResponse, error) {
 		}
 	}
 
-	// Parse output if output schema is configured
-	var parsedContent interface{}
-	var outputContent interface{}
-	if a.outputSchema != nil && a.parseResponse {
-		parsed, err := a.parseOutputWithSchema(resp.Content)
-		if err != nil {
-			return models.RunResponse{}, err
-		}
-		parsedContent = parsed
+	// Parse output using ApplyOutputFormatting method
+	// This provides TWO outputs when OutputModel is configured:
+	// 1. resp.Content (TextContent) = Original creative response from main model
+	// 2. parsedContent (Output) = Structured JSON formatted by OutputModel
+	// This allows using expensive models for content and cheap models for formatting
+	parsedContent, err := a.ApplyOutputFormatting(resp.Content)
+	if err != nil {
+		return models.RunResponse{}, err
+	}
 
-		// Keep the pointer in Output so user can access it directly
-		// If outputSchema was a pointer, parsed is already the same pointer
-		// So both the original variable and run.Output point to the same data
-		outputContent = parsed
+	var outputContent interface{}
+	if parsedContent != resp.Content {
+		// Output was parsed/formatted
+		outputContent = parsedContent
 	}
 
 	return models.RunResponse{
-		TextContent:  resp.Content,
+		TextContent:  resp.Content, // Original response from main model
 		ContentType:  "text",
 		Event:        "RunResponse",
 		ParsedOutput: parsedContent, // Deprecated: kept for backwards compatibility
-		Output:       outputContent, // Pointer to the filled struct (same as outputSchema pointer)
+		Output:       outputContent, // Structured output (pointer to filled struct)
 		Messages: []models.Message{
 			{
 				Role:     models.Role(resp.Role),
@@ -875,7 +1050,7 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 		originalSystemMessage += fmt.Sprintf("<context>\n%s\n</context>\n", contextStr)
 	}
 
-	// Add output schema instructions if configured
+	// Add output schema or output model instructions if configured
 	if a.outputSchema != nil {
 		schemaInstructions, err := a.addOutputSchemaToPrompt("")
 		if err == nil {
