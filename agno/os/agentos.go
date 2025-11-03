@@ -95,7 +95,7 @@ func NewAgentOS(options AgentOSOptions) (*AgentOS, error) {
 			Port:       8080,
 			Host:       "0.0.0.0",
 			Reload:     false,
-			Debug:      false,
+			Debug:      false, // Production mode by default
 			LogLevel:   "info",
 			Timeout:    30 * time.Second,
 			EnableCORS: true,
@@ -423,16 +423,21 @@ func (os *AgentOS) areDBInstancesCompatible(db1, db2 interface{}) bool {
 
 // GetApp creates and returns the HTTP router/app
 func (os *AgentOS) GetApp() *gin.Engine {
+	// Set Gin mode based on Debug setting
 	if os.settings.Debug {
 		gin.SetMode(gin.DebugMode)
+		log.Println("AgentOS: Running in DEBUG mode")
 	} else {
 		gin.SetMode(gin.ReleaseMode)
+		log.Println("AgentOS: Running in PRODUCTION mode")
 	}
 
 	router := gin.New()
 
-	// Add middleware
-	router.Use(gin.Logger())
+	// Add middleware - only enable logging in debug mode
+	if os.settings.Debug {
+		router.Use(gin.Logger())
+	}
 	router.Use(gin.Recovery())
 
 	// Enable CORS if configured

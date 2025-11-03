@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"time"
 
@@ -64,6 +66,16 @@ type AgentConfig struct {
 	SemanticMaxTokens         int
 	SemanticModel             models.AgnoModelInterface
 	SemanticAgent             models.AgentInterface
+
+	// Input/Output Schema
+	// InputSchema provides validation for agent input
+	// Pass a struct instance to define the expected input structure
+	InputSchema interface{}
+	// OutputSchema forces the agent to return structured JSON matching the schema
+	// Pass a struct instance to define the expected output structure
+	OutputSchema interface{}
+	// ParseResponse controls whether to parse the response into the OutputSchema
+	ParseResponse bool
 }
 
 type Agent struct {
@@ -116,6 +128,11 @@ type Agent struct {
 	semanticAgent             models.AgentInterface
 	semanticMaxTokens         int
 	enableSemanticCompression bool
+
+	// Input/Output Schema
+	inputSchema   interface{}
+	outputSchema  interface{}
+	parseResponse bool
 }
 
 func NewAgent(config AgentConfig) (*Agent, error) {
@@ -192,6 +209,16 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		semanticAgent:             config.SemanticAgent,
 		semanticMaxTokens:         config.SemanticMaxTokens,
 		enableSemanticCompression: config.EnableSemanticCompression,
+
+		// Input/Output Schema
+		inputSchema:   config.InputSchema,
+		outputSchema:  config.OutputSchema,
+		parseResponse: config.ParseResponse,
+	}
+
+	// Set default for ParseResponse
+	if agent.parseResponse == false && agent.outputSchema != nil {
+		agent.parseResponse = true
 	}
 
 	if agent.enableSemanticCompression && agent.semanticModel == nil && agent.semanticAgent == nil {
@@ -232,8 +259,251 @@ func (a *Agent) GetKnowledge() knowledge.Knowledge {
 	return a.knowledge
 }
 
-func (a *Agent) Run(prompt string) (models.RunResponse, error) {
+// truncateString truncates a string to maxLen characters
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// validateInput validates the input against the input schema if configured
+func (a *Agent) validateInput(input interface{}) error {
+	if a.inputSchema == nil {
+		return nil
+	}
+
+	// Convert input to JSON and then validate by unmarshaling into schema type
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("failed to marshal input: %w", err)
+	}
+
+	// Create a new instance of the schema type
+	schemaType := reflect.TypeOf(a.inputSchema)
+	if schemaType.Kind() == reflect.Ptr {
+		schemaType = schemaType.Elem()
+	}
+
+	schemaInstance := reflect.New(schemaType).Interface()
+
+	// Unmarshal and validate
+	if err := json.Unmarshal(inputJSON, schemaInstance); err != nil {
+		return fmt.Errorf("input validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// prepareInputWithSchema prepares input according to input schema if configured
+func (a *Agent) prepareInputWithSchema(input interface{}) (string, error) {
+	if a.inputSchema == nil {
+		// If input is a string, return it directly
+		if str, ok := input.(string); ok {
+			return str, nil
+		}
+		// Otherwise, marshal to JSON
+		data, err := json.Marshal(input)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal input: %w", err)
+		}
+		return string(data), nil
+	}
+
+	// Validate input first
+	if err := a.validateInput(input); err != nil {
+		return "", err
+	}
+
+	// Marshal validated input to string
+	data, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal validated input: %w", err)
+	}
+
+	return string(data), nil
+}
+
+// addOutputSchemaToPrompt adds output schema instructions to the system prompt
+func (a *Agent) addOutputSchemaToPrompt(systemPrompt string) (string, error) {
+	if a.outputSchema == nil {
+		return systemPrompt, nil
+	}
+
+	schema, err := GenerateJSONSchema(a.outputSchema)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate output schema: %w", err)
+	}
+
+	schemaJSON, err := schema.ToJSONString()
+	if err != nil {
+		return "", fmt.Errorf("failed to convert schema to JSON: %w", err)
+	}
+
+	// Check if the output schema is a slice/array
+	schemaType := reflect.TypeOf(a.outputSchema)
+	if schemaType.Kind() == reflect.Ptr {
+		schemaType = schemaType.Elem()
+	}
+	isArray := schemaType.Kind() == reflect.Slice
+
+	var outputInstructions string
+	if isArray {
+		// Instructions for array output
+		outputInstructions = fmt.Sprintf(`
+
+## Output Format
+The block below is the JSON Schema (for reference). DO NOT return the JSON Schema itself.
+Instead, RETURN a JSON ARRAY that CONFORMS to this schema.
+
+%s
+
+CRITICAL RULES (read carefully):
+- Return ONLY a JSON ARRAY (starts with [ and ends with ]).
+- Each element in the array must be an object matching the item schema.
+- Do NOT wrap the JSON in backticks or triple backtick markers.
+- Do NOT include any text before or after the JSON array.
+- Do NOT return separate objects - they must be inside a single array.
+- Your entire response must be valid JSON and parseable as an array.
+
+Example of correct format for array:
+[{"field1": "value1", "field2": ["item1"]}, {"field1": "value2", "field2": ["item2"]}]
+
+DO NOT use markdown formatting like code blocks.
+`, schemaJSON)
+	} else {
+		// Instructions for object output
+		outputInstructions = fmt.Sprintf(`
+
+## Output Format
+The block below is the JSON Schema (for reference). DO NOT return the JSON Schema itself.
+Instead, RETURN a single JSON object that CONFORMS to this schema.
+
+%s
+
+CRITICAL RULES (read carefully):
+- Return ONLY the JSON object instance that matches the schema (no schema, no explanations).
+- Do NOT wrap the JSON in backticks or triple backtick markers.
+- Do NOT include any text before or after the JSON.
+- Include all required fields and use the correct types.
+- Your entire response must be valid JSON and parseable.
+
+If you understand, immediately produce an example JSON object that follows the schema (populate fields meaningfully).
+
+Example of correct format:
+{"field1": "value1", "field2": ["item1", "item2"]}
+
+DO NOT use markdown formatting like code blocks.
+`, schemaJSON)
+	}
+
+	return systemPrompt + outputInstructions, nil
+}
+
+// parseOutputWithSchema parses the response according to output schema if configured
+func (a *Agent) parseOutputWithSchema(response string) (interface{}, error) {
+	if a.outputSchema == nil || !a.parseResponse {
+		return response, nil
+	}
+
+	originalResponse := response // Keep original for debugging
+
+	// Clean the response - remove markdown code blocks if present
+	cleaned := strings.TrimSpace(response)
+
+	// Remove markdown code blocks (```json ... ``` or ``` ... ```)
+	if strings.Contains(cleaned, "```") {
+		// Find the start of JSON (after opening backticks)
+		startIdx := strings.Index(cleaned, "```")
+		if startIdx != -1 {
+			// Skip the opening ``` and optional "json"
+			cleaned = cleaned[startIdx+3:]
+			if strings.HasPrefix(cleaned, "json") {
+				cleaned = cleaned[4:]
+			}
+			cleaned = strings.TrimSpace(cleaned)
+
+			// Find the end (closing backticks)
+			endIdx := strings.Index(cleaned, "```")
+			if endIdx != -1 {
+				cleaned = cleaned[:endIdx]
+			}
+		}
+	}
+
+	cleaned = strings.TrimSpace(cleaned)
+
+	// If debug mode, show what we're trying to parse
+	if a.debug {
+		fmt.Printf("\n=== DEBUG: Output Parsing ===\n")
+		fmt.Printf("Original response length: %d\n", len(originalResponse))
+		fmt.Printf("Cleaned response length: %d\n", len(cleaned))
+		fmt.Printf("Original response preview (first 200 chars):\n%s\n", truncateString(originalResponse, 200))
+		fmt.Printf("Cleaned response preview (first 200 chars):\n%s\n", truncateString(cleaned, 200))
+		fmt.Printf("===========================\n\n")
+	}
+
+	// Get schema type
+	schemaType := reflect.TypeOf(a.outputSchema)
+	isPointer := schemaType.Kind() == reflect.Ptr
+
+	if isPointer {
+		schemaType = schemaType.Elem()
+	}
+
+	// Handle slice types differently
+	if schemaType.Kind() == reflect.Slice {
+		var result interface{}
+
+		if isPointer {
+			// If outputSchema is a pointer, unmarshal directly into it
+			if err := json.Unmarshal([]byte(cleaned), a.outputSchema); err != nil {
+				preview := truncateString(cleaned, 500)
+				return nil, fmt.Errorf("failed to parse response into output schema (slice): %w\nResponse preview: %s", err, preview)
+			}
+			result = a.outputSchema
+		} else {
+			// For slices without pointer, create a new slice
+			result = reflect.New(schemaType).Interface()
+			if err := json.Unmarshal([]byte(cleaned), result); err != nil {
+				preview := truncateString(cleaned, 500)
+				return nil, fmt.Errorf("failed to parse response into output schema (slice): %w\nResponse preview: %s", err, preview)
+			}
+		}
+
+		return result, nil
+	}
+
+	// For structs
+	var result interface{}
+
+	if isPointer {
+		// If outputSchema is a pointer, unmarshal directly into it
+		if err := json.Unmarshal([]byte(cleaned), a.outputSchema); err != nil {
+			preview := truncateString(cleaned, 500)
+			return nil, fmt.Errorf("failed to parse response into output schema: %w\nResponse preview: %s", err, preview)
+		}
+		result = a.outputSchema
+	} else {
+		// For structs without pointer, create a new instance
+		result = reflect.New(schemaType).Interface()
+		if err := json.Unmarshal([]byte(cleaned), result); err != nil {
+			preview := truncateString(cleaned, 500)
+			return nil, fmt.Errorf("failed to parse response into output schema: %w\nResponse preview: %s", err, preview)
+		}
+	}
+
+	return result, nil
+}
+
+func (a *Agent) Run(input interface{}) (models.RunResponse, error) {
 	var messages []models.Message
+
+	// Prepare input according to schema if configured
+	prompt, err := a.prepareInputWithSchema(input)
+	if err != nil {
+		return models.RunResponse{}, fmt.Errorf("failed to prepare input: %w", err)
+	}
 
 	// Add system message and history normally
 	baseMessages := a.prepareMessages(prompt)
@@ -325,10 +595,28 @@ func (a *Agent) Run(prompt string) (models.RunResponse, error) {
 		}
 	}
 
+	// Parse output if output schema is configured
+	var parsedContent interface{}
+	var outputContent interface{}
+	if a.outputSchema != nil && a.parseResponse {
+		parsed, err := a.parseOutputWithSchema(resp.Content)
+		if err != nil {
+			return models.RunResponse{}, err
+		}
+		parsedContent = parsed
+
+		// Keep the pointer in Output so user can access it directly
+		// If outputSchema was a pointer, parsed is already the same pointer
+		// So both the original variable and run.Output point to the same data
+		outputContent = parsed
+	}
+
 	return models.RunResponse{
-		TextContent: resp.Content,
-		ContentType: "text",
-		Event:       "RunResponse",
+		TextContent:  resp.Content,
+		ContentType:  "text",
+		Event:        "RunResponse",
+		ParsedOutput: parsedContent, // Deprecated: kept for backwards compatibility
+		Output:       outputContent, // Pointer to the filled struct (same as outputSchema pointer)
 		Messages: []models.Message{
 			{
 				Role:     models.Role(resp.Role),
@@ -585,6 +873,15 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 		contextStr := utils.PrettyPrintMap(a.contextData)
 		systemMessage += fmt.Sprintf("<context>\n%s\n</context>\n", a.ApplySemanticCompression(contextStr))
 		originalSystemMessage += fmt.Sprintf("<context>\n%s\n</context>\n", contextStr)
+	}
+
+	// Add output schema instructions if configured
+	if a.outputSchema != nil {
+		schemaInstructions, err := a.addOutputSchemaToPrompt("")
+		if err == nil {
+			systemMessage += schemaInstructions
+			originalSystemMessage += schemaInstructions
+		}
 	}
 
 	if a.debug {
