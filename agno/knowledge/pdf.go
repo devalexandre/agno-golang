@@ -52,8 +52,10 @@ func (p *PDFKnowledgeBase) Search(ctx context.Context, query string, numDocument
 }
 
 func (p *PDFKnowledgeBase) GetCount(ctx context.Context) (int64, error) {
-	//TODO implement me
-	panic("implement me")
+	if p.VectorDB == nil {
+		return 0, fmt.Errorf("vector database not configured")
+	}
+	return p.VectorDB.GetCount(ctx)
 }
 
 // NewPDFKnowledgeBase creates a new PDF knowledge base
@@ -68,7 +70,7 @@ func NewPDFKnowledgeBase(name string, vectorDB VectorDB) *PDFKnowledgeBase {
 		// Create a default SQLite database for storing knowledge content metadata
 		dbFile := fmt.Sprintf("%s_knowledge.db", name)
 		contentsDB, err := sqlite.NewSqliteStorage(sqlite.SqliteStorageConfig{
-			ID:                "agno-storage", // Default ID expected by frontend
+			ID:                generateUUID(), // Default ID expected by frontend
 			TableName:         "knowledge_contents",
 			DBFile:            &dbFile,
 			SchemaVersion:     1,

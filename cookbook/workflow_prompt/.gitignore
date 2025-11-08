@@ -1,0 +1,11 @@
+# Generated blog posts
+blog_posts/
+
+# Compiled binary
+blog-generator
+
+# Go build artifacts
+*.exe
+*.dll
+*.so
+*.dylib

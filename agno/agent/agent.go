@@ -21,6 +21,168 @@ import (
 	gpt3encoder "github.com/samber/go-gpt-3-encoder"
 )
 
+// RunOptions contains optional parameters for the Run method
+type RunOptions struct {
+	// Stream enables streaming response
+	Stream *bool
+	// StreamEvents enables streaming of intermediate events
+	StreamEvents *bool
+	// StreamIntermediateSteps is deprecated, use StreamEvents instead
+	StreamIntermediateSteps *bool
+	// UserID specifies the user making the request
+	UserID *string
+	// SessionID specifies the session for this run
+	SessionID *string
+	// SessionState contains state to persist across runs
+	SessionState map[string]interface{}
+	// Audio inputs
+	Audio []models.Audio
+	// Images inputs
+	Images []models.Image
+	// Videos inputs
+	Videos []models.Video
+	// Files inputs
+	Files []models.File
+	// Retries number of retry attempts
+	Retries *int
+	// KnowledgeFilters for filtering knowledge base queries
+	KnowledgeFilters map[string]interface{}
+	// AddHistoryToContext includes conversation history in context
+	AddHistoryToContext *bool
+	// AddDependenciesToContext includes dependencies in context
+	AddDependenciesToContext *bool
+	// AddSessionStateToContext includes session state in context
+	AddSessionStateToContext *bool
+	// Dependencies available for tools and prompt functions
+	Dependencies map[string]interface{}
+	// Metadata for this run
+	Metadata map[string]interface{}
+	// DebugMode enables detailed debug logging
+	DebugMode *bool
+}
+
+// RunOption is a function that configures RunOptions
+type RunOption func(*RunOptions)
+
+// WithStream enables streaming response
+func WithStream(stream bool) RunOption {
+	return func(o *RunOptions) {
+		o.Stream = &stream
+	}
+}
+
+// WithStreamEvents enables streaming of intermediate events
+func WithStreamEvents(streamEvents bool) RunOption {
+	return func(o *RunOptions) {
+		o.StreamEvents = &streamEvents
+	}
+}
+
+// WithUserID sets the user ID for the run
+func WithUserID(userID string) RunOption {
+	return func(o *RunOptions) {
+		o.UserID = &userID
+	}
+}
+
+// WithSessionID sets the session ID for the run
+func WithSessionID(sessionID string) RunOption {
+	return func(o *RunOptions) {
+		o.SessionID = &sessionID
+	}
+}
+
+// WithSessionState sets the session state for the run
+func WithSessionState(state map[string]interface{}) RunOption {
+	return func(o *RunOptions) {
+		o.SessionState = state
+	}
+}
+
+// WithAudio adds audio inputs
+func WithAudio(audio ...models.Audio) RunOption {
+	return func(o *RunOptions) {
+		o.Audio = append(o.Audio, audio...)
+	}
+}
+
+// WithImages adds image inputs
+func WithImages(images ...models.Image) RunOption {
+	return func(o *RunOptions) {
+		o.Images = append(o.Images, images...)
+	}
+}
+
+// WithVideos adds video inputs
+func WithVideos(videos ...models.Video) RunOption {
+	return func(o *RunOptions) {
+		o.Videos = append(o.Videos, videos...)
+	}
+}
+
+// WithFiles adds file inputs
+func WithFiles(files ...models.File) RunOption {
+	return func(o *RunOptions) {
+		o.Files = append(o.Files, files...)
+	}
+}
+
+// WithRetries sets the number of retry attempts
+func WithRetries(retries int) RunOption {
+	return func(o *RunOptions) {
+		o.Retries = &retries
+	}
+}
+
+// WithKnowledgeFilters sets knowledge base filters
+func WithKnowledgeFilters(filters map[string]interface{}) RunOption {
+	return func(o *RunOptions) {
+		o.KnowledgeFilters = filters
+	}
+}
+
+// WithAddHistoryToContext includes conversation history in context
+func WithAddHistoryToContext(add bool) RunOption {
+	return func(o *RunOptions) {
+		o.AddHistoryToContext = &add
+	}
+}
+
+// WithAddDependenciesToContext includes dependencies in context
+func WithAddDependenciesToContext(add bool) RunOption {
+	return func(o *RunOptions) {
+		o.AddDependenciesToContext = &add
+	}
+}
+
+// WithAddSessionStateToContext includes session state in context
+func WithAddSessionStateToContext(add bool) RunOption {
+	return func(o *RunOptions) {
+		o.AddSessionStateToContext = &add
+	}
+}
+
+// WithDependencies sets dependencies for the run
+func WithDependencies(deps map[string]interface{}) RunOption {
+	return func(o *RunOptions) {
+		o.Dependencies = deps
+	}
+}
+
+// WithMetadata sets metadata for the run
+func WithMetadata(metadata map[string]interface{}) RunOption {
+	return func(o *RunOptions) {
+		o.Metadata = metadata
+	}
+}
+
+// WithDebugMode enables debug mode
+func WithDebugMode(debug bool) RunOption {
+	return func(o *RunOptions) {
+		o.DebugMode = &debug
+	}
+}
+
 type AgentConfig struct {
 	Context        context.Context
 	Model          models.AgnoModelInterface
@@ -46,7 +208,8 @@ type AgentConfig struct {
 
 	// Memory and Storage Configuration
 	Memory                  memory.MemoryManager
-	Storage                 storage.AgentStorage
+	DB                      storage.DB // Database for storing sessions and runs (Python compatible)
+	Storage                 storage.DB // Deprecated: use DB instead
 	SessionID               string
 	UserID                  string
 	AddHistoryToMessages    bool
@@ -56,6 +219,12 @@ type AgentConfig struct {
 	EnableAgenticMemory     bool
 	EnableSessionSummaries  bool
 	ReadChatHistory         bool
+	EnableAgenticState      bool // Allow tools to modify session state dynamically
+
+	// Default Tools Configuration
+	EnableReadChatHistoryTool     bool // Enable read_chat_history default tool
+	EnableUpdateKnowledgeTool     bool // Enable update_knowledge default tool
+	EnableReadToolCallHistoryTool bool // Enable read_tool_call_history default tool
 
 	//knowledge
 	Knowledge             knowledge.Knowledge
@@ -84,6 +253,66 @@ type AgentConfig struct {
 	OutputModelPrompt string
 	// ParseResponse controls whether to parse the response into the OutputSchema
 	ParseResponse bool
+
+	// --- Hooks ---
+	// Functions called before processing starts (for validation, logging, etc.)
+	PreHooks []func(ctx context.Context, input interface{}) error
+	// Functions called after output is generated but before response is returned
+	PostHooks []func(ctx context.Context, output *models.RunResponse) error
+	// ToolBeforeHooks are called before a tool is executed
+	ToolBeforeHooks []func(ctx context.Context, toolName string, args map[string]interface{}) error
+	// ToolAfterHooks are called after a tool is executed
+	ToolAfterHooks []func(ctx context.Context, toolName string, args map[string]interface{}, result interface{}) error
+
+	// --- Guardrails ---
+	// InputGuardrails validate input before processing
+	InputGuardrails []Guardrail
+	// OutputGuardrails validate output before returning
+	OutputGuardrails []Guardrail
+	// ToolGuardrails validate tool calls
+	ToolGuardrails []Guardrail
+
+	// --- Tool Management ---
+	// Maximum number of tool calls allowed per run
+	ToolCallLimit int
+	// Controls which tool is called: "none", "auto", or specific tool name
+	ToolChoice string
+
+	// --- Context Building ---
+	// If True, add the agent name to the system message
+	AddNameToContext bool
+	// If True, add the current datetime to the system message
+	AddDatetimeToContext bool
+	// If True, add location information to the system message
+	AddLocationToContext bool
+	// Timezone identifier (e.g., "America/Sao_Paulo", "UTC")
+	TimezoneIdentifier string
+	// Additional context added to the system message
+	AdditionalContext string
+
+	// --- Store Options ---
+	// If True, store media in run output
+	StoreMedia bool
+	// If True, store tool messages in run output
+	StoreToolMessages bool
+	// If True, store history messages in run output
+	StoreHistoryMessages bool
+	// If False, media is only available to tools and not sent to the LLM
+	SendMediaToModel bool
+
+	// --- System Message ---
+	// Custom system message (overrides default building)
+	SystemMessage string
+	// Role for the system message (default: "system")
+	SystemMessageRole string
+	// If False, skip context building
+	BuildContext bool
+
+	// --- Retry Configuration ---
+	// Delay between retries in seconds
+	DelayBetweenRetries int
+	// If True, use exponential backoff for retries
+	ExponentialBackoff bool
 }
 
 type Agent struct {
@@ -105,7 +334,7 @@ type Agent struct {
 
 	// Memory and Storage
 	memory                  memory.MemoryManager
-	storage                 storage.AgentStorage
+	db                      storage.DB // Database for sessions and runs
 	sessionID               string
 	userID                  string
 	addHistoryToMessages    bool
@@ -115,10 +344,12 @@ type Agent struct {
 	enableAgenticMemory     bool
 	enableSessionSummaries  bool
 	readChatHistory         bool
+	enableAgenticState      bool
 
 	// Session state
-	messages []models.Message
-	runs     []*storage.AgentRun
+	messages     []models.Message
+	runs         []*storage.AgentRun
+	sessionState map[string]interface{} // Dynamic state that tools can modify
 
 	// Knowledge
 	knowledge             knowledge.Knowledge
@@ -143,9 +374,51 @@ type Agent struct {
 	outputModel       models.AgnoModelInterface
 	outputModelPrompt string
 	parseResponse     bool
+
+	// Hooks
+	preHooks        []func(ctx context.Context, input interface{}) error
+	postHooks       []func(ctx context.Context, output *models.RunResponse) error
+	toolBeforeHooks []func(ctx context.Context, toolName string, args map[string]interface{}) error
+	toolAfterHooks  []func(ctx context.Context, toolName string, args map[string]interface{}, result interface{}) error
+
+	// Guardrails
+	inputGuardrails  []Guardrail
+	outputGuardrails []Guardrail
+	toolGuardrails   []Guardrail
+
+	// Tool Management
+	toolCallLimit int
+	toolChoice    string
+
+	// Context Building
+	addNameToContext     bool
+	addDatetimeToContext bool
+	addLocationToContext bool
+	timezoneIdentifier   string
+	additionalContext    string
+
+	// Store Options
+	storeMedia           bool
+	storeToolMessages    bool
+	storeHistoryMessages bool
+	sendMediaToModel     bool
+
+	// System Message
+	systemMessage     string
+	systemMessageRole string
+	buildContext      bool
+
+	// Retry Configuration
+	delayBetweenRetries int
+	exponentialBackoff  bool
 }
 
 func NewAgent(config AgentConfig) (*Agent, error) {
+	// Ensure context is not nil
+	if config.Context == nil {
+		config.Context = context.Background()
+	}
+
 	config.Context = context.WithValue(config.Context, models.DebugKey, config.Debug)
 	config.Context = context.WithValue(config.Context, models.ShowToolsCallKey, config.ShowToolsCall)
 	if config.Reasoning {
@@ -188,7 +461,7 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 
 		// Memory and Storage
 		memory:                  config.Memory,
-		storage:                 config.Storage,
+		db:                      config.DB,
 		sessionID:               sessionID,
 		userID:                  config.UserID,
 		addHistoryToMessages:    config.AddHistoryToMessages,
@@ -198,10 +471,12 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		enableAgenticMemory:     config.EnableAgenticMemory,
 		enableSessionSummaries:  config.EnableSessionSummaries,
 		readChatHistory:         config.ReadChatHistory,
+		enableAgenticState:      config.EnableAgenticState,
 
 		// Initialize session state
-		messages: []models.Message{},
-		runs:     []*storage.AgentRun{},
+		messages:     []models.Message{},
+		runs:         []*storage.AgentRun{},
+		sessionState: make(map[string]interface{}),
 
 		//knowledge
 		knowledge:             config.Knowledge,
@@ -226,6 +501,69 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		outputModel:       config.OutputModel,
 		outputModelPrompt: config.OutputModelPrompt,
 		parseResponse:     config.ParseResponse,
+
+		// Hooks
+		preHooks:        config.PreHooks,
+		postHooks:       config.PostHooks,
+		toolBeforeHooks: config.ToolBeforeHooks,
+		toolAfterHooks:  config.ToolAfterHooks,
+
+		// Guardrails
+		inputGuardrails:  config.InputGuardrails,
+		outputGuardrails: config.OutputGuardrails,
+		toolGuardrails:   config.ToolGuardrails,
+
+		// Tool Management
+		toolCallLimit: config.ToolCallLimit,
+		toolChoice:    config.ToolChoice,
+
+		// Context Building
+		addNameToContext:     config.AddNameToContext,
+		addDatetimeToContext: config.AddDatetimeToContext,
+		addLocationToContext: config.AddLocationToContext,
+		timezoneIdentifier:   config.TimezoneIdentifier,
+		additionalContext:    config.AdditionalContext,
+
+		// Store Options
+		storeMedia:           config.StoreMedia,
+		storeToolMessages:    config.StoreToolMessages,
+		storeHistoryMessages: config.StoreHistoryMessages,
+		sendMediaToModel:     config.SendMediaToModel,
+
+		// System Message
+		systemMessage:     config.SystemMessage,
+		systemMessageRole: config.SystemMessageRole,
+		buildContext:      config.BuildContext,
+
+		// Retry Configuration
+		delayBetweenRetries: config.DelayBetweenRetries,
+		exponentialBackoff:  config.ExponentialBackoff,
+	}
+
+	// Wrap tools with hooks if configured
+	if len(config.ToolBeforeHooks) > 0 || len(config.ToolAfterHooks) > 0 || len(config.ToolGuardrails) > 0 {
+		agent.tools = agent.WrapToolsWithHooks(agent.tools)
+	}
+
+	// Add default tools if enabled
+	defaultTools := CreateDefaultTools(agent, DefaultToolsConfig{
+		EnableReadChatHistory:     config.EnableReadChatHistoryTool,
+		EnableUpdateKnowledge:     config.EnableUpdateKnowledgeTool,
+		EnableReadToolCallHistory: config.EnableReadToolCallHistoryTool,
+	})
+	if len(defaultTools) > 0 {
+		agent.tools = append(agent.tools, defaultTools...)
+	}
+
+	// Set defaults
+	if agent.systemMessageRole == "" {
+		agent.systemMessageRole = "system"
+	}
+	if agent.buildContext == false && agent.systemMessage == "" {
+		agent.buildContext = true // Default to true if no custom system message
+	}
+	if agent.delayBetweenRetries <= 0 {
+		agent.delayBetweenRetries = 1 // Default 1 second
 	}
 
 	// Set default for ParseResponse
@@ -238,7 +576,7 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 	}
 
 	// Load existing session if storage is provided
-	if agent.storage != nil {
+	if agent.db != nil {
 		agent.loadSession()
 	}
 
@@ -269,6 +607,190 @@ func (a *Agent) GetModel() models.AgnoModelInterface {
 // GetKnowledge returns the agent's knowledge base
 func (a *Agent) GetKnowledge() knowledge.Knowledge {
 	return a.knowledge
+}
+
+// GetSessionState returns a copy of the current session state
+func (a *Agent) GetSessionState() map[string]interface{} {
+	if !a.enableAgenticState {
+		return nil
+	}
+
+	// Return a copy to prevent external modification
+	state := make(map[string]interface{})
+	for k, v := range a.sessionState {
+		state[k] = v
+	}
+	return state
+}
+
+// SetSessionState sets a value in the session state
+func (a *Agent) SetSessionState(key string, value interface{}) error {
+	if !a.enableAgenticState {
+		return fmt.Errorf("agentic state is not enabled")
+	}
+
+	a.sessionState[key] = value
+
+	// Persist to database if configured
+	if err := a.saveSessionState(); err != nil {
+		return fmt.Errorf("failed to persist session state: %w", err)
+	}
+
+	return nil
+}
+
+// GetSessionStateValue gets a specific value from the session state
+func (a *Agent) GetSessionStateValue(key string) (interface{}, bool) {
+	if !a.enableAgenticState {
+		return nil, false
+	}
+
+	val, ok := a.sessionState[key]
+	return val, ok
+}
+
+// DeleteSessionState removes a key from the session state
+func (a *Agent) DeleteSessionState(key string) error {
+	if !a.enableAgenticState {
+		return fmt.Errorf("agentic state is not enabled")
+	}
+
+	delete(a.sessionState, key)
+
+	// Persist to database if configured
+	if err := a.saveSessionState(); err != nil {
+		return fmt.Errorf("failed to persist session state: %w", err)
+	}
+
+	return nil
+}
+
+// ClearSessionState clears all session state
+func (a *Agent) ClearSessionState() error {
+	if !a.enableAgenticState {
+		return fmt.Errorf("agentic state is not enabled")
+	}
+
+	a.sessionState = make(map[string]interface{})
+
+	// Persist to database if configured
+	if err := a.saveSessionState(); err != nil {
+		return fmt.Errorf("failed to persist session state: %w", err)
+	}
+
+	return nil
+}
+
+// saveSessionState persists the current session state to the database
+// This matches Python's behavior of storing session_state in session_data
+func (a *Agent) saveSessionState() error {
+	if a.db == nil || a.sessionID == "" || !a.enableAgenticState {
+		return nil
+	}
+
+	// Load current session
+	session, err := a.db.ReadSession(a.ctx, a.sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to read session: %w", err)
+	}
+
+	// Ensure SessionData is initialized
+	if session.SessionData == nil {
+		session.SessionData = make(map[string]interface{})
+	}
+
+	// Store session state in session_data (matches Python implementation)
+	session.SessionData["session_state"] = a.sessionState
+	session.UpdatedAt = time.Now().Unix()
+
+	// Update session in database
+	if err := a.db.UpdateSession(a.ctx, session); err != nil {
+		return fmt.Errorf("failed to update session: %w", err)
+	}
+
+	return nil
+}
+
+// ExecuteToolBeforeHooks executes all registered tool before hooks
+func (a *Agent) ExecuteToolBeforeHooks(ctx context.Context, toolName string, args map[string]interface{}) error {
+	for i, hook := range a.toolBeforeHooks {
+		if err := hook(ctx, toolName, args); err != nil {
+			return fmt.Errorf("tool before hook %d failed for tool '%s': %w", i, toolName, err)
+		}
+	}
+	return nil
+}
+
+// ExecuteToolAfterHooks executes all registered tool after hooks
+func (a *Agent) ExecuteToolAfterHooks(ctx context.Context, toolName string, args map[string]interface{}, result interface{}) error {
+	for i, hook := range a.toolAfterHooks {
+		if err := hook(ctx, toolName, args, result); err != nil {
+			return fmt.Errorf("tool after hook %d failed for tool '%s': %w", i, toolName, err)
+		}
+	}
+	return nil
+}
+
+// ToolWrapper wraps a tool with before/after hooks
+type ToolWrapper struct {
+	toolkit.Tool
+	agent *Agent
+}
+
+// Execute wraps the original Execute method with hooks and guardrails
+func (tw *ToolWrapper) Execute(methodName string, input json.RawMessage) (interface{}, error) {
+	// Parse input to map for hooks
+	var inputMap map[string]interface{}
+	if err := json.Unmarshal(input, &inputMap); err != nil {
+		inputMap = make(map[string]interface{})
+	}
+
+	// Execute tool guardrails
+	if len(tw.agent.toolGuardrails) > 0 {
+		toolCallData := map[string]interface{}{
+			"tool_name":   tw.GetName() + "." + methodName,
+			"method_name": methodName,
+			"arguments":   inputMap,
+		}
+		if err := RunGuardrails(tw.agent.ctx, tw.agent.toolGuardrails, toolCallData); err != nil {
+			return nil, fmt.Errorf("tool guardrail validation failed: %w", err)
+		}
+	}
+
+	// Execute before hooks
+	if err := tw.agent.ExecuteToolBeforeHooks(tw.agent.ctx, tw.GetName()+"."+methodName, inputMap); err != nil {
+		return nil, err
+	}
+
+	// Execute original tool
+	result, err := tw.Tool.Execute(methodName, input)
+	if err != nil {
+		return result, err
+	}
+
+	// Execute after hooks
+	if err := tw.agent.ExecuteToolAfterHooks(tw.agent.ctx, tw.GetName()+"."+methodName, inputMap, result); err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+// WrapToolsWithHooks wraps tools with before/after hooks and guardrails if configured
+func (a *Agent) WrapToolsWithHooks(tools []toolkit.Tool) []toolkit.Tool {
+	if len(a.toolBeforeHooks) == 0 && len(a.toolAfterHooks) == 0 && len(a.toolGuardrails) == 0 {
+		return tools
+	}
+
+	wrappedTools := make([]toolkit.Tool, len(tools))
+	for i, tool := range tools {
+		wrappedTools[i] = &ToolWrapper{
+			Tool:  tool,
+			agent: a,
+		}
+	}
+
+	return wrappedTools
 }
 
 // truncateString truncates a string to maxLen characters
@@ -671,7 +1193,81 @@ func (a *Agent) unmarshalIntoSchema(jsonStr string) (interface{}, error) {
 	return result, nil
 }
 
-func (a *Agent) Run(input interface{}) (models.RunResponse, error) {
+// RunWithOptions is the new method with full options support
+func (a *Agent) RunWithOptions(input interface{}, opts ...RunOption) (models.RunResponse, error) {
+	// Apply options
+	options := &RunOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// Override agent settings with run options if provided
+	if options.SessionID != nil {
+		a.sessionID = *options.SessionID
+	}
+
+	if options.UserID != nil {
+		a.userID = *options.UserID
+	}
+
+	if options.DebugMode != nil {
+		a.debug = *options.DebugMode
+	}
+
+	if options.AddHistoryToContext != nil {
+		a.addHistoryToMessages = *options.AddHistoryToContext
+	}
+
+	// Merge session state if provided
+	sessionState := make(map[string]interface{})
+	if options.SessionState != nil {
+		for k, v := range options.SessionState {
+			sessionState[k] = v
+		}
+	}
+
+	// Merge dependencies if provided
+	dependencies := make(map[string]interface{})
+	if options.Dependencies != nil {
+		for k, v := range options.Dependencies {
+			dependencies[k] = v
+		}
+	}
+
+	// Merge metadata if provided
+	metadata := make(map[string]interface{})
+	if options.Metadata != nil {
+		for k, v := range options.Metadata {
+			metadata[k] = v
+		}
+	}
+
+	// Add media to context if provided
+	if len(options.Audio) > 0 {
+		metadata["audio"] = options.Audio
+	}
+	if len(options.Images) > 0 {
+		metadata["images"] = options.Images
+	}
+	if len(options.Videos) > 0 {
+		metadata["videos"] = options.Videos
+	}
+	if len(options.Files) > 0 {
+		metadata["files"] = options.Files
+	}
+
+	// Apply knowledge filters if provided (for future use)
+	if options.KnowledgeFilters != nil {
+		// Store for potential future knowledge queries
+		metadata["knowledge_filters"] = options.KnowledgeFilters
+	}
+
+	// Determine number of retries
+	retries := 0
+	if options.Retries != nil {
+		retries = *options.Retries
+	}
+
 	var messages []models.Message
 
 	// Prepare input according to schema if configured
@@ -690,17 +1286,31 @@ func (a *Agent) Run(input interface{}) (models.RunResponse, error) {
 		}
 	}
 
-	// use default reasoning agent
-	if a.reasoningAgent == nil && a.reasoning && a.reasoningModel != nil {
-		a.reasoningAgent = NewReasoningAgent(a.ctx, a.reasoningModel, a.tools, a.reasoningMinSteps, a.reasoningMaxSteps)
+	// Add session state to context if requested
+	if options.AddSessionStateToContext != nil && *options.AddSessionStateToContext && len(sessionState) > 0 {
+		stateJSON, _ := json.Marshal(sessionState)
+		messages = append([]models.Message{{
+			Role:    models.TypeSystemRole,
+			Content: fmt.Sprintf("Session State: %s", string(stateJSON)),
+		}}, messages...)
 	}
-	// Reasoning: insert each step as "assistant" message before user prompt
-	if a.reasoning && a.reasoningModel != nil && a.reasoningAgent != nil {
-		reasoningInterface, ok := a.reasoningAgent.(interface {
-			Reason(prompt string) ([]models.ReasoningStep, error)
-		})
-		if ok {
-			reasoningSteps, err := reasoningInterface.Reason(prompt)
+
+	// Add dependencies to context if requested
+	if options.AddDependenciesToContext != nil && *options.AddDependenciesToContext && len(dependencies) > 0 {
+		depsJSON, _ := json.Marshal(dependencies)
+		messages = append([]models.Message{{
+			Role:    models.TypeSystemRole,
+			Content: fmt.Sprintf("Dependencies: %s", string(depsJSON)),
+		}}, messages...)
+	}
+
+	// Reasoning: if not using agent mode, use simple reasoning
+	if a.reasoning && a.reasoningModel != nil {
+		// use default reasoning agent
+		if a.reasoningAgent == nil {
+			reasoningAgent := NewReasoningAgent(a.ctx, a.reasoningModel, a.tools, a.reasoningMinSteps, a.reasoningMaxSteps)
+			// Use the reasoning agent directly without assigning to interface
+			reasoningSteps, err := reasoningAgent.Reason(prompt)
 			if err == nil && len(reasoningSteps) > 0 {
 				var allStepsMsg string
 				for _, step := range reasoningSteps {
@@ -723,20 +1333,66 @@ func (a *Agent) Run(input interface{}) (models.RunResponse, error) {
 					Role:    "assistant",
 					Content: allStepsMsg,
 				})
-				//reasoningContent = allStepsMsg
-				//utils.ReasoningPanel(reasoningContent)
+			}
+		} else {
+			// Use existing reasoning agent
+			reasoningInterface, ok := a.reasoningAgent.(interface {
+				Reason(prompt string) ([]models.ReasoningStep, error)
+			})
+			if ok {
+				reasoningSteps, err := reasoningInterface.Reason(prompt)
+				if err == nil && len(reasoningSteps) > 0 {
+					var allStepsMsg string
+					for _, step := range reasoningSteps {
+						stepMsg := ""
+						if step.Title != "" {
+							stepMsg += "**" + step.Title + "**\n"
+						}
+						if step.Reasoning != "" {
+							stepMsg += step.Reasoning + "\n"
+						}
+						if step.Action != "" {
+							stepMsg += "Action: " + step.Action + "\n"
+						}
+						if step.Result != "" {
+							stepMsg += "Result: " + step.Result + "\n"
+						}
+						allStepsMsg += stepMsg + "\n"
+					}
+					messages = append(messages, models.Message{
+						Role:    "assistant",
+						Content: allStepsMsg,
+					})
+				}
 			}
 		}
 	}
 
-	resp, err := a.model.Invoke(a.ctx, messages, models.WithTools(a.tools))
+	// Retry logic
+	var resp *models.MessageResponse
+	var lastErr error
 
-	if err != nil {
-		return models.RunResponse{}, err
+	for attempt := 0; attempt <= retries; attempt++ {
+		if a.debug && attempt > 0 {
+			fmt.Printf("Retry attempt %d/%d\n", attempt, retries)
+		}
+
+		resp, lastErr = a.model.Invoke(a.ctx, messages, models.WithTools(a.tools))
+		if lastErr == nil {
+			break
+		}
+
+		if attempt < retries {
+			time.Sleep(time.Second * time.Duration(attempt+1))
+		}
+	}
+
+	if lastErr != nil {
+		return models.RunResponse{}, lastErr
 	}
 
 	// Save run to storage if enabled
-	if a.storage != nil {
+	if a.db != nil {
 		if err := a.saveRun(prompt, resp.Content, messages); err != nil && a.debug {
 			fmt.Printf("Warning: Failed to save run: %v\n", err)
 		}
@@ -804,7 +1460,319 @@ func (a *Agent) Run(input interface{}) (models.RunResponse, error) {
 	}, nil
 }
 
-// create Print with stream func is optional
+// Run executes the agent with the given input and options
+// This method accepts optional RunOptions using the functional options pattern
+func (a *Agent) Run(input interface{}, opts ...RunOption) (models.RunResponse, error) {
+	// Apply options
+	options := &RunOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// Execute pre-hooks for validation and preprocessing
+	if len(a.preHooks) > 0 {
+		for i, hook := range a.preHooks {
+			if err := hook(a.ctx, input); err != nil {
+				return models.RunResponse{}, fmt.Errorf("pre-hook %d failed: %w", i, err)
+			}
+		}
+	}
+
+	// Execute input guardrails
+	if len(a.inputGuardrails) > 0 {
+		if err := RunGuardrails(a.ctx, a.inputGuardrails, input); err != nil {
+			return models.RunResponse{}, fmt.Errorf("input validation failed: %w", err)
+		}
+	}
+
+	// Override agent settings with run options if provided
+	if options.SessionID != nil {
+		a.sessionID = *options.SessionID
+	}
+
+	if options.UserID != nil {
+		a.userID = *options.UserID
+	}
+
+	if options.DebugMode != nil {
+		a.debug = *options.DebugMode
+	}
+
+	if options.AddHistoryToContext != nil {
+		a.addHistoryToMessages = *options.AddHistoryToContext
+	}
+
+	// Merge session state if provided
+	sessionState := make(map[string]interface{})
+	if options.SessionState != nil {
+		for k, v := range options.SessionState {
+			sessionState[k] = v
+		}
+	}
+
+	// Merge dependencies if provided
+	dependencies := make(map[string]interface{})
+	if options.Dependencies != nil {
+		for k, v := range options.Dependencies {
+			dependencies[k] = v
+		}
+	}
+
+	// Merge metadata if provided
+	metadata := make(map[string]interface{})
+	if options.Metadata != nil {
+		for k, v := range options.Metadata {
+			metadata[k] = v
+		}
+	}
+
+	// Add media to context if provided
+	if len(options.Audio) > 0 {
+		metadata["audio"] = options.Audio
+	}
+	if len(options.Images) > 0 {
+		metadata["images"] = options.Images
+	}
+	if len(options.Videos) > 0 {
+		metadata["videos"] = options.Videos
+	}
+	if len(options.Files) > 0 {
+		metadata["files"] = options.Files
+	}
+
+	// Apply knowledge filters if provided (for future use)
+	if options.KnowledgeFilters != nil {
+		// Store for potential future knowledge queries
+		metadata["knowledge_filters"] = options.KnowledgeFilters
+	}
+
+	// Determine number of retries
+	retries := 0
+	if options.Retries != nil {
+		retries = *options.Retries
+	}
+
+	var messages []models.Message
+
+	// Prepare input according to schema if configured
+	prompt, err := a.prepareInputWithSchema(input)
+	if err != nil {
+		return models.RunResponse{}, fmt.Errorf("failed to prepare input: %w", err)
+	}
+
+	// Add system message and history normally
+	baseMessages := a.prepareMessages(prompt)
+	for _, msg := range baseMessages {
+		if msg.Role == models.TypeUserRole {
+			messages = append(messages, msg)
+		} else {
+			messages = append([]models.Message{msg}, messages...)
+		}
+	}
+
+	// Add session state to context if requested
+	if options.AddSessionStateToContext != nil && *options.AddSessionStateToContext && len(sessionState) > 0 {
+		stateJSON, _ := json.Marshal(sessionState)
+		messages = append([]models.Message{{
+			Role:    models.TypeSystemRole,
+			Content: fmt.Sprintf("Session State: %s", string(stateJSON)),
+		}}, messages...)
+	}
+
+	// Add dependencies to context if requested
+	if options.AddDependenciesToContext != nil && *options.AddDependenciesToContext && len(dependencies) > 0 {
+		depsJSON, _ := json.Marshal(dependencies)
+		messages = append([]models.Message{{
+			Role:    models.TypeSystemRole,
+			Content: fmt.Sprintf("Dependencies: %s", string(depsJSON)),
+		}}, messages...)
+	}
+
+	// Reasoning: if not using agent mode, use simple reasoning
+	if a.reasoning && a.reasoningModel != nil {
+		// use default reasoning agent
+		if a.reasoningAgent == nil {
+			reasoningAgent := NewReasoningAgent(a.ctx, a.reasoningModel, a.tools, a.reasoningMinSteps, a.reasoningMaxSteps)
+			// Use the reasoning agent directly without assigning to interface
+			reasoningSteps, err := reasoningAgent.Reason(prompt)
+			if err == nil && len(reasoningSteps) > 0 {
+				var allStepsMsg string
+				for _, step := range reasoningSteps {
+					stepMsg := ""
+					if step.Title != "" {
+						stepMsg += "**" + step.Title + "**\n"
+					}
+					if step.Reasoning != "" {
+						stepMsg += step.Reasoning + "\n"
+					}
+					if step.Action != "" {
+						stepMsg += "Action: " + step.Action + "\n"
+					}
+					if step.Result != "" {
+						stepMsg += "Result: " + step.Result + "\n"
+					}
+					allStepsMsg += stepMsg + "\n"
+				}
+				messages = append(messages, models.Message{
+					Role:    "assistant",
+					Content: allStepsMsg,
+				})
+			}
+		} else {
+			// Use existing reasoning agent
+			reasoningInterface, ok := a.reasoningAgent.(interface {
+				Reason(prompt string) ([]models.ReasoningStep, error)
+			})
+			if ok {
+				reasoningSteps, err := reasoningInterface.Reason(prompt)
+				if err == nil && len(reasoningSteps) > 0 {
+					var allStepsMsg string
+					for _, step := range reasoningSteps {
+						stepMsg := ""
+						if step.Title != "" {
+							stepMsg += "**" + step.Title + "**\n"
+						}
+						if step.Reasoning != "" {
+							stepMsg += step.Reasoning + "\n"
+						}
+						if step.Action != "" {
+							stepMsg += "Action: " + step.Action + "\n"
+						}
+						if step.Result != "" {
+							stepMsg += "Result: " + step.Result + "\n"
+						}
+						allStepsMsg += stepMsg + "\n"
+					}
+					messages = append(messages, models.Message{
+						Role:    "assistant",
+						Content: allStepsMsg,
+					})
+				}
+			}
+		}
+	}
+
+	// Retry logic
+	var resp *models.MessageResponse
+	var lastErr error
+
+	// Prepare model options
+	modelOptions := []models.Option{models.WithTools(a.tools)}
+	if len(metadata) > 0 {
+		modelOptions = append(modelOptions, models.WithMetadata(metadata))
+	}
+
+	for attempt := 0; attempt <= retries; attempt++ {
+		if a.debug && attempt > 0 {
+			fmt.Printf("Retry attempt %d/%d\n", attempt, retries)
+		}
+
+		resp, lastErr = a.model.Invoke(a.ctx, messages, modelOptions...)
+		if lastErr == nil {
+			break
+		}
+
+		if attempt < retries {
+			// Apply exponential backoff if enabled
+			delay := time.Duration(a.delayBetweenRetries) * time.Second
+			if a.exponentialBackoff && attempt > 0 {
+				delay = delay * time.Duration(1<<uint(attempt)) // 2^attempt
+			}
+			time.Sleep(delay)
+		}
+	}
+
+	if lastErr != nil {
+		return models.RunResponse{}, lastErr
+	}
+
+	// Save run to storage if enabled
+	if a.db != nil {
+		if err := a.saveRun(prompt, resp.Content, messages); err != nil && a.debug {
+			fmt.Printf("Warning: Failed to save run: %v\n", err)
+		}
+	}
+
+	// Process memories if enabled
+	if a.memory != nil {
+		if err := a.processMemories(prompt, resp.Content); err != nil && a.debug {
+			fmt.Printf("Warning: Failed to process memories: %v\n", err)
+		}
+	}
+
+	// Update message history for next interaction
+	if a.addHistoryToMessages {
+		a.messages = append(a.messages, models.Message{
+			Role:    "user",
+			Content: prompt,
+		})
+		a.messages = append(a.messages, models.Message{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+
+		// Keep only recent messages based on history limit
+		if a.numHistoryRuns > 0 {
+			maxMessages := a.numHistoryRuns * 2 // user + assistant per run
+			if len(a.messages) > maxMessages {
+				a.messages = a.messages[len(a.messages)-maxMessages:]
+			}
+		}
+	}
+
+	// Parse output using ApplyOutputFormatting method
+	// This provides TWO outputs when OutputModel is configured:
+	// 1. resp.Content (TextContent) = Original creative response from main model
+	// 2. parsedContent (Output) = Structured JSON formatted by OutputModel
+	// This allows using expensive models for content and cheap models for formatting
+	parsedContent, err := a.ApplyOutputFormatting(resp.Content)
+	if err != nil {
+		return models.RunResponse{}, err
+	}
+
+	var outputContent interface{}
+	if parsedContent != resp.Content {
+		// Output was parsed/formatted
+		outputContent = parsedContent
+	}
+
+	runResponse := models.RunResponse{
+		TextContent:  resp.Content, // Original response from main model
+		ContentType:  "text",
+		Event:        "RunResponse",
+		ParsedOutput: parsedContent, // Deprecated: kept for backwards compatibility
+		Output:       outputContent, // Structured output (pointer to filled struct)
+		Messages: []models.Message{
+			{
+				Role:     models.Role(resp.Role),
+				Content:  resp.Content,
+				Thinking: resp.Thinking,
+			},
+		},
+		Model:     resp.Model,
+		CreatedAt: time.Now().Unix(),
+	}
+
+	// Execute output guardrails
+	if len(a.outputGuardrails) > 0 {
+		if err := RunGuardrails(a.ctx, a.outputGuardrails, runResponse); err != nil {
+			return models.RunResponse{}, fmt.Errorf("output validation failed: %w", err)
+		}
+	}
+
+	// Execute post-hooks for validation and post-processing
+	if len(a.postHooks) > 0 {
+		for i, hook := range a.postHooks {
+			if err := hook(a.ctx, &runResponse); err != nil {
+				return models.RunResponse{}, fmt.Errorf("post-hook %d failed: %w", i, err)
+			}
+		}
+	}
+
+	return runResponse, nil
+}
+
 func (a *Agent) PrintResponse(prompt string, stream bool, markdown bool) {
 	fmt.Println("Running agent  stream:", stream, "markdown:", markdown)
 	a.stream = stream
@@ -977,9 +1945,59 @@ func (a *Agent) filterToolCallsFromHistory(messages []models.Message) []models.M
 }
 
 func (a *Agent) prepareMessages(prompt string) []models.Message {
+	// If custom system message is provided and buildContext is false, use it directly
+	if a.systemMessage != "" && !a.buildContext {
+		messages := []models.Message{
+			{
+				Role:    models.Role(a.systemMessageRole),
+				Content: a.systemMessage,
+			},
+		}
+
+		// Add history if enabled
+		if a.addHistoryToMessages {
+			messages = append(messages, a.messages...)
+		}
+
+		// Add user prompt
+		messages = append(messages, models.Message{
+			Role:    models.TypeUserRole,
+			Content: prompt,
+		})
+
+		return messages
+	}
+
 	systemMessage := ""
 	originalSystemMessage := ""
 	originalPrompt := prompt
+
+	// Add agent name to context if enabled
+	if a.addNameToContext && a.name != "" {
+		systemMessage += fmt.Sprintf("You are %s.\n\n", a.name)
+		originalSystemMessage += fmt.Sprintf("You are %s.\n\n", a.name)
+	}
+
+	// Add datetime to context if enabled
+	if a.addDatetimeToContext {
+		location := time.UTC
+		if a.timezoneIdentifier != "" {
+			loc, err := time.LoadLocation(a.timezoneIdentifier)
+			if err == nil {
+				location = loc
+			}
+		}
+		now := time.Now().In(location)
+		dateStr := now.Format("Monday, January 2, 2006 at 3:04 PM MST")
+		systemMessage += fmt.Sprintf("Current date and time: %s\n\n", dateStr)
+		originalSystemMessage += fmt.Sprintf("Current date and time: %s\n\n", dateStr)
+	}
+
+	// Add location to context if enabled
+	if a.addLocationToContext && a.timezoneIdentifier != "" {
+		systemMessage += fmt.Sprintf("Your timezone: %s\n\n", a.timezoneIdentifier)
+		originalSystemMessage += fmt.Sprintf("Your timezone: %s\n\n", a.timezoneIdentifier)
+	}
 
 	if a.goal != "" {
 		systemMessage += fmt.Sprintf("<goal>\n%s\n</goal>\n", a.ApplySemanticCompression(a.goal))
@@ -1059,6 +2077,12 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 		}
 	}
 
+	// Add additional context at the end if provided
+	if a.additionalContext != "" {
+		systemMessage += fmt.Sprintf("\n<additional_context>\n%s\n</additional_context>\n", a.additionalContext)
+		originalSystemMessage += fmt.Sprintf("\n<additional_context>\n%s\n</additional_context>\n", a.additionalContext)
+	}
+
 	if a.debug {
 		utils.DebugPanel(systemMessage)
 	}
@@ -1124,16 +2148,16 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 
 // loadSession loads existing session data from storage
 func (a *Agent) loadSession() error {
-	if a.storage == nil || a.sessionID == "" {
+	if a.db == nil || a.sessionID == "" {
 		return nil
 	}
 
 	// Load session
-	_, err := a.storage.ReadSession(a.ctx, a.sessionID)
+	session, err := a.db.ReadSession(a.ctx, a.sessionID)
 	if err != nil {
 		// Session doesn't exist, create new one
 		if err.Error() == "session not found" {
-			session := &storage.AgentSession{
+			session = &storage.AgentSession{
 				Session: storage.Session{
 					SessionID:   a.sessionID,
 					UserID:      a.userID,
@@ -1146,7 +2170,7 @@ func (a *Agent) loadSession() error {
 				AgentID:   "default-agent",
 				AgentData: make(map[string]interface{}),
 			}
-			if err := a.storage.CreateSession(a.ctx, session); err != nil {
+			if err := a.db.CreateSession(a.ctx, session); err != nil {
 				return fmt.Errorf("failed to create session: %w", err)
 			}
 		} else {
@@ -1154,9 +2178,19 @@ func (a *Agent) loadSession() error {
 		}
 	}
 
+	// Load session state from session_data if enable_agentic_state is enabled
+	if a.enableAgenticState && session != nil && session.SessionData != nil {
+		if sessionState, ok := session.SessionData["session_state"].(map[string]interface{}); ok {
+			// Merge loaded session state with in-memory state
+			for k, v := range sessionState {
+				a.sessionState[k] = v
+			}
+		}
+	}
+
 	// Load runs if history is enabled
 	if a.addHistoryToMessages {
-		runs, err := a.storage.GetRunsForSession(a.ctx, a.sessionID)
+		runs, err := a.db.GetRunsForSession(a.ctx, a.sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to load session runs: %w", err)
 		}
@@ -1200,7 +2234,7 @@ func (a *Agent) buildMessageHistoryFromRuns() {
 
 // saveRun saves a completed run to storage
 func (a *Agent) saveRun(userMessage, agentResponse string, messages []models.Message) error {
-	if a.storage == nil {
+	if a.db == nil {
 		return nil
 	}
 
@@ -1227,7 +2261,7 @@ func (a *Agent) saveRun(userMessage, agentResponse string, messages []models.Mes
 		UpdatedAt:    time.Now(),
 	}
 
-	if err := a.storage.CreateRun(a.ctx, run); err != nil {
+	if err := a.db.CreateRun(a.ctx, run); err != nil {
 		return fmt.Errorf("failed to save run: %w", err)
 	}
 
@@ -1317,7 +2351,7 @@ func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
 		responseContent := fullResponse.String()
 
 		// Save run to storage if enabled
-		if a.storage != nil {
+		if a.db != nil {
 			if saveErr := a.saveRun(prompt, responseContent, messages); saveErr != nil && a.debug {
 				fmt.Printf("Warning: Failed to save run: %v\n", saveErr)
 			}

@@ -41,6 +41,11 @@ func NewLikeOpenAIChat(options ...models.OptionClient) (models.AgnoModelInterfac
 	}, nil
 }
 
+// GetID returns the model ID.
+func (o *OpenAIChat) GetID() string {
+	return o.opts.ID
+}
+
 // ChatCompletion performs a chat completion request.
 func (o *OpenAIChat) ChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*client.ChatCompletionResponse, error) {
 	return o.client.CreateChatCompletion(ctx, messages, options...)
