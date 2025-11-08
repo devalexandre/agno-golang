@@ -87,14 +87,14 @@ type Storage interface {
 	// Upsert (insert or update) a session
 	Upsert(session interface{}) (interface{}, error)
 
-	// Delete a session
-	DeleteSession(sessionID *string) error
+	// Delete a session (updated to match DB interface signature)
+	DeleteSession(ctx context.Context, sessionID string) error
 
-	// Get all session IDs for a user and optional entity
-	GetAllSessionIDs(userID *string, entityID *string) ([]string, error)
+	// Get all session IDs for a user and optional entity (updated signature)
+	GetAllSessionIDs(ctx context.Context, userID string) ([]string, error)
 
-	// Get all sessions for a user and optional entity
-	GetAllSessions(userID *string, entityID *string) ([]interface{}, error)
+	// Get all sessions for a user and optional entity (updated signature)
+	GetAllSessions(ctx context.Context, userID string) ([]*AgentSession, error)
 
 	// Get recent sessions
 	GetRecentSessions(userID *string, entityID *string, limit *int) ([]interface{}, error)
@@ -105,16 +105,17 @@ type Storage interface {
 	// Check if table exists
 	TableExists() (bool, error)
 
-	// Upgrade schema
-	UpgradeSchema() error
+	// Upgrade schema (updated to match DB interface signature)
+	UpgradeSchema(ctx context.Context) error
 
 	// Get/Set mode
 	GetMode() StorageMode
 	SetMode(mode StorageMode)
 }
 
-// AgentStorage defines the interface for agent storage (legacy compatibility)
-type AgentStorage interface {
+// DB defines the interface for agent database storage (Python compatible)
+// This matches Python's BaseDb interface
+type DB interface {
 	// Session management
 	CreateSession(ctx context.Context, session *AgentSession) error
 	ReadSession(ctx context.Context, sessionID string) (*AgentSession, error)
@@ -139,6 +140,9 @@ type AgentStorage interface {
 	UpgradeSchema(ctx context.Context) error
 	DropTables(ctx context.Context) error
 }
+
+// AgentStorage is an alias for DB (deprecated, use DB instead)
+type AgentStorage = DB
 
 // Helper functions to create sessions
 

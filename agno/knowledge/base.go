@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devalexandre/agno-golang/agno/document"
@@ -390,16 +391,149 @@ func (k *BaseKnowledge) LoadDocuments(ctx context.Context, docs []document.Docum
 			docPtrs[i] = &docs[i]
 		}
 
-		if err := k.VectorDB.Insert(ctx, docPtrs, nil); err != nil {
-			return fmt.Errorf("failed to insert documents into VectorDB: %w", err)
+		// Optimize batch size based on dataset size
+		batchSize := 100 // Larger batches for better throughput
+		numWorkers := 10 // More workers for faster processing
+
+		if len(docPtrs) > 1000 {
+			// Very large datasets: use more workers
+			numWorkers = 15
+			batchSize = 150
 		}
 
-		fmt.Printf("[KNOWLEDGE] Successfully inserted %d documents into VectorDB\n", len(docs))
-	} else {
-		fmt.Printf("[KNOWLEDGE] No documents to insert\n")
+		if len(docPtrs) > 500 {
+			// Use parallel processing for large datasets
+			return k.insertDocumentsParallel(ctx, docPtrs, batchSize, numWorkers)
+		}
+
+		// For small datasets, use simple batching with progress
+		return k.insertDocumentsSequential(ctx, docPtrs, batchSize)
 	}
 
+	fmt.Printf("[KNOWLEDGE] No documents to insert\n")
 	return nil
+}
+
+// insertDocumentsSequential inserts documents in batches sequentially
+func (k *BaseKnowledge) insertDocumentsSequential(ctx context.Context, docPtrs []*document.Document, batchSize int) error {
+	totalBatches := (len(docPtrs) + batchSize - 1) / batchSize
+
+	for i := 0; i < len(docPtrs); i += batchSize {
+		end := i + batchSize
+		if end > len(docPtrs) {
+			end = len(docPtrs)
+		}
+
+		batch := docPtrs[i:end]
+		batchNum := (i / batchSize) + 1
+
+		if err := k.VectorDB.Insert(ctx, batch, nil); err != nil {
+			return fmt.Errorf("failed to insert batch %d: %w", batchNum, err)
+		}
+
+		// Show progress bar
+		k.showProgressBar(batchNum, totalBatches, end, len(docPtrs))
+	}
+
+	fmt.Printf("\n[KNOWLEDGE] ✅ Successfully inserted %d documents\n", len(docPtrs))
+	return nil
+}
+
+// insertDocumentsParallel inserts documents using parallel goroutines
+func (k *BaseKnowledge) insertDocumentsParallel(ctx context.Context, docPtrs []*document.Document, batchSize int, numWorkers int) error {
+	totalBatches := (len(docPtrs) + batchSize - 1) / batchSize
+
+	// Create batches
+	type batch struct {
+		docs []*document.Document
+		num  int
+	}
+
+	batches := make([]batch, 0, totalBatches)
+	for i := 0; i < len(docPtrs); i += batchSize {
+		end := i + batchSize
+		if end > len(docPtrs) {
+			end = len(docPtrs)
+		}
+		batches = append(batches, batch{
+			docs: docPtrs[i:end],
+			num:  (i / batchSize) + 1,
+		})
+	}
+
+	// Channels for communication
+	batchChan := make(chan batch, numWorkers)
+	progressChan := make(chan int, totalBatches)
+	errChan := make(chan error, 1)
+	var wg sync.WaitGroup
+
+	// Start workers
+	for range numWorkers {
+		wg.Go(func() {
+			for b := range batchChan {
+				if err := k.VectorDB.Insert(ctx, b.docs, nil); err != nil {
+					select {
+					case errChan <- fmt.Errorf("batch %d failed: %w", b.num, err):
+					default:
+					}
+					return
+				}
+				// Report progress
+				progressChan <- b.num
+			}
+		})
+	}
+
+	// Progress monitor goroutine
+	progressDone := make(chan struct{})
+	go func() {
+		completed := 0
+		for range progressChan {
+			completed++
+			docsProcessed := completed * batchSize
+			if docsProcessed > len(docPtrs) {
+				docsProcessed = len(docPtrs)
+			}
+			k.showProgressBar(completed, totalBatches, docsProcessed, len(docPtrs))
+		}
+		close(progressDone)
+	}()
+
+	// Send batches to workers
+	go func() {
+		for _, b := range batches {
+			batchChan <- b
+		}
+		close(batchChan)
+	}()
+
+	// Wait for workers to complete
+	wg.Wait()
+	close(progressChan)
+	<-progressDone // Wait for progress monitor to finish
+
+	close(errChan)
+
+	// Check for errors
+	if err := <-errChan; err != nil {
+		fmt.Printf("\n[KNOWLEDGE] ❌ Failed: %v\n", err)
+		return err
+	}
+
+	fmt.Printf("\n[KNOWLEDGE] ✅ Successfully inserted %d documents (parallel mode)\n", len(docPtrs))
+	return nil
+}
+
+// showProgressBar displays a progress bar
+func (k *BaseKnowledge) showProgressBar(current, total, docsProcessed, totalDocs int) {
+	percentage := float64(current) / float64(total) * 100
+	barLength := 30
+	filledLength := int(percentage / 100.0 * float64(barLength))
+
+	bar := strings.Repeat("█", filledLength) + strings.Repeat("░", barLength-filledLength)
+
+	fmt.Printf("\r[KNOWLEDGE] [%s] %.1f%% (%d/%d batches, %d/%d docs)",
+		bar, percentage, current, total, docsProcessed, totalDocs)
 }
 
 // Search implementa Knowledge interface

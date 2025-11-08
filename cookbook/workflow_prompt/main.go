@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,92 +16,110 @@ import (
 )
 
 func main() {
-	// Check if prompt is provided as argument
+	// Check if blog topic is provided as argument
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go \"Your question here\"")
-		fmt.Println("Example: go run main.go \"Explique como o agno-go funciona\"")
+		fmt.Println("Usage: go run main.go \"Blog post topic\"")
+		fmt.Println("Example: go run main.go \"Best practices for building AI agents in Go\"")
 		os.Exit(1)
 	}
 
-	prompt := os.Args[1]
-	modelName := "llama3.2:latest"
-	baseURL := "http://localhost:11434"
+	topic := os.Args[1]
 	debug := false
 
-	fmt.Println("=== Workflow Prompt Example ===")
-	fmt.Printf("Model: %s\n", modelName)
-	fmt.Printf("Prompt: %s\n", prompt)
+	fmt.Println("=== Blog Post Generator Workflow ===")
+	fmt.Printf("Topic: %s\n", topic)
 	fmt.Println()
 
 	ctx := context.Background()
 
-	// Create Ollama model
+	// Create Ollama Cloud model
 	model, err := ollama.NewOllamaChat(
-		models.WithID(modelName),
-		models.WithBaseURL(baseURL),
+		models.WithID("kimi-k2:1t-cloud"),
+		models.WithBaseURL("https://ollama.com"),
+		models.WithAPIKey(os.Getenv("OLLAMA_API_KEY")),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create Ollama model: %v", err)
 	}
 
-	// Create agents for the workflow
-	analyzerAgent, err := agent.NewAgent(agent.AgentConfig{
-		Context:     ctx,
-		Name:        "Analyzer",
-		Role:        "Question Analyzer",
-		Description: "Analyzes user questions to understand intent and context",
-		Goal:        "To understand and categorize user questions",
-		Instructions: `Analyze the user's question and provide:
-1. The main topic or subject
-2. The type of question (explanation, how-to, factual, creative, etc.)
-3. Key concepts involved
-4. Suggested approach for answering
-
-Format your response as JSON with these fields: topic, question_type, key_concepts, approach`,
-		Model: model,
-		Debug: debug,
-	})
-	if err != nil {
-		log.Fatalf("Failed to create analyzer agent: %v", err)
+	// Create output directory for blog posts
+	outputDir := "blog_posts"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
-	processorAgent, err := agent.NewAgent(agent.AgentConfig{
+	// Create agents for the blog post generation workflow
+	researcherAgent, err := agent.NewAgent(agent.AgentConfig{
 		Context:     ctx,
-		Name:        "Processor",
-		Role:        "Content Processor",
-		Description: "Processes questions and provides detailed responses",
-		Goal:        "To provide comprehensive and helpful answers",
-		Instructions: `Based on the analysis provided, give a comprehensive answer to the user's question. 
-Make your response:
-- Clear and well-structured
-- Informative and accurate
-- Engaging and helpful
-- Include examples when appropriate`,
+		Name:        "Researcher",
+		Role:        "Content Researcher",
+		Description: "Researches topics and creates comprehensive outlines for blog posts",
+		Goal:        "To create detailed, well-structured blog post outlines",
+		Instructions: `Based on the topic provided, create a comprehensive blog post outline including:
+1. A catchy title
+2. Meta description (150-160 characters)
+3. Main sections with subsections
+4. Key points to cover in each section
+5. Suggested examples or case studies
+6. Target audience
+7. Estimated reading time
+
+Format your response as a structured outline in Markdown.`,
 		Model: model,
 		Debug: debug,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create processor agent: %v", err)
+		log.Fatalf("Failed to create researcher agent: %v", err)
 	}
 
-	reviewerAgent, err := agent.NewAgent(agent.AgentConfig{
+	writerAgent, err := agent.NewAgent(agent.AgentConfig{
 		Context:     ctx,
-		Name:        "Reviewer",
-		Role:        "Quality Reviewer",
-		Description: "Reviews and refines responses for quality and completeness",
-		Goal:        "To ensure responses are of high quality and completeness",
-		Instructions: `Review the provided response and:
-1. Check for accuracy and completeness
-2. Improve clarity and structure if needed
-3. Add any missing important information
-4. Ensure the tone is appropriate and helpful
+		Name:        "Writer",
+		Role:        "Content Writer",
+		Description: "Writes engaging blog post content based on outlines",
+		Goal:        "To create high-quality, engaging blog post content",
+		Instructions: `Based on the outline provided, write a complete blog post with:
+- Engaging introduction that hooks the reader
+- Well-structured sections with clear headings
+- Code examples when relevant (use proper markdown code blocks)
+- Real-world examples and use cases
+- Clear explanations suitable for the target audience
+- Strong conclusion with key takeaways
 
-Provide the final, polished response.`,
+Write in a professional yet conversational tone. Use Markdown formatting.`,
 		Model: model,
 		Debug: debug,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create reviewer agent: %v", err)
+		log.Fatalf("Failed to create writer agent: %v", err)
+	}
+
+	editorAgent, err := agent.NewAgent(agent.AgentConfig{
+		Context:     ctx,
+		Name:        "Editor",
+		Role:        "Content Editor",
+		Description: "Reviews and polishes blog posts for publication",
+		Goal:        "To ensure blog posts are publication-ready",
+		Instructions: `Review the blog post and improve it by:
+1. Checking grammar, spelling, and punctuation
+2. Improving clarity and flow
+3. Ensuring consistent tone and style
+4. Verifying code examples are correct and well-formatted
+5. Adding relevant internal/external link suggestions
+6. Optimizing for SEO (keywords, headings, meta description)
+7. Ensuring the post is engaging and valuable
+
+Provide the final, polished blog post in Markdown format with proper frontmatter including:
+- title
+- date
+- author
+- tags
+- description`,
+		Model: model,
+		Debug: debug,
+	})
+	if err != nil {
+		log.Fatalf("Failed to create editor agent: %v", err)
 	}
 
 	// Create the workflow
@@ -111,88 +130,89 @@ Provide the final, polished response.`,
 	)
 
 	// Create wrapper functions for agents to match the expected interface
-	analyzeExecutor := func(input *v2.StepInput) (*v2.StepOutput, error) {
+	researchExecutor := func(input *v2.StepInput) (*v2.StepOutput, error) {
 		message := input.GetMessageAsString()
-		response, err := analyzerAgent.Run(message)
+		response, err := researcherAgent.Run(message)
 		if err != nil {
 			return nil, err
 		}
 		return &v2.StepOutput{
 			Content:      response.TextContent,
-			StepName:     "analyze",
+			StepName:     "research",
 			ExecutorType: "agent",
-			ExecutorName: analyzerAgent.GetName(),
+			ExecutorName: researcherAgent.GetName(),
 		}, nil
 	}
 
-	processExecutor := func(input *v2.StepInput) (*v2.StepOutput, error) {
-		// Combine original message with analysis
-		message := input.GetMessageAsString()
-		if analysis := input.GetStepContent("analyze"); analysis != nil {
-			message = fmt.Sprintf("Original Question: %s\n\nAnalysis: %v", message, analysis)
+	writeExecutor := func(input *v2.StepInput) (*v2.StepOutput, error) {
+		// Get the outline from research step
+		outline := input.GetStepContent("research")
+		if outline == nil {
+			return nil, fmt.Errorf("no outline from research step")
 		}
 
-		response, err := processorAgent.Run(message)
+		message := fmt.Sprintf("Write a complete blog post based on this outline:\n\n%v", outline)
+		response, err := writerAgent.Run(message)
 		if err != nil {
 			return nil, err
 		}
 		return &v2.StepOutput{
 			Content:      response.TextContent,
-			StepName:     "process",
+			StepName:     "write",
 			ExecutorType: "agent",
-			ExecutorName: processorAgent.GetName(),
+			ExecutorName: writerAgent.GetName(),
 		}, nil
 	}
 
-	reviewExecutor := func(input *v2.StepInput) (*v2.StepOutput, error) {
-		// Get the processed response for review
-		processedContent := input.GetStepContent("process")
-		if processedContent == nil {
-			return nil, fmt.Errorf("no processed content to review")
+	editExecutor := func(input *v2.StepInput) (*v2.StepOutput, error) {
+		// Get the draft from write step
+		draft := input.GetStepContent("write")
+		if draft == nil {
+			return nil, fmt.Errorf("no draft from write step")
 		}
 
-		reviewMessage := fmt.Sprintf("Please review and improve this response:\n\n%v", processedContent)
-		response, err := reviewerAgent.Run(reviewMessage)
+		message := fmt.Sprintf("Edit and finalize this blog post:\n\n%v", draft)
+		response, err := editorAgent.Run(message)
 		if err != nil {
 			return nil, err
 		}
 		return &v2.StepOutput{
 			Content:      response.TextContent,
-			StepName:     "review",
+			StepName:     "edit",
 			ExecutorType: "agent",
-			ExecutorName: reviewerAgent.GetName(),
+			ExecutorName: editorAgent.GetName(),
 		}, nil
 	}
 
 	// Define workflow steps using ExecutorFunc
-	analyzeStep, err := v2.NewStep(
-		v2.WithName("analyze"),
-		v2.WithDescription("Analyze the user's question"),
-		v2.WithExecutor(analyzeExecutor),
-		v2.WithTimeout(30),
-	)
-	if err != nil {
-		log.Fatalf("Failed to create analyze step: %v", err)
-	}
-
-	processStep, err := v2.NewStep(
-		v2.WithName("process"),
-		v2.WithDescription("Process and answer the question"),
-		v2.WithExecutor(processExecutor),
+	researchStep, err := v2.NewStep(
+		v2.WithName("research"),
+		v2.WithDescription("Research topic and create blog post outline"),
+		v2.WithExecutor(researchExecutor),
 		v2.WithTimeout(60),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create process step: %v", err)
+		log.Fatalf("Failed to create research step: %v", err)
 	}
 
-	reviewStep, err := v2.NewStep(
-		v2.WithName("review"),
-		v2.WithDescription("Review and refine the response"),
-		v2.WithExecutor(reviewExecutor),
-		v2.WithTimeout(45),
+	writeStep, err := v2.NewStep(
+		v2.WithName("write"),
+		v2.WithDescription("Write blog post content based on outline"),
+		v2.WithExecutor(writeExecutor),
+		v2.WithTimeout(120),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create review step: %v", err)
+		log.Fatalf("Failed to create write step: %v", err)
+	}
+
+	editStep, err := v2.NewStep(
+		v2.WithName("edit"),
+		v2.WithDescription("Edit and finalize blog post for publication"),
+		v2.WithExecutor(editExecutor),
+		v2.WithTimeout(60),
+	)
+	if err != nil {
+		log.Fatalf("Failed to create edit step: %v", err)
 	}
 
 	// Add event handlers for real-time feedback
@@ -214,23 +234,23 @@ Provide the final, polished response.`,
 	})
 
 	workflow.OnEvent(v2.WorkflowCompletedEvent, func(event *v2.WorkflowRunResponseEvent) {
-		fmt.Printf("🎉 Workflow completed successfully!\n")
+		fmt.Printf("🎉 Blog post generation completed!\n")
 	})
 
 	// Set the workflow steps directly as a slice of steps
-	workflow.Steps = []*v2.Step{analyzeStep, processStep, reviewStep}
+	workflow.Steps = []*v2.Step{researchStep, writeStep, editStep}
 
 	// Prepare workflow input
 	input := &v2.WorkflowExecutionInput{
-		Message: prompt,
+		Message: topic,
 		AdditionalData: map[string]interface{}{
 			"timestamp": time.Now().Format(time.RFC3339),
-			"model":     modelName,
+			"model":     model.GetID(),
 		},
 	}
 
 	// Execute the workflow
-	fmt.Println("🚀 Starting workflow execution...")
+	fmt.Println("🚀 Starting blog post generation workflow...")
 	fmt.Println(strings.Repeat("-", 60))
 
 	response, err := workflow.Run(ctx, input)
@@ -240,38 +260,52 @@ Provide the final, polished response.`,
 
 	// Display results
 	fmt.Println(strings.Repeat("-", 60))
-	fmt.Println("📋 WORKFLOW RESULTS:")
+	fmt.Println("📋 BLOG POST GENERATION RESULTS:")
 	fmt.Println(strings.Repeat("-", 60))
 
 	// Get step outputs for detailed view using the step getter method
 	if debug {
-		if analyzeOutput := workflow.GetStepOutput("analyze"); analyzeOutput != nil {
-			fmt.Println("🔍 ANALYSIS:")
-			fmt.Printf("%v\n", analyzeOutput.Content)
+		if researchOutput := workflow.GetStepOutput("research"); researchOutput != nil {
+			fmt.Println("🔍 RESEARCH & OUTLINE:")
+			fmt.Printf("%v\n", researchOutput.Content)
 			fmt.Println()
 		}
 
-		if processOutput := workflow.GetStepOutput("process"); processOutput != nil {
-			fmt.Println("⚙️ PROCESSING:")
-			fmt.Printf("%v\n", processOutput.Content)
+		if writeOutput := workflow.GetStepOutput("write"); writeOutput != nil {
+			fmt.Println("✍️ DRAFT:")
+			fmt.Printf("%v\n", writeOutput.Content)
 			fmt.Println()
 		}
 	}
 
-	if reviewOutput := workflow.GetStepOutput("review"); reviewOutput != nil {
-		fmt.Println("📝 FINAL RESPONSE:")
-		fmt.Printf("%v\n", reviewOutput.Content)
+	// Get the final edited blog post
+	var finalBlogPost string
+	if editOutput := workflow.GetStepOutput("edit"); editOutput != nil {
+		fmt.Println("📝 FINAL BLOG POST:")
+		finalBlogPost = fmt.Sprintf("%v", editOutput.Content)
+		fmt.Printf("%v\n", finalBlogPost)
 		fmt.Println()
+	} else {
+		finalBlogPost = fmt.Sprintf("%v", response.Content)
 	}
 
-	// Final response from workflow
-	fmt.Println("🏁 WORKFLOW OUTPUT:")
-	fmt.Printf("%v\n", response.Content)
+	// Generate filename from topic (sanitize for filesystem)
+	timestamp := time.Now().Format("2006-01-02")
+	filename := generateFilename(topic, timestamp)
+	filePath := filepath.Join(outputDir, filename)
+
+	// Save blog post to file
+	if err := os.WriteFile(filePath, []byte(finalBlogPost), 0644); err != nil {
+		log.Fatalf("Failed to save blog post: %v", err)
+	}
+
+	fmt.Println(strings.Repeat("-", 60))
+	fmt.Printf("💾 Blog post saved to: %s\n", filePath)
+	fmt.Println(strings.Repeat("-", 60))
 
 	// Show execution metrics if debug enabled
 	if debug && workflow.GetMetrics() != nil {
 		metrics := workflow.GetMetrics()
-		fmt.Println(strings.Repeat("-", 60))
 		fmt.Println("📊 EXECUTION METRICS:")
 		fmt.Printf("Total Duration: %v\n", time.Duration(metrics.DurationMs)*time.Millisecond)
 		if metrics.StepsExecuted > 0 {
@@ -283,10 +317,37 @@ Provide the final, polished response.`,
 			fmt.Printf("Step '%s': %v (retries: %d)\n",
 				stepName, time.Duration(stepMetrics.DurationMs)*time.Millisecond, stepMetrics.RetryCount)
 		}
+		fmt.Println(strings.Repeat("-", 60))
 	}
 
-	fmt.Println(strings.Repeat("=", 60))
-	fmt.Println("✨ Example completed successfully!")
+	fmt.Println("✨ Blog post generation completed successfully!")
+	fmt.Printf("📄 Open your blog post: %s\n", filePath)
+}
+
+// generateFilename creates a filesystem-safe filename from a topic and date
+func generateFilename(topic, date string) string {
+	// Convert to lowercase and replace spaces with hyphens
+	safe := strings.ToLower(topic)
+	safe = strings.ReplaceAll(safe, " ", "-")
+
+	// Remove special characters, keep only alphanumeric and hyphens
+	var result strings.Builder
+	for _, r := range safe {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			result.WriteRune(r)
+		}
+	}
+
+	// Clean up multiple consecutive hyphens
+	cleaned := strings.ReplaceAll(result.String(), "--", "-")
+	cleaned = strings.Trim(cleaned, "-")
+
+	// Limit length
+	if len(cleaned) > 50 {
+		cleaned = cleaned[:50]
+	}
+
+	return fmt.Sprintf("%s-%s.md", date, cleaned)
 }
 
 // truncateString truncates a string to a maximum length
