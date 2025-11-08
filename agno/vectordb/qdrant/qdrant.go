@@ -258,8 +258,9 @@ func (q *Qdrant) VectorSearch(ctx context.Context, query string, limit int, filt
 				},
 			},
 		},
-		Filter: filter,
-		Limit:  func() *uint64 { l := uint64(limit); return &l }(),
+		Filter:      filter,
+		Limit:       func() *uint64 { l := uint64(limit); return &l }(),
+		WithPayload: &qdrant.WithPayloadSelector{SelectorOptions: &qdrant.WithPayloadSelector_Enable{Enable: true}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to search points: %w", err)

@@ -3,3 +3,4 @@ examples
 *.db
 *.py
 __pycache__
+agno-python
