@@ -138,6 +138,7 @@ type AgnoModelInterface interface {
 	AInvoke(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, <-chan error)
 	InvokeStream(ctx context.Context, messages []Message, options ...Option) error
 	AInvokeStream(ctx context.Context, messages []Message, options ...Option) (<-chan *MessageResponse, <-chan error)
+	GetID() string
 }
 
 // AgentInterface define os métodos essenciais para agentes
@@ -179,4 +180,39 @@ func (r *RunResponse) GetOutput(target interface{}) interface{} {
 		return target // Return zero value of type
 	}
 	return r.Output
+}
+
+// Media types for agent inputs
+
+// Audio represents an audio input
+type Audio struct {
+	ID       string `json:"id,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+}
+
+// Image represents an image input
+type Image struct {
+	ID       string `json:"id,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+}
+
+// Video represents a video input
+type Video struct {
+	ID       string `json:"id,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+}
+
+// File represents a file input
+type File struct {
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
 }

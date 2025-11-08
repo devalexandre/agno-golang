@@ -34,6 +34,11 @@ func NewOpenAIChat(options ...models.OptionClient) (models.AgnoModelInterface, e
 	}, nil
 }
 
+// GetID returns the model ID.
+func (o *OpenAIChat) GetID() string {
+	return o.opts.ID
+}
+
 // GetClientOptions returns the client options for this OpenAI model
 func (o *OpenAIChat) GetClientOptions() *models.ClientOptions {
 	return o.opts

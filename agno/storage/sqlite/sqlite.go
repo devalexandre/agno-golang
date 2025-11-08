@@ -357,7 +357,7 @@ func (s *SqliteStorage) parseJSONFields(data map[string]interface{}) error {
 func (s *SqliteStorage) Upsert(session interface{}) (interface{}, error) {
 	// Perform schema upgrade if needed
 	if s.autoUpgradeSchema && !s.schemaUpToDate {
-		if err := s.UpgradeSchema(); err != nil {
+		if err := s.upgradeSchemaOld(); err != nil {
 			return nil, fmt.Errorf("failed to upgrade schema: %w", err)
 		}
 	}
@@ -487,8 +487,8 @@ func (s *SqliteStorage) upsertWorkflowV2Session(session interface{}) (interface{
 	return nil, fmt.Errorf("workflow v2 session upsert not implemented yet")
 }
 
-// DeleteSession deletes a session by ID
-func (s *SqliteStorage) DeleteSession(sessionID *string) error {
+// deleteSessionByPtr is the internal implementation that uses pointers
+func (s *SqliteStorage) deleteSessionByPtr(sessionID *string) error {
 	if sessionID == nil {
 		log.Printf("Warning: No session_id provided for deletion")
 		return nil
@@ -515,7 +515,7 @@ func (s *SqliteStorage) DeleteSession(sessionID *string) error {
 }
 
 // GetAllSessionIDs gets all session IDs, optionally filtered
-func (s *SqliteStorage) GetAllSessionIDs(userID *string, entityID *string) ([]string, error) {
+func (s *SqliteStorage) getAllSessionIDsByPtr(userID *string, entityID *string) ([]string, error) {
 	query := fmt.Sprintf("SELECT session_id FROM %s WHERE 1=1", s.tableName)
 	args := []interface{}{}
 
@@ -563,7 +563,7 @@ func (s *SqliteStorage) GetAllSessionIDs(userID *string, entityID *string) ([]st
 }
 
 // GetAllSessions gets all sessions, optionally filtered
-func (s *SqliteStorage) GetAllSessions(userID *string, entityID *string) ([]interface{}, error) {
+func (s *SqliteStorage) getAllSessionsByPtr(userID *string, entityID *string) ([]interface{}, error) {
 	query := fmt.Sprintf("SELECT * FROM %s WHERE 1=1", s.tableName)
 	args := []interface{}{}
 
@@ -664,7 +664,7 @@ func (s *SqliteStorage) GetRecentSessions(userID *string, entityID *string, limi
 }
 
 // UpgradeSchema upgrades the database schema
-func (s *SqliteStorage) UpgradeSchema() error {
+func (s *SqliteStorage) upgradeSchemaOld() error {
 	if !s.autoUpgradeSchema {
 		log.Printf("Auto schema upgrade disabled. Skipping upgrade.")
 		return nil

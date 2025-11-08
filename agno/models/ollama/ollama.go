@@ -18,6 +18,19 @@ type OllamaChat struct {
 	opts    *models.ClientOptions
 }
 
+// authTransport wraps an http.RoundTripper to add Authorization header
+type authTransport struct {
+	transport http.RoundTripper
+	apiKey    string
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	}
+	return t.transport.RoundTrip(req)
+}
+
 // NewOllamaChat creates a new instance of the integration with the OllamaChat API.
 func NewOllamaChat(options ...models.OptionClient) (models.AgnoModelInterface, error) {
 	opts := models.DefaultOptions()
@@ -30,13 +43,28 @@ func NewOllamaChat(options ...models.OptionClient) (models.AgnoModelInterface, e
 	if opts.BaseURL == "" {
 		opts.BaseURL = "http://localhost:11434"
 	}
-	cli := client.NewClient(opts.ID, opts.BaseURL, http.DefaultClient)
+
+	// Create HTTP client with custom transport for authorization
+	httpClient := http.DefaultClient
+	if opts.APIKey != "" {
+		httpClient = &http.Client{
+			Transport: &authTransport{
+				transport: http.DefaultTransport,
+				apiKey:    opts.APIKey,
+			},
+		}
+	}
+
+	cli := client.NewClient(opts.ID, opts.BaseURL, httpClient)
 	return &OllamaChat{
 		id:      opts.ID,
 		baseURL: opts.BaseURL,
 		client:  cli,
 		opts:    opts,
 	}, nil
+}
+func (o *OllamaChat) GetID() string {
+	return o.id
 }
 
 // GetClientOptions returns the client options for this Ollama model

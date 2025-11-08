@@ -32,6 +32,11 @@ func NewGemini(options ...models.OptionClient) (models.AgnoModelInterface, error
 	}, nil
 }
 
+// GetID returns the model ID.
+func (g *Gemini) GetID() string {
+	return g.opts.ID
+}
+
 // GetClientOptions returns the client options for this Gemini model
 func (g *Gemini) GetClientOptions() *models.ClientOptions {
 	return g.opts
