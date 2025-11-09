@@ -94,7 +94,7 @@ func NewDuckDuckGoTool() *DuckDuckGoTool {
 	tk.Name = "DuckDuckGoTool"
 	tk.Description = "Searches DuckDuckGo for the given query."
 	dt.Toolkit = tk
-	dt.Toolkit.Register("Search", dt, dt.Search, DuckDuckGoToolInput{})
+	dt.Toolkit.Register("Search", "Search DuckDuckGo for the given query", dt, dt.Search, DuckDuckGoToolInput{})
 	return dt
 }
 

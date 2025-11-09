@@ -65,11 +65,11 @@ func NewMathTool() *MathTool {
 	mt := &MathTool{tk}
 
 	// Register methods
-	mt.Toolkit.Register("BasicMath", mt, mt.BasicMath, BasicMathParams{})
-	mt.Toolkit.Register("Statistics", mt, mt.Statistics, StatisticsParams{})
-	mt.Toolkit.Register("Trigonometry", mt, mt.Trigonometry, TrigonometryParams{})
-	mt.Toolkit.Register("Random", mt, mt.Random, RandomParams{})
-	mt.Toolkit.Register("Calculate", mt, mt.Calculate, CalculateParams{})
+	mt.Toolkit.Register("BasicMath", "Perform basic mathematical operations", mt, mt.BasicMath, BasicMathParams{})
+	mt.Toolkit.Register("Statistics", "Perform statistical analysis on numbers", mt, mt.Statistics, StatisticsParams{})
+	mt.Toolkit.Register("Trigonometry", "Perform trigonometric calculations", mt, mt.Trigonometry, TrigonometryParams{})
+	mt.Toolkit.Register("Random", "Generate random numbers", mt, mt.Random, RandomParams{})
+	mt.Toolkit.Register("Calculate", "Evaluate simple mathematical expressions", mt, mt.Calculate, CalculateParams{})
 
 	return mt
 }

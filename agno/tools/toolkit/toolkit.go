@@ -29,13 +29,17 @@ func (tk *Toolkit) GetDescription() string {
 // methodName = Function name
 // fn = Execution function
 // paramExample = Example struct that represents the parameters for schema generation
-func (tk *Toolkit) Register(methodName string, receiver interface{}, fn interface{}, paramExample interface{}) {
+func (tk *Toolkit) Register(methodName, description string, receiver interface{}, fn interface{}, paramExample interface{}) {
 	if _, ok := tk.methods[methodName]; ok {
 		panic(fmt.Sprintf("Register: method %s already registered", methodName))
 	}
 
 	if methodName == "" {
 		panic("Register: methodName cannot be empty")
+	}
+
+	if description == "" {
+		panic("Register: description cannot be empty")
 	}
 
 	if receiver == nil {
@@ -67,16 +71,26 @@ func (tk *Toolkit) Register(methodName string, receiver interface{}, fn interfac
 	fullMethodName := tk.Name + "_" + methodName
 
 	tk.methods[fullMethodName] = Method{
-		Receiver:  receiver,
-		Function:  fn,
-		Schema:    schema,
-		ParamType: paramType,
+		Receiver:    receiver,
+		Description: description,
+		Function:    fn,
+		Schema:      schema,
+		ParamType:   paramType,
 	}
 }
 
 // GetMethods returns all methods registered in the toolkit.
 func (tk *Toolkit) GetMethods() map[string]Method {
 	return tk.methods
+}
+
+// GetDescriptionOfMethod returns the description of a specific registered method.
+func (tk *Toolkit) GetDescriptionOfMethod(methodName string) string {
+	method, ok := tk.methods[methodName]
+	if !ok {
+		panic(fmt.Sprintf("GetDescriptionOfMethod: method %s not found", methodName))
+	}
+	return method.Description
 }
 
 // GetFunction returns the execution function associated with a registered method.

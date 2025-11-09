@@ -69,23 +69,21 @@ type SearchFileParams struct {
 
 // NewFileTool creates a new FileTool instance
 func NewFileTool(write bool) *FileTool {
-	tk := toolkit.NewToolkit()
-	tk.Name = "FileTool"
-	tk.Description = "A comprehensive file system tool for reading, writing, listing, and managing files and directories. Supports text files, binary operations, directory traversal, and file search functionality. Write operations are disabled by default for security."
-
 	ft := &FileTool{
-		Toolkit:      tk,
 		WriteEnabled: write,
 	}
+	ft.Toolkit = toolkit.NewToolkit()
+	ft.Toolkit.Name = "FileTool"
+	ft.Toolkit.Description = "A comprehensive file system tool for reading, writing, listing, and managing files and directories. Supports text files, binary operations, directory traversal, and file search functionality. Write operations are disabled by default for security."
 
 	// Register methods
-	ft.Toolkit.Register("ReadFile", ft, ft.ReadFile, ReadFileParams{})
-	ft.Toolkit.Register("WriteFile", ft, ft.WriteFile, WriteFileParams{})
-	ft.Toolkit.Register("GetFileInfo", ft, ft.GetFileInfo, FileInfoParams{})
-	ft.Toolkit.Register("ListDirectory", ft, ft.ListDirectory, ListDirParams{})
-	ft.Toolkit.Register("SearchFiles", ft, ft.SearchFiles, SearchFileParams{})
-	ft.Toolkit.Register("CreateDirectory", ft, ft.CreateDirectory, FileInfoParams{})
-	ft.Toolkit.Register("DeleteFile", ft, ft.DeleteFile, FileInfoParams{})
+	ft.Toolkit.Register("ReadFile", "Read content from a file", ft, ft.ReadFile, ReadFileParams{})
+	ft.Toolkit.Register("WriteFile", "Write content to a file", ft, ft.WriteFile, WriteFileParams{})
+	ft.Toolkit.Register("GetFileInfo", "Get information about a file or directory", ft, ft.GetFileInfo, FileInfoParams{})
+	ft.Toolkit.Register("ListDirectory", "List contents of a directory", ft, ft.ListDirectory, ListDirParams{})
+	ft.Toolkit.Register("SearchFiles", "Search for files matching patterns", ft, ft.SearchFiles, SearchFileParams{})
+	ft.Toolkit.Register("CreateDirectory", "Create a directory", ft, ft.CreateDirectory, FileInfoParams{})
+	ft.Toolkit.Register("DeleteFile", "Delete a file or directory", ft, ft.DeleteFile, FileInfoParams{})
 	// ft.Toolkit.Register("Base64Encode", ft, ft.base64encode, StringParams{})
 	// ft.Toolkit.Register("Base64Decode", ft, ft.base64decode, StringParams{})
 

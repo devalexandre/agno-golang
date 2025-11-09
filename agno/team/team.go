@@ -347,36 +347,45 @@ func (t *Team) runCollaborateMode(prompt string) (models.RunResponse, error) {
 		}
 	}
 
-	// Step 2: Synthesize all responses
-	synthesisPrompt := t.buildCollaborationSynthesisPrompt(prompt)
+	// Step 2: Detect and resolve conflicts if needed
+	hasConflicts, conflictAnalysis := t.detectConflicts(memberResponses)
 
-	synthesisMessages := []models.Message{
-		{
-			Role:    models.TypeSystemRole,
-			Content: synthesisPrompt,
-		},
-		{
-			Role:    models.TypeUserRole,
-			Content: fmt.Sprintf("Original request: %s\n\nPlease synthesize the following collaborative responses:\n\n%s", prompt, strings.Join(memberResponses, "\n\n---\n\n")),
-		},
-	}
-
-	finalResp, err := t.model.Invoke(t.ctx, synthesisMessages)
-	if err != nil {
-		return models.RunResponse{}, err
+	var finalContent string
+	if hasConflicts {
+		// Resolve conflicts before synthesis
+		resolvedContent, err := t.resolveConflicts(prompt, memberResponses, conflictAnalysis)
+		if err != nil {
+			if t.debug {
+				fmt.Printf("Conflict resolution failed, proceeding with standard synthesis: %v\n", err)
+			}
+			// Fall back to standard synthesis
+			finalContent, err = t.synthesizeResponses(prompt, memberResponses, t.buildCollaborationSynthesisPrompt(prompt))
+			if err != nil {
+				return models.RunResponse{}, err
+			}
+		} else {
+			finalContent = resolvedContent
+		}
+	} else {
+		// No conflicts, proceed with standard synthesis
+		var err error
+		finalContent, err = t.synthesizeResponses(prompt, memberResponses, t.buildCollaborationSynthesisPrompt(prompt))
+		if err != nil {
+			return models.RunResponse{}, err
+		}
 	}
 
 	return models.RunResponse{
-		TextContent: finalResp.Content,
+		TextContent: finalContent,
 		ContentType: "text",
 		Event:       "TeamCollaborateResponse",
 		Messages: []models.Message{
 			{
-				Role:    models.Role(finalResp.Role),
-				Content: finalResp.Content,
+				Role:    models.TypeAssistantRole,
+				Content: finalContent,
 			},
 		},
-		Model:     finalResp.Model,
+		Model:     t.model.GetID(),
 		CreatedAt: time.Now().Unix(),
 	}, nil
 }
@@ -649,6 +658,116 @@ func (t *Team) loadSession() {
 			fmt.Printf("No team session found for session %s: %v\n", t.sessionID, err)
 		}
 	}
+}
+
+// detectConflicts analyzes member responses to identify conflicts
+func (t *Team) detectConflicts(responses []string) (bool, string) {
+	if len(responses) < 2 {
+		return false, ""
+	}
+
+	// Use AI to detect conflicts
+	analysisPrompt := fmt.Sprintf(`Analyze the following responses from team members and identify any conflicts or contradictions.
+
+Responses:
+%s
+
+Identify:
+1. Direct contradictions (members saying opposite things)
+2. Inconsistent recommendations
+3. Conflicting data or facts
+4. Different approaches that cannot coexist
+
+If conflicts exist, respond with "CONFLICTS DETECTED" followed by a detailed analysis.
+If no significant conflicts exist, respond with "NO CONFLICTS".`, strings.Join(responses, "\n\n---\n\n"))
+
+	messages := []models.Message{
+		{
+			Role:    models.TypeSystemRole,
+			Content: "You are a conflict detection specialist. Analyze team responses for contradictions and conflicts.",
+		},
+		{
+			Role:    models.TypeUserRole,
+			Content: analysisPrompt,
+		},
+	}
+
+	resp, err := t.model.Invoke(t.ctx, messages)
+	if err != nil {
+		if t.debug {
+			fmt.Printf("Conflict detection failed: %v\n", err)
+		}
+		return false, ""
+	}
+
+	analysis := strings.TrimSpace(resp.Content)
+	hasConflicts := strings.Contains(strings.ToUpper(analysis), "CONFLICTS DETECTED")
+
+	return hasConflicts, analysis
+}
+
+// resolveConflicts uses AI to resolve conflicts between member responses
+func (t *Team) resolveConflicts(prompt string, responses []string, conflictAnalysis string) (string, error) {
+	resolutionPrompt := fmt.Sprintf(`You are a conflict resolution specialist for a team of AI agents.
+
+Original Request: %s
+
+Team Member Responses:
+%s
+
+Conflict Analysis:
+%s
+
+Your task is to resolve these conflicts and provide a unified, coherent response that:
+1. Acknowledges the different perspectives
+2. Identifies the most accurate or appropriate information
+3. Reconciles contradictions with logical reasoning
+4. Provides a balanced final answer
+5. Explains the resolution approach when necessary
+
+Provide a clear, unified response that addresses the original request while resolving all conflicts.`,
+		prompt,
+		strings.Join(responses, "\n\n---\n\n"),
+		conflictAnalysis)
+
+	messages := []models.Message{
+		{
+			Role:    models.TypeSystemRole,
+			Content: "You are an expert at resolving conflicts and synthesizing diverse viewpoints into coherent solutions.",
+		},
+		{
+			Role:    models.TypeUserRole,
+			Content: resolutionPrompt,
+		},
+	}
+
+	resp, err := t.model.Invoke(t.ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("conflict resolution failed: %w", err)
+	}
+
+	return strings.TrimSpace(resp.Content), nil
+}
+
+// synthesizeResponses performs standard synthesis without conflict resolution
+func (t *Team) synthesizeResponses(prompt string, responses []string, synthesisPrompt string) (string, error) {
+	synthesisMessages := []models.Message{
+		{
+			Role:    models.TypeSystemRole,
+			Content: synthesisPrompt,
+		},
+		{
+			Role:    models.TypeUserRole,
+			Content: fmt.Sprintf("Original request: %s\n\nPlease synthesize the following collaborative responses:\n\n%s", prompt, strings.Join(responses, "\n\n---\n\n")),
+		},
+	}
+
+	finalResp, err := t.model.Invoke(t.ctx, synthesisMessages)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(finalResp.Content), nil
 }
 
 // Helper functions for type conversion
