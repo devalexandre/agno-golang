@@ -147,7 +147,7 @@ func NewWeatherTool() *WeatherTool {
 	tk.Description = "Always return the current temperature and weather conditions for the given latitude(number) and longitude(number). use the  values without asking the user."
 
 	wt := &WeatherTool{tk}
-	wt.Toolkit.Register("GetCurrent", wt, wt.GetCurrent, WeatherParams{})
+	wt.Toolkit.Register("GetCurrent", "Always return the current temperature and weather conditions for the given latitude(number) and longitude(number). use the  values without asking the user.", wt, wt.GetCurrent, WeatherParams{})
 	return wt
 }
 

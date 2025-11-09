@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -12,61 +11,9 @@ import (
 	"github.com/devalexandre/agno-golang/agno/agent"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/models/ollama"
+	"github.com/devalexandre/agno-golang/agno/tools"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
-
-// WeatherTool implements a weather tool similar to the Python example
-type WeatherTool struct{}
-
-func (w *WeatherTool) GetName() string {
-	return "get_weather_for_city"
-}
-
-func (w *WeatherTool) GetDescription() string {
-	return "Get weather for a city"
-}
-
-func (w *WeatherTool) GetParameterStruct(methodName string) map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"city": map[string]interface{}{
-				"type":        "string",
-				"description": "The city to get weather for",
-			},
-		},
-		"required": []string{"city"},
-	}
-}
-
-func (w *WeatherTool) GetMethods() map[string]toolkit.Method {
-	return map[string]toolkit.Method{
-		"get_weather": {
-			Function: w.Execute,
-		},
-	}
-}
-
-func (w *WeatherTool) GetFunction(methodName string) interface{} {
-	return w.Execute
-}
-
-func (w *WeatherTool) Execute(methodName string, input json.RawMessage) (interface{}, error) {
-	var params struct {
-		City string `json:"city"`
-	}
-
-	if err := json.Unmarshal(input, &params); err != nil {
-		return nil, err
-	}
-
-	// Generate random weather like in Python example
-	conditions := []string{"Sunny", "Cloudy", "Rainy", "Snowy", "Foggy", "Windy"}
-	temperature := rand.Intn(46) - 10 // -10 to 35
-	condition := conditions[rand.Intn(len(conditions))]
-
-	return fmt.Sprintf("%s: %d°C, %s", params.City, temperature, condition), nil
-}
 
 func main() {
 	// Initialize random seed
@@ -87,7 +34,7 @@ func main() {
 	}
 
 	// Create weather tool
-	weatherTool := &WeatherTool{}
+	weatherTool := tools.NewWeatherTool()
 
 	// Create agent with max_tool_calls_from_history limit
 	weatherAgent, err := agent.NewAgent(agent.AgentConfig{

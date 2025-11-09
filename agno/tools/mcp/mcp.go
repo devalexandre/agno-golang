@@ -210,6 +210,10 @@ func (m *MCPTool) GetDescription() string {
 	return fmt.Sprintf("MCP integration for %s", m.name)
 }
 
+func (m *MCPTool) GetDescriptionOfMethod(methodName string) string {
+	return fmt.Sprintf("MCP integration for %s", methodName)
+}
+
 func (m *MCPTool) GetParameterStruct(methodName string) map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

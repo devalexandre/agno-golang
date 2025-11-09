@@ -55,11 +55,11 @@ func NewShellTool() *ShellTool {
 	st := &ShellTool{tk}
 
 	// Register methods
-	st.Toolkit.Register("Execute", st, st.Execute, ExecuteParams{})
-	st.Toolkit.Register("GetSystemInfo", st, st.GetSystemInfo, SystemInfoParams{})
-	st.Toolkit.Register("ListProcesses", st, st.ListProcesses, struct{}{})
-	st.Toolkit.Register("GetCurrentDirectory", st, st.GetCurrentDirectory, struct{}{})
-	st.Toolkit.Register("ChangeDirectory", st, st.ChangeDirectory, struct {
+	st.Toolkit.Register("Execute", "Execute shell commands", st, st.Execute, ExecuteParams{})
+	st.Toolkit.Register("SystemInfo", "Get system information", st, st.GetSystemInfo, SystemInfoParams{})
+	st.Toolkit.Register("ListFiles", "List files in current directory", st, st.ListFiles, struct{}{})
+	st.Toolkit.Register("GetCurrentDirectory", "Get current working directory", st, st.GetCurrentDirectory, struct{}{})
+	st.Toolkit.Register("ChangeDirectory", "Change current directory", st, st.ChangeDirectory, struct {
 		Path string `json:"path" description:"Directory path to change to" required:"true"`
 	}{})
 
@@ -334,6 +334,50 @@ func (st *ShellTool) ListProcesses(params struct{}) (interface{}, error) {
 		"processes": outputStr,
 		"operation": "ListProcesses",
 		"platform":  runtime.GOOS,
+	}, nil
+}
+
+// ListFiles lists files in the current directory
+func (st *ShellTool) ListFiles(params struct{}) (interface{}, error) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return ShellResult{
+			Success:   false,
+			Error:     fmt.Sprintf("failed to get current directory: %v", err),
+			Operation: "ListFiles",
+		}, nil
+	}
+
+	entries, err := os.ReadDir(currentDir)
+	if err != nil {
+		return ShellResult{
+			Success:   false,
+			Error:     fmt.Sprintf("failed to read directory: %v", err),
+			Operation: "ListFiles",
+		}, nil
+	}
+
+	var files []map[string]interface{}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, map[string]interface{}{
+			"name":    entry.Name(),
+			"is_dir":  entry.IsDir(),
+			"size":    info.Size(),
+			"mode":    info.Mode().String(),
+			"modtime": info.ModTime().Unix(),
+		})
+	}
+
+	return map[string]interface{}{
+		"files":       files,
+		"count":       len(files),
+		"current_dir": currentDir,
+		"operation":   "ListFiles",
+		"success":     true,
 	}, nil
 }
 

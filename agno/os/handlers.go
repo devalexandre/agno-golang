@@ -1,6 +1,7 @@
 package os
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -505,6 +506,24 @@ func (os *AgentOS) websocketHandler(c *gin.Context) {
 	}
 	defer conn.Close()
 
+	// Connection tracking
+	connectionID := generateID("ws_conn")
+	isAuthenticated := false
+	requiresAuth := os.settings.SecurityKey != "" // Require auth if security key is set
+
+	// Send connection confirmation
+	conn.WriteJSON(gin.H{
+		"event":         "connected",
+		"connection_id": connectionID,
+		"message":       "Connected to workflow events. Please authenticate to continue.",
+		"requires_auth": requiresAuth,
+	})
+
+	// If auth not required, mark as authenticated
+	if !requiresAuth {
+		isAuthenticated = true
+	}
+
 	// Handle WebSocket messages
 	for {
 		var msg map[string]interface{}
@@ -513,14 +532,169 @@ func (os *AgentOS) websocketHandler(c *gin.Context) {
 			break
 		}
 
-		// Echo the message for now (TODO: implement proper message handling)
-		err = conn.WriteJSON(gin.H{
-			"type":      "echo",
-			"message":   msg,
-			"timestamp": time.Now(),
-		})
-		if err != nil {
-			break
+		// Get action from message (support both "action" and "type" fields for compatibility)
+		action, ok := msg["action"].(string)
+		if !ok {
+			if typ, ok := msg["type"].(string); ok {
+				action = typ
+			}
+		}
+
+		// Handle authentication
+		if action == "authenticate" {
+			token, ok := msg["token"].(string)
+			if !ok || token == "" {
+				conn.WriteJSON(gin.H{
+					"event": "auth_error",
+					"error": "Token is required",
+				})
+				continue
+			}
+
+			// Validate token against security key
+			if token == os.settings.SecurityKey || !requiresAuth {
+				isAuthenticated = true
+				conn.WriteJSON(gin.H{
+					"event":   "authenticated",
+					"message": "Authentication successful. You can now send commands.",
+				})
+			} else {
+				conn.WriteJSON(gin.H{
+					"event": "auth_error",
+					"error": "Invalid token",
+				})
+			}
+			continue
+		}
+
+		// Check authentication for other actions
+		if requiresAuth && !isAuthenticated {
+			conn.WriteJSON(gin.H{
+				"event": "auth_required",
+				"error": "Authentication required. Send authenticate action with valid token.",
+			})
+			continue
+		}
+
+		// Handle authenticated actions
+		switch action {
+		case "ping":
+			conn.WriteJSON(gin.H{"event": "pong"})
+
+		case "start-workflow", "run_workflow":
+			// Execute workflow
+			workflowID, _ := msg["workflow_id"].(string)
+			workflowMessage, _ := msg["message"].(string)
+			sessionID, _ := msg["session_id"].(string)
+			// userID from websocket message (future use)
+			_, _ = msg["user_id"].(string)
+
+			if workflowID == "" {
+				conn.WriteJSON(gin.H{
+					"event": "error",
+					"error": "workflow_id is required",
+				})
+				continue
+			}
+
+			// Find the workflow
+			var targetWorkflow *v2.Workflow
+			for _, wf := range os.workflows {
+				wfID := generateDeterministicID("workflow", wf.Name)
+				if wfID == workflowID || wf.Name == workflowID {
+					targetWorkflow = wf
+					break
+				}
+			}
+
+			if targetWorkflow == nil {
+				conn.WriteJSON(gin.H{
+					"event": "error",
+					"error": fmt.Sprintf("Workflow %s not found", workflowID),
+				})
+				continue
+			}
+
+			// Generate session ID if not provided
+			if sessionID == "" {
+				sessionID = generateID("session")
+			}
+
+			// Execute workflow with WebSocket streaming
+			runID := generateID("run")
+
+			// Send RunStarted event
+			conn.WriteJSON(gin.H{
+				"event":       "RunStarted",
+				"created_at":  time.Now().Unix(),
+				"workflow_id": workflowID,
+				"run_id":      runID,
+				"session_id":  sessionID,
+			})
+
+			// Run workflow (simplified version - in production should use proper streaming)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						conn.WriteJSON(gin.H{
+							"event":  "error",
+							"error":  fmt.Sprintf("Workflow execution failed: %v", r),
+							"run_id": runID,
+						})
+					}
+				}()
+
+				// Execute workflow with context
+				ctx := context.Background()
+				result, err := targetWorkflow.Run(ctx, workflowMessage)
+				if err != nil {
+					conn.WriteJSON(gin.H{
+						"event":  "error",
+						"error":  err.Error(),
+						"run_id": runID,
+					})
+					return
+				}
+
+				// Send content event
+				content := ""
+				if result != nil && result.Content != nil {
+					if str, ok := result.Content.(string); ok {
+						content = str
+					} else {
+						// Convert to JSON string if not a string
+						if jsonBytes, err := json.Marshal(result.Content); err == nil {
+							content = string(jsonBytes)
+						}
+					}
+				}
+
+				conn.WriteJSON(gin.H{
+					"event":       "RunContent",
+					"created_at":  time.Now().Unix(),
+					"workflow_id": workflowID,
+					"run_id":      runID,
+					"session_id":  sessionID,
+					"content":     content,
+				})
+
+				// Send RunCompleted event
+				conn.WriteJSON(gin.H{
+					"event":       "RunCompleted",
+					"created_at":  time.Now().Unix(),
+					"workflow_id": workflowID,
+					"run_id":      runID,
+					"session_id":  sessionID,
+					"content":     content,
+				})
+			}()
+
+		default:
+			// Echo back for unknown actions
+			conn.WriteJSON(gin.H{
+				"event":            "echo",
+				"original_message": msg,
+			})
 		}
 	}
 }
@@ -999,6 +1173,65 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		sessionID = generateID("session")
 	}
 
+	// Process media uploads from multipart form (Python compatible)
+	var images []*agent.Image
+	var audio []*agent.Audio
+	var videos []*agent.Video
+	var files []*agent.File
+
+	if form, err := c.MultipartForm(); err == nil {
+		// Process images
+		if imageFiles, ok := form.File["images"]; ok && len(imageFiles) > 0 {
+			images, err = processImageUploads(imageFiles)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "Failed to process image uploads",
+					"details": err.Error(),
+				})
+				return
+			}
+		}
+
+		// Process audio
+		if audioFiles, ok := form.File["audio"]; ok && len(audioFiles) > 0 {
+			audio, err = processAudioUploads(audioFiles)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "Failed to process audio uploads",
+					"details": err.Error(),
+				})
+				return
+			}
+		}
+
+		// Process videos
+		if videoFiles, ok := form.File["videos"]; ok && len(videoFiles) > 0 {
+			videos, err = processVideoUploads(videoFiles)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "Failed to process video uploads",
+					"details": err.Error(),
+				})
+				return
+			}
+		}
+
+		// Process files (documents)
+		if docFiles, ok := form.File["files"]; ok && len(docFiles) > 0 {
+			files, err = processFileUploads(docFiles)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "Failed to process file uploads",
+					"details": err.Error(),
+				})
+				return
+			}
+		}
+	}
+
+	// Get user_id for run options
+	userID := c.PostForm("user_id")
+
 	// Check if streaming is requested
 	stream := c.PostForm("stream") == "true"
 
@@ -1051,7 +1284,6 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 
 		// Add run to session (with extended fields for proper API response)
 		os.mu.Lock()
-		userID := c.PostForm("user_id")
 		if session, exists := os.sessions[sessionID]; exists {
 			newRun := &SessionRun{
 				ID:        runID,
@@ -1096,12 +1328,91 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		// Run the agent with streaming - following Python implementation
 		var finalmessage string
 
-		_ = targetAgent.RunStream(message, func(chunk []byte) error {
-			// Accumulate content in finalmessage (single source of truth)
-			finalmessage += string(chunk)
+		// Prepare run options with media uploads and user context
+		runOpts := []agent.RunOption{
+			agent.WithSessionID(sessionID),
+		}
 
-			// Send RunContent event for each chunk (following Python format)
-			// Python order: created_at, event, agent_id, agent_name, run_id, session_id, content, content_type, reasoning_content
+		// Add user ID if provided
+		if userID != "" {
+			runOpts = append(runOpts, agent.WithUserID(userID))
+		}
+
+		// Convert and add images if any were uploaded
+		if len(images) > 0 {
+			imageValues := make([]agent.Image, len(images))
+			for i, img := range images {
+				if img != nil {
+					imageValues[i] = *img
+				}
+			}
+			runOpts = append(runOpts, agent.WithImages(imageValues...))
+		}
+
+		// Convert and add audio if any were uploaded
+		if len(audio) > 0 {
+			audioValues := make([]agent.Audio, len(audio))
+			for i, aud := range audio {
+				if aud != nil {
+					audioValues[i] = *aud
+				}
+			}
+			runOpts = append(runOpts, agent.WithAudio(audioValues...))
+		}
+
+		// Convert and add videos if any were uploaded
+		if len(videos) > 0 {
+			videoValues := make([]agent.Video, len(videos))
+			for i, vid := range videos {
+				if vid != nil {
+					videoValues[i] = *vid
+				}
+			}
+			runOpts = append(runOpts, agent.WithVideos(videoValues...))
+		}
+
+		// Convert and add files if any were uploaded
+		if len(files) > 0 {
+			fileValues := make([]agent.File, len(files))
+			for i, file := range files {
+				if file != nil {
+					fileValues[i] = *file
+				}
+			}
+			runOpts = append(runOpts, agent.WithFiles(fileValues...))
+		}
+
+		// TODO: Update RunStream to accept RunOptions
+		// For now, we'll call Run instead when media is present
+		if len(images) > 0 || len(audio) > 0 || len(videos) > 0 || len(files) > 0 {
+			// Use Run with options and manually stream the response
+			// Convert runOpts to interface{} slice
+			interfaceOpts := make([]interface{}, len(runOpts))
+			for i, opt := range runOpts {
+				interfaceOpts[i] = opt
+			}
+			response, err := targetAgent.Run(message, interfaceOpts...)
+			if err != nil {
+				// Send error event
+				errorEvent := map[string]interface{}{
+					"created_at": time.Now().Unix(),
+					"event":      "RunError",
+					"agent_id":   agentID,
+					"agent_name": targetAgent.GetName(),
+					"run_id":     runID,
+					"session_id": sessionID,
+					"error":      err.Error(),
+				}
+				errorJSON, _ := json.Marshal(errorEvent)
+				c.Writer.Write([]byte(fmt.Sprintf("event: RunError\ndata: %s\n\n", errorJSON)))
+				c.Writer.Flush()
+				return
+			}
+
+			// Manually stream the content
+			finalmessage = response.TextContent
+
+			// Send RunContent event
 			contentEvent := RunContentEvent{
 				CreatedAt:        time.Now().Unix(),
 				Event:            "RunContent",
@@ -1109,17 +1420,40 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 				AgentName:        targetAgent.GetName(),
 				RunID:            runID,
 				SessionID:        sessionID,
-				Content:          string(chunk),
+				Content:          response.TextContent,
 				ContentType:      "str",
-				ReasoningContent: "", // Python always includes this, even if empty
+				ReasoningContent: "",
 			}
-
 			contentEventJSON, _ := json.Marshal(contentEvent)
 			c.Writer.Write([]byte(fmt.Sprintf("event: RunContent\ndata: %s\n\n", contentEventJSON)))
 			c.Writer.Flush()
+		} else {
+			// No media - use normal streaming
+			_ = targetAgent.RunStream(message, func(chunk []byte) error {
+				// Accumulate content in finalmessage (single source of truth)
+				finalmessage += string(chunk)
 
-			return nil
-		})
+				// Send RunContent event for each chunk (following Python format)
+				// Python order: created_at, event, agent_id, agent_name, run_id, session_id, content, content_type, reasoning_content
+				contentEvent := RunContentEvent{
+					CreatedAt:        time.Now().Unix(),
+					Event:            "RunContent",
+					AgentID:          agentID,
+					AgentName:        targetAgent.GetName(),
+					RunID:            runID,
+					SessionID:        sessionID,
+					Content:          string(chunk),
+					ContentType:      "str",
+					ReasoningContent: "", // Python always includes this, even if empty
+				}
+
+				contentEventJSON, _ := json.Marshal(contentEvent)
+				c.Writer.Write([]byte(fmt.Sprintf("event: RunContent\ndata: %s\n\n", contentEventJSON)))
+				c.Writer.Flush()
+
+				return nil
+			})
+		}
 
 		// Send RunContentCompleted event EXACTLY like Python
 		contentCompletedEvent := RunContentCompletedEvent{
@@ -1546,8 +1880,12 @@ func (os *AgentOS) cancelAgentRunHandler(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement actual run cancellation logic
-	// For now, return success response
+	// Implement actual run cancellation logic
+	if !targetAgent.CancelRun(runID) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel run"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Agent run cancelled", "run_id": runID})
 }
 
@@ -1583,14 +1921,140 @@ func (os *AgentOS) continueAgentRunHandler(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement actual run continuation logic
-	// For now, return success response
-	c.JSON(http.StatusOK, gin.H{
-		"message":    "Agent run continued",
-		"run_id":     runID,
-		"agent_id":   agentID,
-		"session_id": req.SessionID,
-	})
+	// Parse tools from JSON string
+	var toolsData []map[string]interface{}
+	if req.Tools != "" {
+		if err := json.Unmarshal([]byte(req.Tools), &toolsData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid JSON in tools field",
+				"details": err.Error(),
+			})
+			return
+		}
+	}
+
+	// For now, continue run is implemented as a new run with the updated tools context
+	// In the future, this should use actual run state restoration
+
+	if req.Stream {
+		// Set SSE headers for streaming
+		origin := c.GetHeader("Origin")
+		if origin == "https://os.agno.com" || origin == "http://localhost:3000" {
+			c.Header("Access-Control-Allow-Origin", origin)
+		} else {
+			c.Header("Access-Control-Allow-Origin", "*")
+		}
+		c.Header("Access-Control-Allow-Headers", "Cache-Control, Content-Type, Authorization, Accept, Accept-Language, Accept-Encoding")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Expose-Headers", "*")
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+
+		// Send RunStarted event
+		startEventData := map[string]interface{}{
+			"event":      "RunStarted",
+			"created_at": time.Now().Unix(),
+			"agent_id":   agentID,
+			"agent_name": targetAgent.GetName(),
+			"run_id":     runID,
+			"session_id": req.SessionID,
+		}
+		startEventJSON, _ := json.Marshal(startEventData)
+		c.Writer.Write([]byte(fmt.Sprintf("event: RunStarted\ndata: %s\n\n", startEventJSON)))
+		c.Writer.Flush()
+
+		// Build continuation message with tools context
+		continueMessage := fmt.Sprintf("Continuing from previous run. Updated tools: %s", req.Tools)
+
+		// Run the agent
+		var finalmessage string
+		_ = targetAgent.RunStream(continueMessage, func(chunk []byte) error {
+			finalmessage += string(chunk)
+
+			// Send RunContent event
+			contentEvent := RunContentEvent{
+				CreatedAt:        time.Now().Unix(),
+				Event:            "RunContent",
+				AgentID:          agentID,
+				AgentName:        targetAgent.GetName(),
+				RunID:            runID,
+				SessionID:        req.SessionID,
+				Content:          string(chunk),
+				ContentType:      "str",
+				ReasoningContent: "",
+			}
+
+			contentEventJSON, _ := json.Marshal(contentEvent)
+			c.Writer.Write([]byte(fmt.Sprintf("event: RunContent\ndata: %s\n\n", contentEventJSON)))
+			c.Writer.Flush()
+
+			return nil
+		})
+
+		// Send RunContentCompleted event
+		contentCompletedEvent := RunContentCompletedEvent{
+			CreatedAt: time.Now().Unix(),
+			Event:     "RunContentCompleted",
+			AgentID:   agentID,
+			AgentName: targetAgent.GetName(),
+			RunID:     runID,
+			SessionID: req.SessionID,
+		}
+		contentCompletedJSON, _ := json.Marshal(contentCompletedEvent)
+		c.Writer.Write([]byte(fmt.Sprintf("event: RunContentCompleted\ndata: %s\n\n", contentCompletedJSON)))
+		c.Writer.Flush()
+
+		// Send RunCompleted event
+		runCompletedEvent := RunCompletedEvent{
+			CreatedAt:   time.Now().Unix(),
+			Event:       "RunCompleted",
+			AgentID:     agentID,
+			AgentName:   targetAgent.GetName(),
+			RunID:       runID,
+			SessionID:   req.SessionID,
+			Content:     finalmessage,
+			ContentType: "str",
+		}
+		runCompletedJSON, _ := json.Marshal(runCompletedEvent)
+		c.Writer.Write([]byte(fmt.Sprintf("event: RunCompleted\ndata: %s\n\n", runCompletedJSON)))
+		c.Writer.Flush()
+
+	} else {
+		// Non-streaming response
+		continueMessage := fmt.Sprintf("Continuing from previous run. Updated tools: %s", req.Tools)
+
+		runOpts := []agent.RunOption{}
+		if req.SessionID != "" {
+			runOpts = append(runOpts, agent.WithSessionID(req.SessionID))
+		}
+		if req.UserID != "" {
+			runOpts = append(runOpts, agent.WithUserID(req.UserID))
+		}
+
+		// Convert runOpts to interface{} slice
+		interfaceOpts := make([]interface{}, len(runOpts))
+		for i, opt := range runOpts {
+			interfaceOpts[i] = opt
+		}
+		response, err := targetAgent.Run(continueMessage, interfaceOpts...)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to continue run",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"run_id":     runID,
+			"agent_id":   agentID,
+			"session_id": req.SessionID,
+			"content":    response.TextContent,
+		})
+	}
 }
 
 // cancelTeamRunHandler cancels a team run - compatible with Python API

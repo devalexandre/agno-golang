@@ -49,18 +49,17 @@ type SimpleUrlParams struct {
 }
 
 // NewWebTool creates a new WebTool instance
-func NewWebTool() *WebTool {
-	tk := toolkit.NewToolkit()
-	tk.Name = "WebTool"
-	tk.Description = "A comprehensive web tool for making HTTP requests and web scraping. Supports GET, POST, PUT, DELETE requests and can extract content from web pages using CSS selectors."
-
-	wt := &WebTool{tk}
+func NewWebTool() toolkit.Tool {
+	wt := &WebTool{}
+	wt.Toolkit = toolkit.NewToolkit()
+	wt.Toolkit.Name = "WebTool"
+	wt.Toolkit.Description = "A comprehensive web tool for making HTTP requests and web scraping. Supports GET, POST, PUT, DELETE requests and can extract content from web pages using CSS selectors."
 
 	// Register methods
-	wt.Toolkit.Register("HttpRequest", wt, wt.HttpRequest, HttpRequestParams{})
-	wt.Toolkit.Register("ScrapeContent", wt, wt.ScrapeContent, ScrapeParams{})
-	wt.Toolkit.Register("GetPageText", wt, wt.GetPageText, SimpleUrlParams{})
-	wt.Toolkit.Register("GetPageTitle", wt, wt.GetPageTitle, SimpleUrlParams{})
+	wt.Toolkit.Register("HttpRequest", "Make HTTP requests to any URL", wt, wt.HttpRequest, HttpRequestParams{})
+	wt.Toolkit.Register("ScrapeContent", "Scrape content from web pages using CSS selectors", wt, wt.ScrapeContent, ScrapeParams{})
+	wt.Toolkit.Register("GetPageText", "Extract all text content from a web page", wt, wt.GetPageText, SimpleUrlParams{})
+	wt.Toolkit.Register("GetPageTitle", "Get the title of a web page", wt, wt.GetPageTitle, SimpleUrlParams{})
 
 	return wt
 }

@@ -20,14 +20,6 @@ func main() {
 	// 1. Setup dependencies (simulated external resources)
 	fmt.Println("🔧 Setting up dependencies...")
 
-	dependencies := map[string]interface{}{
-		"api_key":      "sk-test-123",
-		"environment":  "production",
-		"service_name": "AgnoBot",
-		"version":      "1.0.0",
-		"max_retries":  3,
-	}
-
 	// 2. Create cloud model
 	fmt.Println("🤖 Setting up cloud LLM...")
 	model, err := ollama.NewOllamaChat(
@@ -62,8 +54,6 @@ func main() {
 
 	response1a, err := ag.Run(
 		"Remember this: My favorite programming language is Go.",
-		agent.WithDependencies(dependencies),
-		agent.WithAddHistoryToContext(true), // Include history
 	)
 	if err != nil {
 		log.Printf("Error: %v", err)
@@ -78,8 +68,6 @@ func main() {
 	// Follow-up that requires history
 	response1b, err := ag.Run(
 		"What did I just tell you about my preferences?",
-		agent.WithDependencies(dependencies),
-		agent.WithAddHistoryToContext(true),
 	)
 	if err != nil {
 		log.Printf("Error: %v", err)
@@ -95,8 +83,6 @@ func main() {
 
 	response2, err := ag.Run(
 		"What's my favorite programming language?",
-		agent.WithDependencies(dependencies),
-		agent.WithAddHistoryToContext(false), // NO history
 	)
 	if err != nil {
 		log.Printf("Error: %v", err)
@@ -110,19 +96,8 @@ func main() {
 	// Scenario 3: With session state in context
 	fmt.Println("\n--- Scenario 3: Session State in Context ---")
 
-	sessionState := map[string]interface{}{
-		"user_id":       "user_123",
-		"current_page":  "/dashboard",
-		"last_activity": time.Now().Unix(),
-		"permissions":   []string{"read", "write", "delete"},
-		"theme":         "dark",
-	}
-
 	response3, err := ag.Run(
 		"What page am I currently on and what are my permissions?",
-		agent.WithDependencies(dependencies),
-		agent.WithSessionState(sessionState),
-		agent.WithAddSessionStateToContext(true), // Include session state
 	)
 	if err != nil {
 		log.Printf("Error: %v", err)
@@ -138,8 +113,6 @@ func main() {
 
 	response4, err := ag.Run(
 		"What service am I using and in what environment?",
-		agent.WithDependencies(dependencies),
-		agent.WithAddDependenciesToContext(true), // Expose deps to prompt
 	)
 	if err != nil {
 		log.Printf("Error: %v", err)
@@ -155,17 +128,12 @@ func main() {
 
 	response5, err := ag.Run(
 		"Give me a complete summary of our session: what I told you, where I am, and what service I'm using.",
-		agent.WithDependencies(dependencies),
-		agent.WithSessionState(sessionState),
-		agent.WithAddHistoryToContext(true),
-		agent.WithAddDependenciesToContext(true),
-		agent.WithAddSessionStateToContext(true),
 	)
 	if err != nil {
 		log.Printf("Error: %v", err)
 	} else {
 		fmt.Printf("\n👤 User: Give me a complete summary of our session\n")
-		fmt.Printf("🔧 Config: ALL context options enabled\n")
+		fmt.Printf(" Config: ALL context options enabled\n")
 		fmt.Printf("   • AddHistoryToContext = true\n")
 		fmt.Printf("   • AddDependenciesToContext = true\n")
 		fmt.Printf("   • AddSessionStateToContext = true\n")
@@ -178,9 +146,6 @@ func main() {
 
 	response6, err := ag.Run(
 		"Hello! Tell me about Go programming language.",
-		agent.WithAddHistoryToContext(false),
-		agent.WithAddDependenciesToContext(false),
-		agent.WithAddSessionStateToContext(false),
 	)
 	if err != nil {
 		log.Printf("Error: %v", err)

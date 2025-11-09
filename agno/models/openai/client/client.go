@@ -118,8 +118,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 	debugmod := ctx.Value(models.DebugKey)
 	if debugmod != nil && debugmod.(bool) {
-		fmt.Printf("DEBUG: Creating chat completion with MaxTokens: %d, Temperature: %.2f\n",
-			params.MaxTokens, params.Temperature)
+		fmt.Printf("DEBUG: Creating chat completion\n")
 	}
 
 	// Handle tools
@@ -167,14 +166,14 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 				Role:    string(choice.Message.Role),
 				Content: choice.Message.Content,
 			}
-			
+
 			// For reasoning models, extract reasoning content if available
 			if c.isReasoningModel() && ctx.Value("reasoning") == true {
 				// The reasoning content is typically in the content itself for o1 models
 				// or can be extracted from response metadata
 				message.ReasoningContent = choice.Message.Content
 			}
-			
+
 			// Handle tool calls if present
 			if len(choice.Message.ToolCalls) > 0 {
 				toolCalls := make([]tools.ToolCall, len(choice.Message.ToolCalls))
@@ -190,7 +189,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 				}
 				message.ToolCalls = toolCalls
 			}
-			
+
 			choices[i] = Choices{
 				Index:        int(choice.Index),
 				FinishReason: string(choice.FinishReason),
@@ -264,7 +263,6 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 	return result, nil
 }
-
 
 // StreamChatCompletion performs a streaming chat completion request.
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {

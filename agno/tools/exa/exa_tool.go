@@ -22,10 +22,10 @@ func NewExaTool(apiKey string) toolkit.Tool {
 	}
 
 	// ✅ Register all methods with their specific input types
-	exaTool.Toolkit.Register("SearchExa", exaTool, exaTool.SearchExa, SearchExaInput{})
-	exaTool.Toolkit.Register("GetContents", exaTool, exaTool.GetContents, GetContentsInput{})
-	exaTool.Toolkit.Register("FindSimilar", exaTool, exaTool.FindSimilar, FindSimilarInput{})
-	exaTool.Toolkit.Register("ExaAnswer", exaTool, exaTool.ExaAnswer, ExaAnswerInput{})
+	exaTool.Toolkit.Register("SearchExa", "Search Exa API for documents", exaTool, exaTool.SearchExa, SearchExaInput{})
+	exaTool.Toolkit.Register("GetContents", "Get contents from URLs", exaTool, exaTool.GetContents, GetContentsInput{})
+	exaTool.Toolkit.Register("FindSimilar", "Find similar documents", exaTool, exaTool.FindSimilar, FindSimilarInput{})
+	exaTool.Toolkit.Register("ExaAnswer", "Generate answers using Exa", exaTool, exaTool.ExaAnswer, ExaAnswerInput{})
 
 	return exaTool
 }

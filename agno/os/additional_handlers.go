@@ -8,6 +8,7 @@ import (
 	"net/http"
 	stdos "os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -35,12 +36,6 @@ type PaginationMeta struct {
 	TotalCount int `json:"total_count"`
 }
 
-// PaginatedResponse represents a paginated API response
-type PaginatedResponse struct {
-	Data interface{}    `json:"data"`
-	Meta PaginationMeta `json:"meta"`
-}
-
 // ContentResponse represents a knowledge content item
 type ContentResponse struct {
 	ID            string                 `json:"id"`
@@ -53,6 +48,43 @@ type ContentResponse struct {
 	StatusMessage string                 `json:"status_message,omitempty"`
 	CreatedAt     *time.Time             `json:"created_at,omitempty"`
 	UpdatedAt     *time.Time             `json:"updated_at,omitempty"`
+}
+
+// Helper function to build paginated response
+func BuildPaginatedResponse(data []interface{}, page, limit, totalCount int) gin.H {
+	totalPages := 0
+	if limit > 0 {
+		totalPages = (totalCount + limit - 1) / limit
+	}
+
+	return gin.H{
+		"data": data,
+		"meta": gin.H{
+			"page":        page,
+			"limit":       limit,
+			"total_pages": totalPages,
+			"total_count": totalCount,
+		},
+	}
+}
+
+// Helper function to convert any slice to []interface{}
+func convertToInterfaceSlice(slice interface{}) []interface{} {
+	if slice == nil {
+		return nil
+	}
+
+	// Use reflection to convert any slice type to []interface{}
+	v := reflect.ValueOf(slice)
+	if v.Kind() != reflect.Slice {
+		return nil
+	}
+
+	result := make([]interface{}, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		result[i] = v.Index(i).Interface()
+	}
+	return result
 }
 
 // Knowledge handlers - compatible with Python API
@@ -136,24 +168,15 @@ func (os *AgentOS) listKnowledgeContentHandler(c *gin.Context) {
 		})
 	}
 
-	// Calculate pagination
-	totalPages := 0
-	if limit > 0 {
-		totalPages = (totalCount + limit - 1) / limit
-	}
-
-	// Return paginated response
+	// Return paginated response using the new helper function
 	// Add cache-control to ensure fresh data
 	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-	c.JSON(http.StatusOK, PaginatedResponse{
-		Data: responseData,
-		Meta: PaginationMeta{
-			Page:       page,
-			Limit:      limit,
-			TotalPages: totalPages,
-			TotalCount: totalCount,
-		},
-	})
+	c.JSON(http.StatusOK, BuildPaginatedResponse(
+		convertToInterfaceSlice(responseData),
+		page,
+		limit,
+		totalCount,
+	))
 }
 
 // createKnowledgeContentHandler handles POST /knowledge/content
@@ -725,13 +748,13 @@ func (os *AgentOS) searchKnowledgeHandler(c *gin.Context) {
 	totalCount := len(results)
 	totalPages := (totalCount + limit - 1) / limit
 
-	c.JSON(http.StatusOK, PaginatedResponse{
-		Data: results,
-		Meta: PaginationMeta{
-			Page:       page,
-			Limit:      limit,
-			TotalPages: totalPages,
-			TotalCount: totalCount,
+	c.JSON(http.StatusOK, gin.H{
+		"data": results,
+		"meta": gin.H{
+			"page":        page,
+			"limit":       limit,
+			"total_pages": totalPages,
+			"total_count": totalCount,
 		},
 	})
 }
