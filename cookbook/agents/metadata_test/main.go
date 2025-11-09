@@ -60,7 +60,7 @@ func main() {
 	fmt.Println("\n--- Test: Metadata with Images ---")
 	response, err = testAgent.Run(
 		"Describe this image",
-		agent.WithImages(models.Image{
+		agent.WithImages(agent.Image{
 			ID:       "img-001",
 			URL:      "https://example.com/test.jpg",
 			MimeType: "image/jpeg",

@@ -142,8 +142,9 @@ type AgnoModelInterface interface {
 }
 
 // AgentInterface define os métodos essenciais para agentes
+// Note: RunOption is defined in agno/agent/options.go
 type AgentInterface interface {
-	Run(input interface{}) (RunResponse, error)
+	Run(input interface{}, opts ...interface{}) (RunResponse, error)
 	Reason(prompt string) ([]ReasoningStep, error)
 	RunStream(prompt string, fn func([]byte) error) error
 }
@@ -182,37 +183,12 @@ func (r *RunResponse) GetOutput(target interface{}) interface{} {
 	return r.Output
 }
 
-// Media types for agent inputs
-
-// Audio represents an audio input
-type Audio struct {
-	ID       string `json:"id,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Data     []byte `json:"data,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-}
-
-// Image represents an image input
-type Image struct {
-	ID       string `json:"id,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Data     []byte `json:"data,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-}
-
-// Video represents a video input
-type Video struct {
-	ID       string `json:"id,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Data     []byte `json:"data,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-}
-
-// File represents a file input
-type File struct {
-	ID       string `json:"id,omitempty"`
-	Name     string `json:"name,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Data     []byte `json:"data,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-}
+// Type aliases for backwards compatibility
+// These allow other packages to reference agent types via models package
+// Import agent package to get access to these types
+// Note: These are defined in agno/agent/options.go
+// type RunOption = agent.RunOption
+// type Image = agent.Image
+// type Audio = agent.Audio
+// type Video = agent.Video
+// type File = agent.File

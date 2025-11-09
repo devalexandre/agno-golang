@@ -3,15 +3,19 @@ package memory
 import (
 	"context"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 
+	"github.com/devalexandre/agno-golang/agno/embedder"
 	"github.com/devalexandre/agno-golang/agno/models"
 )
 
 // Memory implements the MemoryManager interface
 type Memory struct {
-	Model models.AgnoModelInterface
-	DB    MemoryDatabase
+	Model    models.AgnoModelInterface
+	DB       MemoryDatabase
+	Embedder embedder.Embedder // Optional: for semantic search
 }
 
 // NewMemory creates a new Memory instance
@@ -19,6 +23,15 @@ func NewMemory(model models.AgnoModelInterface, db MemoryDatabase) *Memory {
 	return &Memory{
 		Model: model,
 		DB:    db,
+	}
+}
+
+// NewMemoryWithEmbedder creates a new Memory instance with embedder for semantic search
+func NewMemoryWithEmbedder(model models.AgnoModelInterface, db MemoryDatabase, emb embedder.Embedder) *Memory {
+	return &Memory{
+		Model:    model,
+		DB:       db,
+		Embedder: emb,
 	}
 }
 
@@ -231,4 +244,238 @@ func (m *Memory) GetMemoriesAsContext(ctx context.Context, userID string) (strin
 	}
 
 	return context.String(), nil
+}
+
+// SearchMemoriesSemantic performs semantic search on user memories
+// Returns memories ranked by relevance to the query
+func (m *Memory) SearchMemoriesSemantic(ctx context.Context, userID, query string, limit int) ([]*UserMemory, error) {
+	if m.Embedder == nil {
+		return nil, fmt.Errorf("embedder not configured for semantic search")
+	}
+
+	// Get all user memories
+	allMemories, err := m.GetUserMemories(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user memories: %w", err)
+	}
+
+	if len(allMemories) == 0 {
+		return []*UserMemory{}, nil
+	}
+
+	// Generate embedding for the query
+	queryEmbedding, err := m.Embedder.GetEmbedding(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed query: %w", err)
+	}
+
+	// Calculate similarity scores for each memory
+	type scoredMemory struct {
+		memory *UserMemory
+		score  float64
+	}
+
+	scoredMemories := make([]scoredMemory, 0, len(allMemories))
+
+	for _, memory := range allMemories {
+		// Generate embedding for the memory
+		memoryEmbedding, err := m.Embedder.GetEmbedding(memory.Memory)
+		if err != nil {
+			// Skip memories that fail to embed
+			continue
+		}
+
+		// Calculate cosine similarity
+		similarity := cosineSimilarity(queryEmbedding, memoryEmbedding)
+
+		scoredMemories = append(scoredMemories, scoredMemory{
+			memory: memory,
+			score:  similarity,
+		})
+	}
+
+	// Sort by similarity score (descending)
+	sort.Slice(scoredMemories, func(i, j int) bool {
+		return scoredMemories[i].score > scoredMemories[j].score
+	})
+
+	// Return top N results
+	if limit <= 0 || limit > len(scoredMemories) {
+		limit = len(scoredMemories)
+	}
+
+	results := make([]*UserMemory, limit)
+	for i := 0; i < limit; i++ {
+		results[i] = scoredMemories[i].memory
+	}
+
+	return results, nil
+}
+
+// SearchMemoriesHybrid performs hybrid search combining semantic and keyword matching
+func (m *Memory) SearchMemoriesHybrid(ctx context.Context, userID, query string, limit int, semanticWeight float64) ([]*UserMemory, error) {
+	if m.Embedder == nil {
+		// Fall back to keyword search if no embedder
+		return m.SearchMemoriesKeyword(ctx, userID, query, limit)
+	}
+
+	// Get all user memories
+	allMemories, err := m.GetUserMemories(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user memories: %w", err)
+	}
+
+	if len(allMemories) == 0 {
+		return []*UserMemory{}, nil
+	}
+
+	// Generate embedding for the query
+	queryEmbedding, err := m.Embedder.GetEmbedding(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed query: %w", err)
+	}
+
+	// Normalize semantic weight
+	if semanticWeight < 0 {
+		semanticWeight = 0
+	}
+	if semanticWeight > 1 {
+		semanticWeight = 1
+	}
+	keywordWeight := 1.0 - semanticWeight
+
+	// Calculate hybrid scores
+	type scoredMemory struct {
+		memory *UserMemory
+		score  float64
+	}
+
+	queryLower := strings.ToLower(query)
+	scoredMemories := make([]scoredMemory, 0, len(allMemories))
+
+	for _, memory := range allMemories {
+		// Semantic score
+		var semanticScore float64
+		memoryEmbedding, err := m.Embedder.GetEmbedding(memory.Memory)
+		if err == nil {
+			semanticScore = cosineSimilarity(queryEmbedding, memoryEmbedding)
+		}
+
+		// Keyword score (simple TF-IDF-like scoring)
+		keywordScore := calculateKeywordScore(queryLower, strings.ToLower(memory.Memory))
+
+		// Combine scores
+		hybridScore := (semanticScore * semanticWeight) + (keywordScore * keywordWeight)
+
+		scoredMemories = append(scoredMemories, scoredMemory{
+			memory: memory,
+			score:  hybridScore,
+		})
+	}
+
+	// Sort by hybrid score (descending)
+	sort.Slice(scoredMemories, func(i, j int) bool {
+		return scoredMemories[i].score > scoredMemories[j].score
+	})
+
+	// Return top N results
+	if limit <= 0 || limit > len(scoredMemories) {
+		limit = len(scoredMemories)
+	}
+
+	results := make([]*UserMemory, limit)
+	for i := 0; i < limit; i++ {
+		results[i] = scoredMemories[i].memory
+	}
+
+	return results, nil
+}
+
+// SearchMemoriesKeyword performs simple keyword-based search
+func (m *Memory) SearchMemoriesKeyword(ctx context.Context, userID, query string, limit int) ([]*UserMemory, error) {
+	allMemories, err := m.GetUserMemories(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user memories: %w", err)
+	}
+
+	if len(allMemories) == 0 {
+		return []*UserMemory{}, nil
+	}
+
+	queryLower := strings.ToLower(query)
+
+	type scoredMemory struct {
+		memory *UserMemory
+		score  float64
+	}
+
+	scoredMemories := make([]scoredMemory, 0)
+
+	for _, memory := range allMemories {
+		score := calculateKeywordScore(queryLower, strings.ToLower(memory.Memory))
+		if score > 0 {
+			scoredMemories = append(scoredMemories, scoredMemory{
+				memory: memory,
+				score:  score,
+			})
+		}
+	}
+
+	// Sort by score (descending)
+	sort.Slice(scoredMemories, func(i, j int) bool {
+		return scoredMemories[i].score > scoredMemories[j].score
+	})
+
+	// Return top N results
+	if limit <= 0 || limit > len(scoredMemories) {
+		limit = len(scoredMemories)
+	}
+
+	results := make([]*UserMemory, limit)
+	for i := 0; i < limit; i++ {
+		results[i] = scoredMemories[i].memory
+	}
+
+	return results, nil
+}
+
+// Helper functions
+
+// cosineSimilarity calculates the cosine similarity between two vectors
+func cosineSimilarity(a, b []float64) float64 {
+	if len(a) != len(b) {
+		return 0
+	}
+
+	var dotProduct, normA, normB float64
+
+	for i := range a {
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+// calculateKeywordScore calculates a simple keyword matching score
+func calculateKeywordScore(query, text string) float64 {
+	queryWords := strings.Fields(query)
+	if len(queryWords) == 0 {
+		return 0
+	}
+
+	matches := 0
+	for _, word := range queryWords {
+		if strings.Contains(text, word) {
+			matches++
+		}
+	}
+
+	// Return ratio of matched words
+	return float64(matches) / float64(len(queryWords))
 }

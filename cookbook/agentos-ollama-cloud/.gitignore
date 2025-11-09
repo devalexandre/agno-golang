@@ -1,0 +1,34 @@
+# Environment variables
+.env
+
+# Compiled binary
+agentos
+agentos-ollama-cloud
+main
+
+# Test files
+*.test
+*.out
+
+# Logs
+*.log
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Generated content
+blog_posts/
+output/
+generated/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

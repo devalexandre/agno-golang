@@ -64,6 +64,9 @@ func WithStreamingFunc(f func(context.Context, []byte) error) Option {
 	}
 }
 
+// Note: WithAudio, WithVideos, WithFiles, WithImages, WithMetadata are defined in agno/agent/options.go
+// They are re-exported from the agent package for backwards compatibility
+
 // ClientOptions represents the options for the OpenAI API client.
 type ClientOptions struct {
 	APIKey         string                 `json:"-"`                       // API key.
@@ -143,13 +146,6 @@ func WithReasoningEffort(reasoningEffort string) Option {
 	}
 }
 
-// WithMetadata sets the additional metadata.
-func WithMetadata(metadata map[string]interface{}) Option {
-	return func(o *CallOptions) {
-		o.Metadata = metadata
-	}
-}
-
 // WithFrequencyPenalty sets the frequency penalty.
 func WithFrequencyPenalty(penalty float32) Option {
 	return func(o *CallOptions) {
@@ -196,13 +192,6 @@ func WithMaxCompletionTokens(tokens int) Option {
 func WithModalities(modalities []string) Option {
 	return func(o *CallOptions) {
 		o.Modalities = modalities
-	}
-}
-
-// WithAudio sets the audio data.
-func WithAudio(audio map[string]interface{}) Option {
-	return func(o *CallOptions) {
-		o.Audio = audio
 	}
 }
 
