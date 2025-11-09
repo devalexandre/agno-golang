@@ -28,10 +28,10 @@ func NewStateManagementToolkit(agent *Agent) *StateManagementToolkit {
 	tk.Description = "Manage agent session state - set, get, and delete values"
 
 	// Register methods
-	tk.Register("set", smt, smt.SetState, SetStateParams{})
-	tk.Register("get", smt, smt.GetState, GetStateParams{})
-	tk.Register("delete", smt, smt.DeleteState, DeleteStateParams{})
-	tk.Register("list", smt, smt.ListState, ListStateParams{})
+	tk.Register("SetState", "Store a value in the agent's session state under a given key", smt, smt.SetState, SetStateParams{})
+	tk.Register("GetState", "Retrieve a value from session state by key", smt, smt.GetState, GetStateParams{})
+	tk.Register("DeleteState", "Remove a key-value pair from session state", smt, smt.DeleteState, DeleteStateParams{})
+	tk.Register("ListState", "List all key-value pairs currently stored in session state", smt, smt.ListState, ListStateParams{})
 
 	smt.Toolkit = tk
 

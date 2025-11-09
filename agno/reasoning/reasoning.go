@@ -1,4 +1,3 @@
-// Package reasoning provides functionality for managing reasoning steps.
 package reasoning
 
 import (

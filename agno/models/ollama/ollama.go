@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -96,6 +97,9 @@ func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, opti
 				},
 			})
 		}
+		// show tools
+		toolsjson, _ := json.MarshalIndent(toolCalls, "", "  ")
+		fmt.Printf("🛠️  Tool Calls: %s\n", string(toolsjson))
 	}
 
 	return &models.MessageResponse{

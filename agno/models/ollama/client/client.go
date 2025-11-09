@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -62,38 +61,6 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		option(callOptions)
 	}
 
-	// Extract images from metadata and add to last user message
-	if callOptions.Metadata != nil {
-		if imagesInterface, ok := callOptions.Metadata["images"]; ok {
-			if images, ok := imagesInterface.([]models.Image); ok && len(images) > 0 {
-				// Convert images to base64 encoded bytes
-				var base64Images []api.ImageData
-				for _, img := range images {
-					// If Data is populated with raw image bytes, encode to base64
-					if len(img.Data) > 0 {
-						// Ollama expects base64-encoded image data
-						base64Str := base64.StdEncoding.EncodeToString(img.Data)
-						base64Images = append(base64Images, api.ImageData(base64Str))
-					} else if img.URL != "" {
-						// URLs can be passed directly
-						base64Images = append(base64Images, api.ImageData(img.URL))
-					}
-				}
-
-				// Add images to the last user message
-				if len(base64Images) > 0 && len(msgs) > 0 {
-					// Find last user message
-					for i := len(msgs) - 1; i >= 0; i-- {
-						if msgs[i].Role == "user" {
-							msgs[i].Images = base64Images
-							break
-						}
-					}
-				}
-			}
-		}
-	}
-
 	callOptions.Tools = nil
 
 	opts, err := utils.StructToMap(callOptions)
@@ -104,6 +71,11 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 	_tools, maptools, _ := c.prepareTools(callOptions.ToolCall)
 	req.Tools = _tools
+
+	if showToolsCall != nil && showToolsCall.(bool) {
+		toolsJosn, _ := json.MarshalIndent(_tools, "", "  ")
+		fmt.Printf("🛠️  Tools: %s\n", string(toolsJosn))
+	}
 
 	var responseTools []api.Message
 	var resp_ api.ChatResponse
@@ -304,38 +276,6 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 		option(callOptions)
 	}
 
-	// Extract images from metadata and add to last user message
-	if callOptions.Metadata != nil {
-		if imagesInterface, ok := callOptions.Metadata["images"]; ok {
-			if images, ok := imagesInterface.([]models.Image); ok && len(images) > 0 {
-				// Convert images to base64 encoded bytes
-				var base64Images []api.ImageData
-				for _, img := range images {
-					// If Data is populated with raw image bytes, encode to base64
-					if len(img.Data) > 0 {
-						// Ollama expects base64-encoded image data
-						base64Str := base64.StdEncoding.EncodeToString(img.Data)
-						base64Images = append(base64Images, api.ImageData(base64Str))
-					} else if img.URL != "" {
-						// URLs can be passed directly
-						base64Images = append(base64Images, api.ImageData(img.URL))
-					}
-				}
-
-				// Add images to the last user message
-				if len(base64Images) > 0 && len(msgs) > 0 {
-					// Find last user message
-					for i := len(msgs) - 1; i >= 0; i-- {
-						if msgs[i].Role == "user" {
-							msgs[i].Images = base64Images
-							break
-						}
-					}
-				}
-			}
-		}
-	}
-
 	_tools, maptools, _ := c.prepareTools(callOptions.ToolCall)
 	callOptions.Tools = nil
 	req.Tools = _tools
@@ -472,6 +412,11 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 	var names []string
 
 	for _, tool := range toolsCall {
+		tooname := tool.GetName()
+		if strings.Contains(tooname, "_") {
+			fmt.Printf("⚠️ Tool name '%s' contains underscores. It's recommended to use camelCase names for Ollama compatibility.\n", tooname)
+			panic("Name Tool can not be Underscore")
+		}
 		for methodName := range tool.GetMethods() {
 			// Get parameter schema
 			params := tool.GetParameterStruct(methodName)
@@ -526,7 +471,7 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 				Type: "function",
 				Function: api.ToolFunction{
 					Name:        methodName,
-					Description: tool.GetDescription(),
+					Description: tool.GetDescriptionOfMethod(methodName),
 					Parameters: api.ToolFunctionParameters{
 						Type:       "object",
 						Required:   requiredFields,

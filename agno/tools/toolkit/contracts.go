@@ -14,10 +14,11 @@ type Toolkit struct {
 
 // Method stores the execution function and its parameter schema.
 type Method struct {
-	Receiver  interface{}
-	Function  interface{}
-	Schema    map[string]interface{}
-	ParamType reflect.Type
+	Receiver    interface{}
+	Description string
+	Function    interface{}
+	Schema      map[string]interface{}
+	ParamType   reflect.Type
 }
 
 // Tool is the interface that defines the basic operations for any tool.
@@ -27,5 +28,6 @@ type Tool interface {
 	GetParameterStruct(methodName string) map[string]interface{}           // Returns the JSON schema based on the registered method
 	GetMethods() map[string]Method                                         // Returns the registered methods
 	GetFunction(methodName string) interface{}                             // Returns the execution function
+	GetDescriptionOfMethod(methodName string) string                       // Returns the description of a specific method
 	Execute(methodName string, input json.RawMessage) (interface{}, error) // Executes the function
 }

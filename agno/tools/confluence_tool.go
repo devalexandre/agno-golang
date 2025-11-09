@@ -42,8 +42,8 @@ func NewConfluenceTool(baseURL, username, apiToken string) toolkit.Tool {
 		Toolkit:  tk,
 	}
 
-	c.Toolkit.Register("SearchConfluence", c, c.SearchConfluence, SearchConfluenceInput{})
-	c.Toolkit.Register("GetPageContent", c, c.GetPageContent, GetPageContentInput{})
+	c.Toolkit.Register("SearchConfluence", "Search Confluence pages using CQL query", c, c.SearchConfluence, SearchConfluenceInput{})
+	c.Toolkit.Register("GetPageContent", "Get Confluence page content by ID", c, c.GetPageContent, GetPageContentInput{})
 
 	return c
 }

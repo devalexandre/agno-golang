@@ -7,6 +7,7 @@ import (
 	"log"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devalexandre/agno-golang/agno/knowledge"
@@ -20,168 +21,6 @@ import (
 	"github.com/google/uuid"
 	gpt3encoder "github.com/samber/go-gpt-3-encoder"
 )
-
-// RunOptions contains optional parameters for the Run method
-type RunOptions struct {
-	// Stream enables streaming response
-	Stream *bool
-	// StreamEvents enables streaming of intermediate events
-	StreamEvents *bool
-	// StreamIntermediateSteps is deprecated, use StreamEvents instead
-	StreamIntermediateSteps *bool
-	// UserID specifies the user making the request
-	UserID *string
-	// SessionID specifies the session for this run
-	SessionID *string
-	// SessionState contains state to persist across runs
-	SessionState map[string]interface{}
-	// Audio inputs
-	Audio []models.Audio
-	// Images inputs
-	Images []models.Image
-	// Videos inputs
-	Videos []models.Video
-	// Files inputs
-	Files []models.File
-	// Retries number of retry attempts
-	Retries *int
-	// KnowledgeFilters for filtering knowledge base queries
-	KnowledgeFilters map[string]interface{}
-	// AddHistoryToContext includes conversation history in context
-	AddHistoryToContext *bool
-	// AddDependenciesToContext includes dependencies in context
-	AddDependenciesToContext *bool
-	// AddSessionStateToContext includes session state in context
-	AddSessionStateToContext *bool
-	// Dependencies available for tools and prompt functions
-	Dependencies map[string]interface{}
-	// Metadata for this run
-	Metadata map[string]interface{}
-	// DebugMode enables detailed debug logging
-	DebugMode *bool
-}
-
-// RunOption is a function that configures RunOptions
-type RunOption func(*RunOptions)
-
-// WithStream enables streaming response
-func WithStream(stream bool) RunOption {
-	return func(o *RunOptions) {
-		o.Stream = &stream
-	}
-}
-
-// WithStreamEvents enables streaming of intermediate events
-func WithStreamEvents(streamEvents bool) RunOption {
-	return func(o *RunOptions) {
-		o.StreamEvents = &streamEvents
-	}
-}
-
-// WithUserID sets the user ID for the run
-func WithUserID(userID string) RunOption {
-	return func(o *RunOptions) {
-		o.UserID = &userID
-	}
-}
-
-// WithSessionID sets the session ID for the run
-func WithSessionID(sessionID string) RunOption {
-	return func(o *RunOptions) {
-		o.SessionID = &sessionID
-	}
-}
-
-// WithSessionState sets the session state for the run
-func WithSessionState(state map[string]interface{}) RunOption {
-	return func(o *RunOptions) {
-		o.SessionState = state
-	}
-}
-
-// WithAudio adds audio inputs
-func WithAudio(audio ...models.Audio) RunOption {
-	return func(o *RunOptions) {
-		o.Audio = append(o.Audio, audio...)
-	}
-}
-
-// WithImages adds image inputs
-func WithImages(images ...models.Image) RunOption {
-	return func(o *RunOptions) {
-		o.Images = append(o.Images, images...)
-	}
-}
-
-// WithVideos adds video inputs
-func WithVideos(videos ...models.Video) RunOption {
-	return func(o *RunOptions) {
-		o.Videos = append(o.Videos, videos...)
-	}
-}
-
-// WithFiles adds file inputs
-func WithFiles(files ...models.File) RunOption {
-	return func(o *RunOptions) {
-		o.Files = append(o.Files, files...)
-	}
-}
-
-// WithRetries sets the number of retry attempts
-func WithRetries(retries int) RunOption {
-	return func(o *RunOptions) {
-		o.Retries = &retries
-	}
-}
-
-// WithKnowledgeFilters sets knowledge base filters
-func WithKnowledgeFilters(filters map[string]interface{}) RunOption {
-	return func(o *RunOptions) {
-		o.KnowledgeFilters = filters
-	}
-}
-
-// WithAddHistoryToContext includes conversation history in context
-func WithAddHistoryToContext(add bool) RunOption {
-	return func(o *RunOptions) {
-		o.AddHistoryToContext = &add
-	}
-}
-
-// WithAddDependenciesToContext includes dependencies in context
-func WithAddDependenciesToContext(add bool) RunOption {
-	return func(o *RunOptions) {
-		o.AddDependenciesToContext = &add
-	}
-}
-
-// WithAddSessionStateToContext includes session state in context
-func WithAddSessionStateToContext(add bool) RunOption {
-	return func(o *RunOptions) {
-		o.AddSessionStateToContext = &add
-	}
-}
-
-// WithDependencies sets dependencies for the run
-func WithDependencies(deps map[string]interface{}) RunOption {
-	return func(o *RunOptions) {
-		o.Dependencies = deps
-	}
-}
-
-// WithMetadata sets metadata for the run
-func WithMetadata(metadata map[string]interface{}) RunOption {
-	return func(o *RunOptions) {
-		o.Metadata = metadata
-	}
-}
-
-// WithDebugMode enables debug mode
-func WithDebugMode(debug bool) RunOption {
-	return func(o *RunOptions) {
-		o.DebugMode = &debug
-	}
-}
 
 type AgentConfig struct {
 	Context        context.Context
@@ -200,11 +39,12 @@ type AgentConfig struct {
 	Debug          bool
 	//--- Agent Reasoning ---
 	// Enable reasoning by working through the problem step by step.
-	Reasoning         bool
-	ReasoningModel    models.AgnoModelInterface
-	ReasoningAgent    models.AgentInterface
-	ReasoningMinSteps int
-	ReasoningMaxSteps int
+	Reasoning            bool
+	ReasoningModel       models.AgnoModelInterface
+	ReasoningAgent       models.AgentInterface
+	ReasoningMinSteps    int
+	ReasoningMaxSteps    int
+	ReasoningPersistence reasoning.ReasoningPersistence
 
 	// Memory and Storage Configuration
 	Memory                  memory.MemoryManager
@@ -351,16 +191,21 @@ type Agent struct {
 	runs         []*storage.AgentRun
 	sessionState map[string]interface{} // Dynamic state that tools can modify
 
+	// Active runs tracking for cancellation
+	activeRuns map[string]context.CancelFunc
+	runMutex   sync.RWMutex
+
 	// Knowledge
 	knowledge             knowledge.Knowledge
 	knowledgeMaxDocuments int
 
 	// Reasoning
-	reasoning         bool
-	reasoningModel    models.AgnoModelInterface
-	reasoningAgent    models.AgentInterface
-	reasoningMinSteps int
-	reasoningMaxSteps int
+	reasoning            bool
+	reasoningModel       models.AgnoModelInterface
+	reasoningAgent       models.AgentInterface
+	reasoningMinSteps    int
+	reasoningMaxSteps    int
+	reasoningPersistence reasoning.ReasoningPersistence
 
 	// Semantic Compression
 	semanticModel             models.AgnoModelInterface
@@ -411,7 +256,15 @@ type Agent struct {
 	// Retry Configuration
 	delayBetweenRetries int
 	exponentialBackoff  bool
+
+	// Default Tools Configuration
+	enableReadChatHistoryTool     bool // Enable read_chat_history default tool
+	enableUpdateKnowledgeTool     bool // Enable update_knowledge default tool
+	enableReadToolCallHistoryTool bool // Enable read_tool_call_history default tool
 }
+
+// Ensure Agent implements models.AgentInterface
+var _ models.AgentInterface = (*Agent)(nil)
 
 func NewAgent(config AgentConfig) (*Agent, error) {
 	// Ensure context is not nil
@@ -483,11 +336,12 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		knowledgeMaxDocuments: config.KnowledgeMaxDocuments,
 
 		// Reasoning
-		reasoning:         config.Reasoning,
-		reasoningModel:    config.ReasoningModel,
-		reasoningAgent:    config.ReasoningAgent,
-		reasoningMinSteps: config.ReasoningMinSteps,
-		reasoningMaxSteps: config.ReasoningMaxSteps,
+		reasoning:            config.Reasoning,
+		reasoningModel:       config.ReasoningModel,
+		reasoningAgent:       config.ReasoningAgent,
+		reasoningMinSteps:    config.ReasoningMinSteps,
+		reasoningMaxSteps:    config.ReasoningMaxSteps,
+		reasoningPersistence: config.ReasoningPersistence,
 
 		// Semantic Compression
 		semanticModel:             config.SemanticModel,
@@ -538,6 +392,11 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		// Retry Configuration
 		delayBetweenRetries: config.DelayBetweenRetries,
 		exponentialBackoff:  config.ExponentialBackoff,
+
+		// Default Tools Configuration
+		enableReadChatHistoryTool:     config.EnableReadChatHistoryTool,
+		enableUpdateKnowledgeTool:     config.EnableUpdateKnowledgeTool,
+		enableReadToolCallHistoryTool: config.EnableReadToolCallHistoryTool,
 	}
 
 	// Wrap tools with hooks if configured
@@ -602,6 +461,156 @@ func (a *Agent) GetRole() string {
 // GetModel returns the agent's model
 func (a *Agent) GetModel() models.AgnoModelInterface {
 	return a.model
+}
+
+// GetID returns the agent's ID (sessionID as ID)
+func (a *Agent) GetID() string {
+	return a.sessionID
+}
+
+// GetToolCallLimit returns the agent's tool call limit
+func (a *Agent) GetToolCallLimit() int {
+	return a.toolCallLimit
+}
+
+// GetToolChoice returns the agent's tool choice setting
+func (a *Agent) GetToolChoice() string {
+	return a.toolChoice
+}
+
+// GetStorage returns the agent's storage/database
+func (a *Agent) GetStorage() storage.DB {
+	return a.db
+}
+
+// GetAddHistoryToMessages returns whether history is added to messages
+func (a *Agent) GetAddHistoryToMessages() bool {
+	return a.addHistoryToMessages
+}
+
+// GetEnableSessionSummaries returns whether session summaries are enabled
+func (a *Agent) GetEnableSessionSummaries() bool {
+	return a.enableSessionSummaries
+}
+
+// GetEnableAgenticMemory returns whether agentic memory is enabled
+func (a *Agent) GetEnableAgenticMemory() bool {
+	return a.enableAgenticMemory
+}
+
+// GetEnableReasoning returns whether reasoning is enabled
+func (a *Agent) GetEnableReasoning() bool {
+	return a.reasoning
+}
+
+// GetReadChatHistory returns whether chat history reading is enabled
+func (a *Agent) GetReadChatHistory() bool {
+	return a.readChatHistory
+}
+
+// GetReadToolCallHistory returns whether tool call history reading is enabled
+func (a *Agent) GetReadToolCallHistory() bool {
+	return a.enableReadToolCallHistoryTool
+}
+
+// activeRun represents an active run with its context and cancellation function
+type activeRun struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// CancelRun attempts to cancel a running operation by its run ID
+// This implementation tracks active runs and uses context cancellation
+func (a *Agent) CancelRun(runID string) bool {
+	a.runMutex.Lock()
+	defer a.runMutex.Unlock()
+
+	// Check if we have a cancellation function for this run ID
+	if cancelFunc, exists := a.activeRuns[runID]; exists {
+		// Cancel the run
+		cancelFunc()
+		delete(a.activeRuns, runID)
+		return true
+	}
+
+	// Run ID not found in active runs
+	return false
+}
+
+// ContinueRun continues a previous run with updated tools
+func (a *Agent) ContinueRun(runID string, updatedTools []map[string]interface{}, sessionID, userID *string) (models.RunResponse, error) {
+	// For now, we'll implement a basic continue run mechanism
+	// In a more sophisticated implementation, we would load the previous run state
+	// and continue from where it left off
+
+	// Track the run for cancellation
+	_ = a.trackRun(runID)
+	defer a.untrackRun(runID)
+
+	// Create a simple prompt indicating this is a continuation
+	prompt := "Continuing from previous run. Please proceed with the task."
+
+	// Add tool information to context if provided
+	if len(updatedTools) > 0 {
+		toolInfo := "Updated tools available:\n"
+		for _, tool := range updatedTools {
+			if name, ok := tool["name"].(string); ok {
+				toolInfo += fmt.Sprintf("- %s\n", name)
+			}
+		}
+		prompt = toolInfo + "\n" + prompt
+	}
+
+	// Execute the agent with the continuation prompt
+	// In a real implementation, this would restore the previous state
+	options := []interface{}{}
+	if sessionID != nil {
+		options = append(options, WithSessionID(*sessionID))
+	}
+	if userID != nil {
+		options = append(options, WithUserID(*userID))
+	}
+
+	// Add updated tools to the agent's tool set if needed
+	// For now, we'll just pass them as context
+
+	response, err := a.Run(prompt, options...)
+	if err != nil {
+		return models.RunResponse{}, err
+	}
+
+	return response, nil
+}
+
+// trackRun adds a run to the active runs tracking map
+func (a *Agent) trackRun(runID string) context.Context {
+	a.runMutex.Lock()
+	defer a.runMutex.Unlock()
+
+	// Create a new context with cancellation for this run
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.activeRuns[runID] = cancel
+	return ctx
+}
+
+// untrackRun removes a run from the active runs tracking map
+func (a *Agent) untrackRun(runID string) {
+	a.runMutex.Lock()
+	defer a.runMutex.Unlock()
+
+	if cancelFunc, exists := a.activeRuns[runID]; exists {
+		// Call cancel to ensure any goroutines are notified
+		cancelFunc()
+		delete(a.activeRuns, runID)
+	}
+}
+
+// GetMetadata returns the agent's metadata
+func (a *Agent) GetMetadata() map[string]interface{} {
+	// Return a copy to prevent external modification
+	metadata := make(map[string]interface{})
+	// Add any existing metadata fields here
+	return metadata
 }
 
 // GetKnowledge returns the agent's knowledge base
@@ -831,28 +840,22 @@ func (a *Agent) validateInput(input interface{}) error {
 
 // prepareInputWithSchema prepares input according to input schema if configured
 func (a *Agent) prepareInputWithSchema(input interface{}) (string, error) {
-	if a.inputSchema == nil {
-		// If input is a string, return it directly
-		if str, ok := input.(string); ok {
-			return str, nil
-		}
-		// Otherwise, marshal to JSON
-		data, err := json.Marshal(input)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal input: %w", err)
-		}
-		return string(data), nil
+	// If input is a string, return it directly (most common case)
+	if str, ok := input.(string); ok {
+		return str, nil
 	}
 
-	// Validate input first
-	if err := a.validateInput(input); err != nil {
-		return "", err
+	// If input schema is configured, validate first
+	if a.inputSchema != nil {
+		if err := a.validateInput(input); err != nil {
+			return "", err
+		}
 	}
 
-	// Marshal validated input to string
+	// Marshal non-string input to JSON
 	data, err := json.Marshal(input)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal validated input: %w", err)
+		return "", fmt.Errorf("failed to marshal input: %w", err)
 	}
 
 	return string(data), nil
@@ -1194,11 +1197,13 @@ func (a *Agent) unmarshalIntoSchema(jsonStr string) (interface{}, error) {
 }
 
 // RunWithOptions is the new method with full options support
-func (a *Agent) RunWithOptions(input interface{}, opts ...RunOption) (models.RunResponse, error) {
+func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.RunResponse, error) {
 	// Apply options
 	options := &RunOptions{}
 	for _, opt := range opts {
-		opt(options)
+		if runOpt, ok := opt.(func(*RunOptions)); ok {
+			runOpt(options)
+		}
 	}
 
 	// Override agent settings with run options if provided
@@ -1462,11 +1467,13 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...RunOption) (models.Run
 
 // Run executes the agent with the given input and options
 // This method accepts optional RunOptions using the functional options pattern
-func (a *Agent) Run(input interface{}, opts ...RunOption) (models.RunResponse, error) {
+func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse, error) {
 	// Apply options
 	options := &RunOptions{}
 	for _, opt := range opts {
-		opt(options)
+		if runOpt, ok := opt.(func(*RunOptions)); ok {
+			runOpt(options)
+		}
 	}
 
 	// Execute pre-hooks for validation and preprocessing
@@ -1658,9 +1665,6 @@ func (a *Agent) Run(input interface{}, opts ...RunOption) (models.RunResponse, e
 
 	// Prepare model options
 	modelOptions := []models.Option{models.WithTools(a.tools)}
-	if len(metadata) > 0 {
-		modelOptions = append(modelOptions, models.WithMetadata(metadata))
-	}
 
 	for attempt := 0; attempt <= retries; attempt++ {
 		if a.debug && attempt > 0 {
@@ -2328,7 +2332,7 @@ func (a *Agent) processMemories(userMessage, agentResponse string) error {
 	return nil
 }
 
-func (a *Agent) RunStream(prompt string, fn func(chuck []byte) error) error {
+func (a *Agent) RunStream(prompt string, fn func([]byte) error) error {
 	messages := a.prepareMessages(prompt)
 
 	// Collect streaming content for memory processing

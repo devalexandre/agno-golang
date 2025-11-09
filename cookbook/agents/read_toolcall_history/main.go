@@ -65,13 +65,13 @@ func main() {
 	tk := toolkit.NewToolkit()
 	tk.Name = calc.Name
 	tk.Description = calc.Description
-	tk.Register("add", calc, calc.Add, AddParams{})
-	tk.Register("multiply", calc, calc.Multiply, MultiplyParams{})
-	tk.Register("divide", calc, calc.Divide, DivideParams{})
+	tk.Register("Add", "Add two numbers together", calc, calc.Add, AddParams{})
+	tk.Register("Multiply", "Multiply two numbers", calc, calc.Multiply, MultiplyParams{})
+	tk.Register("Divide", "Divide the first number by the second (returns an error if dividing by zero)", calc, calc.Divide, DivideParams{})
 
 	// Create Ollama Cloud model
 	model, err := ollama.NewOllamaChat(
-		models.WithID("kimi-k2:1t-cloud"),
+		models.WithID("deepseek-v3.1:671b-cloud"),
 		models.WithAPIKey(apiKey),
 		models.WithBaseURL("https://ollama.com"),
 	)

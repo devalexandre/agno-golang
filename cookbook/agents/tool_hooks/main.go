@@ -47,7 +47,7 @@ func main() {
 
 	// Create Ollama Cloud model
 	model, err := ollama.NewOllamaChat(
-		models.WithID("kimi-k2:1t-cloud"),
+		models.WithID("deepseek-v3.1:671b-cloud"),
 		models.WithBaseURL("https://ollama.com"),
 		models.WithAPIKey(apiKey),
 	)
@@ -62,8 +62,8 @@ func main() {
 	tk := toolkit.NewToolkit()
 	tk.Name = calc.Name
 	tk.Description = calc.Description
-	tk.Register("add", calc, calc.Add, AddParams{})
-	tk.Register("multiply", calc, calc.Multiply, MultiplyParams{})
+	tk.Register("add", "Add two numbers", calc, calc.Add, AddParams{})
+	tk.Register("multiply", "Multiply two numbers", calc, calc.Multiply, MultiplyParams{})
 
 	// Tool call counter for demonstration
 	toolCallCount := 0
@@ -80,7 +80,7 @@ When asked to perform calculations, use the calculator tool.
 Always explain what you're calculating.`,
 		Tools:         []toolkit.Tool{&tk},
 		ShowToolsCall: true,
-		Debug:         true,
+		Debug:         false,
 
 		// Configure tool hooks
 		ToolBeforeHooks: []func(ctx context.Context, toolName string, args map[string]interface{}) error{

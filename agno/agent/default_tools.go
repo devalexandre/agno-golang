@@ -64,8 +64,8 @@ func NewReadChatHistoryTool(agent *Agent) toolkit.Tool {
 	tk.Name = "chat_history"
 	tk.Description = "Read conversation history from the current session"
 
-	tk.Register("read", rcht, rcht.ReadHistory, ReadHistoryParams{})
-	tk.Register("search", rcht, rcht.SearchHistory, SearchHistoryParams{})
+	tk.Register("ReadHistory", "Retrieve the full conversation history for the current session", rcht, rcht.ReadHistory, ReadHistoryParams{})
+	tk.Register("SearchHistory", "Search the conversation history for messages matching a query", rcht, rcht.SearchHistory, SearchHistoryParams{})
 
 	rcht.Toolkit = tk
 	return &tk
@@ -180,8 +180,8 @@ func NewUpdateKnowledgeTool(agent *Agent) toolkit.Tool {
 	tk.Name = "knowledge"
 	tk.Description = "Update and manage the knowledge base"
 
-	tk.Register("add", ukt, ukt.AddKnowledge, AddKnowledgeParams{})
-	tk.Register("search", ukt, ukt.SearchKnowledge, SearchKnowledgeParams{})
+	tk.Register("AddKnowledge", "Add a new piece of information to the knowledge base", ukt, ukt.AddKnowledge, AddKnowledgeParams{})
+	tk.Register("SearchKnowledge", "Search the knowledge base for relevant information", ukt, ukt.SearchKnowledge, SearchKnowledgeParams{})
 
 	ukt.Toolkit = tk
 	return &tk
@@ -259,11 +259,11 @@ func NewReadToolCallHistoryTool(agent *Agent) toolkit.Tool {
 	}
 
 	tk := toolkit.NewToolkit()
-	tk.Name = "tool_history"
+	tk.Name = "ToolHistory"
 	tk.Description = "Read history of tool calls made during the conversation"
 
-	tk.Register("read", rth, rth.ReadToolHistory, ReadToolHistoryParams{})
-	tk.Register("stats", rth, rth.GetToolStats, GetToolStatsParams{})
+	tk.Register("ReadToolHistory", "Retrieve the full history of tool calls from the current conversation", rth, rth.ReadToolHistory, ReadToolHistoryParams{})
+	tk.Register("GetToolStats", "Get usage statistics for tools called during the session", rth, rth.GetToolStats, GetToolStatsParams{})
 
 	rth.Toolkit = tk
 	return &tk
