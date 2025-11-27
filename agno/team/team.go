@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/agent"
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/storage"
@@ -42,7 +43,7 @@ type TeamConfig struct {
 	Description  string
 	Instructions []string
 	Model        models.AgnoModelInterface // Team leader model
-	Members      []TeamMember
+	Members      []*agent.Agent
 	Mode         TeamMode
 	Tools        []toolkit.Tool
 
@@ -107,8 +108,30 @@ type Team struct {
 	messages []models.Message
 }
 
+// AgentWrapper wraps an agent to implement the TeamMember interface
+type AgentWrapper struct {
+	agent *agent.Agent
+}
+
+func (aw *AgentWrapper) GetName() string {
+	return aw.agent.GetName()
+}
+
+func (aw *AgentWrapper) GetRole() string {
+	return aw.agent.GetRole()
+}
+
+func (aw *AgentWrapper) Run(prompt string) (models.RunResponse, error) {
+	return aw.agent.Run(prompt)
+}
+
+func (aw *AgentWrapper) RunStream(prompt string, fn func([]byte) error) error {
+	return aw.agent.RunStream(prompt, fn)
+}
+
 // NewTeam creates a new Team instance
 func NewTeam(config TeamConfig) *Team {
+	var members []TeamMember
 	// Set default mode if not specified
 	if config.Mode == "" {
 		config.Mode = CoordinateMode
@@ -118,6 +141,12 @@ func NewTeam(config TeamConfig) *Team {
 	config.Context = context.WithValue(config.Context, models.DebugKey, config.Debug)
 	config.Context = context.WithValue(config.Context, models.ShowToolsCallKey, config.ShowToolCalls)
 
+	// create agent using wrapper for team members if needed
+	for i, member := range config.Members {
+		members = append(members, &AgentWrapper{agent: member})
+		config.Members[i] = member
+	}
+
 	team := &Team{
 		ctx:          config.Context,
 		name:         config.Name,
@@ -125,7 +154,7 @@ func NewTeam(config TeamConfig) *Team {
 		description:  config.Description,
 		instructions: config.Instructions,
 		model:        config.Model,
-		members:      config.Members,
+		members:      members,
 		mode:         config.Mode,
 		tools:        config.Tools,
 
