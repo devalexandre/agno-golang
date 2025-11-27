@@ -12,27 +12,6 @@ import (
 	"github.com/devalexandre/agno-golang/agno/team"
 )
 
-// AgentWrapper wraps an agent to implement the TeamMember interface
-type AgentWrapper struct {
-	agent *agent.Agent
-}
-
-func (aw *AgentWrapper) GetName() string {
-	return aw.agent.GetName()
-}
-
-func (aw *AgentWrapper) GetRole() string {
-	return aw.agent.GetRole()
-}
-
-func (aw *AgentWrapper) Run(prompt string) (models.RunResponse, error) {
-	return aw.agent.Run(prompt)
-}
-
-func (aw *AgentWrapper) RunStream(prompt string, fn func([]byte) error) error {
-	return aw.agent.RunStream(prompt, fn)
-}
-
 func main() {
 	ctx := context.Background()
 
@@ -49,7 +28,7 @@ func main() {
 	// 1. Create Ollama Cloud model
 	fmt.Println("🤖 Setting up Ollama Cloud model...")
 	ollamaModel, err := ollama.NewOllamaChat(
-		models.WithID("kimi-k2:1t-cloud"),
+		models.WithID("deepseek-v3.1:671b-cloud"),
 		models.WithBaseURL("https://ollama.com"),
 		models.WithAPIKey(apiKey),
 	)
@@ -122,9 +101,9 @@ Be thorough but supportive in your reviews.`,
 	fmt.Println("✅ Editor created")
 
 	// 3. Create agent wrappers for team compatibility
-	researchMember := &AgentWrapper{agent: researchAgent}
-	writerMember := &AgentWrapper{agent: writerAgent}
-	editorMember := &AgentWrapper{agent: editorAgent}
+	// researchMember := &AgentWrapper{agent: researchAgent}
+	// writerMember := &AgentWrapper{agent: writerAgent}
+	// editorMember := &AgentWrapper{agent: editorAgent}
 
 	// 4. Create the team
 	fmt.Println("\n🎯 Creating collaborative team...")
@@ -133,7 +112,7 @@ Be thorough but supportive in your reviews.`,
 		Name:        "Content Creation Team",
 		Description: "A team specialized in creating high-quality content",
 		Model:       ollamaModel,
-		Members:     []team.TeamMember{researchMember, writerMember, editorMember},
+		Members:     []*agent.Agent{researchAgent, writerAgent, editorAgent},
 		Mode:        team.CoordinateMode,
 		Debug:       false,
 		Markdown:    false,
