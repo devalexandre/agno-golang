@@ -1781,6 +1781,7 @@ func (a *Agent) PrintResponse(prompt string, stream bool, markdown bool) {
 	fmt.Println("Running agent  stream:", stream, "markdown:", markdown)
 	a.stream = stream
 	a.markdown = markdown
+	utils.SetMarkdownMode(markdown)
 	if stream {
 		a.print_stream_response(prompt, markdown)
 	} else {
@@ -1834,10 +1835,8 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	// Thinking
 	spinnerResponse := utils.ThinkingPanel(prompt)
 	contentChan := utils.StartSimplePanel(spinnerResponse, start, markdown)
-	defer close(contentChan)
 
 	// Response
-	responseTile := fmt.Sprintf("Response (%.1fs)\n\n", time.Since(start).Seconds())
 	fullResponse := ""
 	var streamBuffer string // Mover para fora do callback
 	showResponse := false
@@ -1845,10 +1844,6 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 		models.WithTools(a.tools),
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			if !showResponse {
-				contentChan <- utils.ContentUpdateMsg{
-					PanelName: "Response",
-					Content:   responseTile,
-				}
 				showResponse = true
 			}
 
@@ -1897,6 +1892,20 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 			Content:   streamBuffer,
 		}
 	}
+
+	// Close channel to stop the streaming goroutine
+	close(contentChan)
+	// We wait a bit to ensure streaming output is finished
+	time.Sleep(100 * time.Millisecond)
+
+	// Since StartSimplePanel now handles the panel rendering and clearing,
+	// we don't need to do manual clearing or print the final panel here.
+	// However, we might want to ensure the final state is consistent.
+	// But StartSimplePanel runs in a goroutine that consumes the channel.
+	// When we close the channel, the loop finishes.
+
+	// If we want to guarantee the final panel is printed by the goroutine,
+	// we just need to ensure all content was sent.
 }
 
 // filterToolCallsFromHistory filters the tool calls from message history based on maxToolCallsFromHistory

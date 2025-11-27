@@ -2,11 +2,10 @@ package utils
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
-	mkdown "github.com/MichaelMure/go-term-markdown"
-	"github.com/pterm/pterm"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/devalexandre/agno-golang/agno/utils/terminal"
 )
 
 // MessageType for dynamic messages
@@ -28,229 +27,158 @@ type ContentUpdateMsg struct {
 	Content   string
 }
 
-// StartSimplePanel starts the simple printing loop
-func StartSimplePanel(spinner *pterm.SpinnerPrinter, start time.Time, markdown bool) chan<- ContentUpdateMsg {
-	contentChan := make(chan ContentUpdateMsg)
+// Global renderer instance
+var globalRenderer *terminal.PanelRenderer
+
+// init initializes the global renderer
+func init() {
+	width := terminal.GetTerminalWidth()
+	globalRenderer = terminal.NewRenderer(width, false)
+}
+
+// GetRenderer returns the global renderer instance
+func GetRenderer() *terminal.PanelRenderer {
+	return globalRenderer
+}
+
+// SetMarkdownMode enables or disables markdown rendering
+func SetMarkdownMode(enabled bool) {
+	width := terminal.GetTerminalWidth()
+	globalRenderer = terminal.NewRenderer(width, enabled)
+}
+
+// ThinkingPanel displays a thinking panel and returns nil (for compatibility)
+func ThinkingPanel(content string) interface{} {
+	panel := globalRenderer.RenderThinking(content)
+	fmt.Println(panel)
+	return nil // Return nil for compatibility with old spinner interface
+}
+
+// ResponsePanel displays a response panel with timing
+func ResponsePanel(content string, sp interface{}, start time.Time, markdown bool) {
+	duration := time.Since(start).Seconds()
+
+	// Update renderer if markdown setting changed
+	if markdown != globalRenderer.Markdown {
+		width := terminal.GetTerminalWidth()
+		globalRenderer = terminal.NewRenderer(width, markdown)
+	}
+
+	panel := globalRenderer.RenderResponse(content, duration)
+	fmt.Println(panel)
+}
+
+// ToolCallPanel displays a tool call panel
+func ToolCallPanel(content string) {
+	panel := globalRenderer.RenderToolCallSimple(content)
+	fmt.Println(panel)
+}
+
+// ToolCallPanelWithArgs displays a tool call panel with structured arguments
+func ToolCallPanelWithArgs(toolName string, args interface{}) {
+	panel := globalRenderer.RenderToolCall(toolName, args)
+	fmt.Println(panel)
+}
+
+// DebugPanel displays a debug panel
+func DebugPanel(content string) {
+	panel := globalRenderer.RenderDebug(content)
+	fmt.Println(panel)
+}
+
+// ErrorPanel displays an error panel
+func ErrorPanel(err error) {
+	panel := globalRenderer.RenderError(err)
+	fmt.Println(panel)
+}
+
+// SuccessPanel displays a success panel
+func SuccessPanel(content string) {
+	panel := globalRenderer.RenderSuccess(content)
+	fmt.Println(panel)
+}
+
+// WarningPanel displays a warning panel
+func WarningPanel(content string) {
+	panel := globalRenderer.RenderWarning(content)
+	fmt.Println(panel)
+}
+
+// InfoPanel displays an info panel
+func InfoPanel(content string) {
+	panel := globalRenderer.RenderInfo(content)
+	fmt.Println(panel)
+}
+
+// ReasoningPanel displays a reasoning panel
+func ReasoningPanel(content string) {
+	panel := globalRenderer.RenderCustom("💭", "Reasoning...", content, terminal.WarningColor)
+	fmt.Println(panel)
+}
+
+// StartSimplePanel starts a simple streaming panel
+// Returns a channel to send content updates
+func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- ContentUpdateMsg {
+	contentChan := make(chan ContentUpdateMsg, 10)
+
+	// Update renderer if markdown setting changed
+	if markdown != globalRenderer.Markdown {
+		width := terminal.GetTerminalWidth()
+		globalRenderer = terminal.NewRenderer(width, markdown)
+	}
 
 	go func() {
+		var responseAccumulator string
+		var lastHeight int
+
 		for update := range contentChan {
-			printPanel(update.PanelName, update.Content, spinner, start, markdown)
+			if update.PanelName == MessageResponse {
+				responseAccumulator += update.Content
+
+				// Calculate height of previous print to clear
+				if lastHeight > 0 {
+					fmt.Printf("\033[%dA", lastHeight) // Move up
+					fmt.Print("\033[J")                // Clear below
+				}
+
+				// Render new panel
+				duration := time.Since(start).Seconds()
+				panel := globalRenderer.RenderResponse(responseAccumulator, duration)
+
+				fmt.Print(panel)
+				fmt.Println() // Add newline for visual separation
+
+				// Calculate new height (including the extra newline)
+				lastHeight = lipgloss.Height(panel) + 1
+			} else {
+				printPanel(update.PanelName, update.Content, sp, start, markdown)
+			}
 		}
 	}()
 
 	return contentChan
 }
 
-// thinking
-func ThinkingPanel(content string) *pterm.SpinnerPrinter {
-	paddedBox := pterm.DefaultBox.
-		WithLeftPadding(4).
-		WithRightPadding(4).
-		WithTopPadding(1).
-		WithBottomPadding(1)
-
-	// Set the box title
-	title := pterm.LightGreen("Thinking...")
-	paddedBox.
-		WithTitle(title).
-		WithTextStyle(pterm.NewStyle(pterm.FgGreen)).
-		Println(content)
-
-	spinnerResponse, _ := pterm.DefaultSpinner.
-		WithWriter(paddedBox.Writer).
-		Start("Loading...")
-
-	return spinnerResponse
-
-}
-
-// Reasoning Panel Yellow
-func ReasoningPanel(content string) {
-	// Get terminal width to prevent overflow
-	terminalWidth := pterm.GetTerminalWidth()
-
-	// Ensure minimum width to prevent negative calculations
-	if terminalWidth < 30 {
-		terminalWidth = 80 // Default fallback
-	}
-
-	// Use a fixed width that works well for most terminals
-	panelWidth := 75
-	if terminalWidth < panelWidth {
-		panelWidth = terminalWidth - 4
-	}
-
-	// Calculate available content width (account for borders and padding)
-	maxContentWidth := panelWidth - 4 // "│ " + " │"
-
-	// Process content lines
-	lines := strings.Split(content, "\n")
-	var processedLines []string
-
-	for _, line := range lines {
-		if len(line) == 0 {
-			processedLines = append(processedLines, "")
-			continue
-		}
-
-		// Wrap long lines
-		for len(line) > maxContentWidth {
-			processedLines = append(processedLines, line[:maxContentWidth])
-			line = line[maxContentWidth:]
-		}
-		if len(line) > 0 {
-			processedLines = append(processedLines, line)
-		}
-	}
-
-	// Create borders with fixed width
-	title := " Reasoning... "
-	titleLen := len(title)
-	remainingWidth := panelWidth - titleLen - 4 // 4 for "┌─" and "─┐"
-	if remainingWidth < 0 {
-		remainingWidth = 0
-	}
-
-	leftPadding := remainingWidth / 2
-	rightPadding := remainingWidth - leftPadding
-
-	topBorder := "┌─" + strings.Repeat("─", leftPadding) + title + strings.Repeat("─", rightPadding) + "─┐"
-	bottomBorder := "└" + strings.Repeat("─", panelWidth-2) + "┘"
-
-	// Print the panel
-	fmt.Printf("\n%s\n", pterm.LightYellow(topBorder))
-
-	// Add empty line for spacing
-	emptyPadding := strings.Repeat(" ", maxContentWidth)
-	fmt.Printf("%s %s %s\n", pterm.LightYellow("│"), emptyPadding, pterm.LightYellow("│"))
-
-	for _, line := range processedLines {
-		fmt.Println(line)
-		// Pad line to fit exactly within borders
-		padding := maxContentWidth - len(line)
-		if padding < 0 {
-			padding = 0
-			line = line[:maxContentWidth]
-		}
-		fmt.Printf("%s %s%s %s\n",
-			pterm.LightYellow("│"),
-			line,
-			strings.Repeat(" ", padding),
-			pterm.LightYellow("│"))
-	}
-
-	// Add empty line for spacing
-	fmt.Printf("%s %s %s\n", pterm.LightYellow("│"), emptyPadding, pterm.LightYellow("│"))
-
-	fmt.Printf("%s\n\n", pterm.LightYellow(bottomBorder))
-}
-
-// Debug Panel
-func DebugPanel(content string) {
-	paddedBox := pterm.DefaultBox.
-		WithLeftPadding(4).
-		WithRightPadding(4).
-		WithTopPadding(1).
-		WithBottomPadding(1)
-
-	// Set the box title
-	title := pterm.LightYellow("Debug...")
-	paddedBox.
-		WithTitle(title).
-		Println(content)
-}
-
-// tools Panel
-func ToolCallPanel(content string) {
-	// Avoid panic when content is too small for pterm box
-	if len(content) < 3 {
-		content = "   " + content + "   "
-	}
-	
-	paddedBox := pterm.DefaultBox.
-		WithLeftPadding(4).
-		WithRightPadding(4).
-		WithTopPadding(1).
-		WithBottomPadding(1)
-
-	// Set the box title
-	title := pterm.LightCyan("Tool Call...")
-	paddedBox.
-		WithTitle(title).
-		Println(content)
-}
-
-// response panel
-func ResponsePanel(content string, sp *pterm.SpinnerPrinter, start time.Time, markdown bool) {
-	sp.Stop()
-	res := pterm.LightBlue(fmt.Sprintf("Response (%.1fs)\n\n", time.Since(start).Seconds()))
-	if markdown {
-		content = string(mkdown.Render(content, 100, 0))
-	}
-	res += content
-
-	// Print the final result instead of just updating spinner text
-	fmt.Println(res)
-}
-
-// printPanel prints a panel using pterm
-func printPanel(panelName MessageType, content string, spinnerResponse *pterm.SpinnerPrinter, stime time.Time, markdown bool) {
-	paddedBox := pterm.DefaultBox.
-		WithLeftPadding(4).
-		WithRightPadding(4).
-		WithTopPadding(1).
-		WithBottomPadding(1)
-
+// printPanel prints a panel based on its type
+func printPanel(panelName MessageType, content string, sp interface{}, start time.Time, markdown bool) {
 	switch panelName {
 	case MessageError:
-		title := pterm.LightRed("Error...")
-		paddedBox.
-			WithTitle(title).
-			WithTextStyle(pterm.NewStyle(pterm.FgRed))
-		spinnerResponse.WithWriter(paddedBox.Writer)
-		spinnerResponse.UpdateText(content)
-
+		ErrorPanel(fmt.Errorf("%s", content))
 	case MessageWarning:
-		title := pterm.LightYellow("Warning...")
-		paddedBox.
-			WithTitle(title).
-			WithTextStyle(pterm.NewStyle(pterm.FgYellow))
-		spinnerResponse.WithWriter(paddedBox.Writer)
-		spinnerResponse.UpdateText(content)
-
+		WarningPanel(content)
 	case MessageDebug:
-		title := pterm.LightBlue("Debug...")
-		paddedBox.
-			WithTitle(title).
-			WithBoxStyle(pterm.Debug.MessageStyle)
-		spinnerResponse.WithWriter(paddedBox.Writer)
-		spinnerResponse.UpdateText(content)
-
+		DebugPanel(content)
 	case MessageSystem:
-		title := pterm.LightMagenta("System...")
-		paddedBox.
-			WithTitle(title).
-			WithTextStyle(pterm.NewStyle(pterm.FgMagenta))
-		spinnerResponse.WithWriter(paddedBox.Writer)
-		spinnerResponse.UpdateText(content)
-
+		InfoPanel(content)
 	case MessageToolCall:
-		title := pterm.LightCyan("Tool Call...")
-		paddedBox.
-			WithTitle(title).
-			WithTextStyle(pterm.NewStyle(pterm.FgCyan))
-		spinnerResponse.WithWriter(paddedBox.Writer)
-		spinnerResponse.UpdateText(content)
+		ToolCallPanel(content)
 	case MessageResponse:
-		if markdown {
-			content = string(mkdown.Render(content, 100, 0))
-		}
-
-		spinnerResponse.Stop()
-		paddedBox.
-			WithTextStyle(pterm.NewStyle(pterm.FgLightBlue))
-		spinnerResponse.WithWriter(paddedBox.Writer)
-		spinnerResponse.UpdateText(content)
-
+		// For streaming, just print the content directly
+		fmt.Print(content)
+	case MessageThinking:
+		ThinkingPanel(content)
+	default:
+		// Default to info panel
+		fmt.Println(globalRenderer.RenderCustom("ℹ", string(panelName), content, terminal.InfoColor))
 	}
 }
