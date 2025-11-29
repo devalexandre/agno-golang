@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
+
+	"github.com/devalexandre/agno-golang/agno/utils"
 )
 
 // RunStatus represents the status of a workflow run
@@ -119,6 +122,12 @@ type Workflow struct {
 	StoreEvents  bool
 	EventsToSkip []WorkflowRunEvent
 
+	// Input validation
+	InputSchema interface{}
+
+	// WebSocket streaming
+	WebSocketHandler WebSocketHandler
+
 	// Internal state
 	mu            sync.RWMutex
 	stepOutputs   map[string]*StepOutput
@@ -229,8 +238,27 @@ func WithEventStorage(store bool, skip ...WorkflowRunEvent) WorkflowOption {
 	}
 }
 
+// WithInputSchema sets the input schema for validation
+func WithInputSchema(schema interface{}) WorkflowOption {
+	return func(w *Workflow) {
+		w.InputSchema = schema
+	}
+}
+
+// WithWebSocketHandler sets the WebSocket handler for real-time event streaming
+func WithWebSocketHandler(handler WebSocketHandler) WorkflowOption {
+	return func(w *Workflow) {
+		w.WebSocketHandler = handler
+	}
+}
+
 // Run executes the workflow with the given input
 func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResponse, error) {
+	// Validate input if schema is configured
+	if err := w.validateInput(input); err != nil {
+		return nil, fmt.Errorf("input validation failed: %w", err)
+	}
+
 	// Initialize run
 	w.RunID = GenerateID()
 	w.metrics.RunID = w.RunID
@@ -648,15 +676,6 @@ func (w *Workflow) emitEvent(event *WorkflowRunResponseEvent) {
 		}
 	}
 
-	// Call registered handlers
-	w.mu.RLock()
-	handlers := w.eventHandlers[event.Event]
-	w.mu.RUnlock()
-
-	for _, handler := range handlers {
-		handler(event)
-	}
-
 	// Store event if configured
 	if w.StoreEvents {
 		// TODO: Implement event storage
@@ -721,6 +740,64 @@ func (w *Workflow) GetStepOutput(stepName string) *StepOutput {
 	return w.stepOutputs[stepName]
 }
 
+// validateInput validates the input against the InputSchema if configured
+func (w *Workflow) validateInput(input interface{}) error {
+	if w.InputSchema == nil {
+		return nil
+	}
+
+	// Get the schema type
+	schemaType := reflect.TypeOf(w.InputSchema)
+	if schemaType == nil {
+		return fmt.Errorf("input schema is nil")
+	}
+
+	// Handle pointer types
+	if schemaType.Kind() == reflect.Ptr {
+		schemaType = schemaType.Elem()
+	}
+
+	// Get the input type
+	inputType := reflect.TypeOf(input)
+	if inputType == nil {
+		return fmt.Errorf("input is nil, expected %s", schemaType.Name())
+	}
+
+	// Handle pointer types in input
+	if inputType.Kind() == reflect.Ptr {
+		inputType = inputType.Elem()
+	}
+
+	// Check if types match
+	if inputType != schemaType {
+		return fmt.Errorf("input type mismatch: expected %s, got %s", schemaType.Name(), inputType.Name())
+	}
+
+	// If input is a struct, validate required fields
+	if schemaType.Kind() == reflect.Struct {
+		inputValue := reflect.ValueOf(input)
+		if inputValue.Kind() == reflect.Ptr {
+			inputValue = inputValue.Elem()
+		}
+
+		// Iterate through struct fields
+		for i := 0; i < schemaType.NumField(); i++ {
+			field := schemaType.Field(i)
+			fieldValue := inputValue.Field(i)
+
+			// Check for required tag
+			if tag := field.Tag.Get("validate"); tag == "required" {
+				// Check if field is zero value
+				if fieldValue.IsZero() {
+					return fmt.Errorf("required field '%s' is missing or zero", field.Name)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // GetMetrics returns the workflow metrics
 func (w *Workflow) GetMetrics() *WorkflowMetrics {
 	w.mu.RLock()
@@ -730,29 +807,135 @@ func (w *Workflow) GetMetrics() *WorkflowMetrics {
 
 // PrintResponse prints the workflow response in a formatted way
 func (w *Workflow) PrintResponse(input interface{}, markdown bool) {
-	ctx := context.Background()
-	response, err := w.Run(ctx, input)
+	utils.SetMarkdownMode(markdown)
 
+	if w.Stream {
+		w.printStreamingResponse(input, markdown)
+	} else {
+		w.printStaticResponse(input, markdown)
+	}
+}
+
+// printStaticResponse prints a static workflow response
+func (w *Workflow) printStaticResponse(input interface{}, markdown bool) {
+	start := time.Now()
+	ctx := context.Background()
+
+	// Thinking panel
+	spinnerResponse := utils.ThinkingPanel("Executing workflow...")
+
+	response, err := w.Run(ctx, input)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		utils.ErrorPanel(err)
 		return
 	}
 
-	if markdown {
-		fmt.Println("```")
-	}
-
+	// Response panel
+	content := ""
 	if response.Content != nil {
 		switch v := response.Content.(type) {
 		case string:
-			fmt.Println(v)
+			content = v
 		default:
-			data, _ := json.MarshalIndent(v, "", "  ")
-			fmt.Println(string(data))
+			// Try to extract text content from complex objects
+			if contentMap, ok := v.(map[string]interface{}); ok {
+				if textContent, exists := contentMap["text_content"]; exists {
+					if textStr, ok := textContent.(string); ok {
+						content = textStr
+					} else {
+						content = fmt.Sprintf("%v", textContent)
+					}
+				} else if parsedOutput, exists := contentMap["parsed_output"]; exists {
+					if parsedStr, ok := parsedOutput.(string); ok {
+						content = parsedStr
+					} else {
+						content = fmt.Sprintf("%v", parsedOutput)
+					}
+				} else {
+					// Fallback: try to find any string field
+					for _, value := range contentMap {
+						if strValue, ok := value.(string); ok && len(strValue) > 10 {
+							content = strValue
+							break
+						}
+					}
+					if content == "" {
+						data, _ := json.MarshalIndent(v, "", "  ")
+						content = string(data)
+					}
+				}
+			} else {
+				content = fmt.Sprintf("%v", v)
+			}
 		}
 	}
 
-	if markdown {
-		fmt.Println("```")
+	utils.ResponsePanel(content, spinnerResponse, start, markdown)
+}
+
+// printStreamingResponse prints a streaming workflow response
+func (w *Workflow) printStreamingResponse(input interface{}, markdown bool) {
+	start := time.Now()
+	ctx := context.Background()
+
+	// Thinking panel
+	spinnerResponse := utils.ThinkingPanel("Executing workflow...")
+
+	// Start streaming panel
+	contentChan := utils.StartSimplePanel(spinnerResponse, start, markdown)
+
+	// Register event handlers for streaming
+	w.OnEvent(StepCompletedEvent, func(event *WorkflowRunResponseEvent) {
+		if event.Data != nil {
+			stepOutput, ok := event.Data.(*StepOutput)
+			if ok && stepOutput.Content != nil {
+				var content string
+				switch v := stepOutput.Content.(type) {
+				case string:
+					content = v
+				default:
+					data, _ := json.Marshal(v)
+					content = string(data)
+				}
+
+				contentChan <- utils.ContentUpdateMsg{
+					PanelName: utils.MessageResponse,
+					Content:   content,
+				}
+			}
+		}
+	})
+
+	// Run workflow
+	response, err := w.Run(ctx, input)
+	if err != nil {
+		contentChan <- utils.ContentUpdateMsg{
+			PanelName: utils.MessageError,
+			Content:   err.Error(),
+		}
+		close(contentChan)
+		return
 	}
+
+	// Send final response if not already streamed
+	if response.Content != nil && !w.StreamIntermediateSteps {
+		var content string
+		switch v := response.Content.(type) {
+		case string:
+			content = v
+		default:
+			data, _ := json.MarshalIndent(v, "", "  ")
+			content = string(data)
+		}
+
+		contentChan <- utils.ContentUpdateMsg{
+			PanelName: utils.MessageResponse,
+			Content:   content,
+		}
+	}
+
+	close(contentChan)
+
+	// Small delay to ensure final rendering
+	time.Sleep(100 * time.Millisecond)
 }
