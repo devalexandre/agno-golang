@@ -58,6 +58,7 @@ func NewShellTool() *ShellTool {
 	st.Toolkit.Register("Execute", "Execute shell commands", st, st.Execute, ExecuteParams{})
 	st.Toolkit.Register("SystemInfo", "Get system information", st, st.GetSystemInfo, SystemInfoParams{})
 	st.Toolkit.Register("ListFiles", "List files in current directory", st, st.ListFiles, struct{}{})
+	st.Toolkit.Register("ListProcesses", "List running processes", st, st.ListProcesses, struct{}{})
 	st.Toolkit.Register("GetCurrentDirectory", "Get current working directory", st, st.GetCurrentDirectory, struct{}{})
 	st.Toolkit.Register("ChangeDirectory", "Change current directory", st, st.ChangeDirectory, struct {
 		Path string `json:"path" description:"Directory path to change to" required:"true"`
@@ -68,19 +69,26 @@ func NewShellTool() *ShellTool {
 
 // Execute implements the toolkit.Tool interface
 func (st *ShellTool) Execute(action string, params json.RawMessage) (interface{}, error) {
-	switch action {
+	// Remove tool prefix if present (e.g., "ShellTool_Execute" -> "Execute")
+	// This allows the toolkit to register methods with prefixes while keeping
+	// the switch statement clean and handling both formats
+	methodName := strings.TrimPrefix(action, st.Name+"_")
+
+	switch methodName {
 	case "Execute":
 		var executeParams ExecuteParams
 		if err := json.Unmarshal(params, &executeParams); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters: %w", err)
 		}
 		return st.executeCommand(executeParams)
-	case "GetSystemInfo":
+	case "SystemInfo":
 		var sysParams SystemInfoParams
 		if err := json.Unmarshal(params, &sysParams); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters: %w", err)
 		}
 		return st.GetSystemInfo(sysParams)
+	case "ListFiles":
+		return st.ListFiles(struct{}{})
 	case "ListProcesses":
 		return st.ListProcesses(struct{}{})
 	case "GetCurrentDirectory":
@@ -96,7 +104,7 @@ func (st *ShellTool) Execute(action string, params json.RawMessage) (interface{}
 			Path string `json:"path" description:"Directory path to change to" required:"true"`
 		}{Path: dirParams.Path})
 	default:
-		return nil, fmt.Errorf("unknown action: %s", action)
+		return nil, fmt.Errorf("unknown action: %s (available: Execute, SystemInfo, ListFiles, ListProcesses, GetCurrentDirectory, ChangeDirectory)", action)
 	}
 }
 
