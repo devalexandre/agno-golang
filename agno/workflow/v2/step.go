@@ -4,7 +4,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
+
+	"github.com/devalexandre/agno-golang/agno/agent"
+	"github.com/devalexandre/agno-golang/agno/models"
 )
 
 // StepExecutor represents any type that can execute a step
@@ -28,6 +32,7 @@ type Step struct {
 	TimeoutSeconds        int
 	SkipOnFailure         bool
 	StrictInputValidation bool
+	Stream                bool
 
 	// Internal state
 	activeExecutor StepExecutor
@@ -37,13 +42,13 @@ type Step struct {
 
 // Agent interface (should be imported from agent package)
 type Agent interface {
-	Run(ctx context.Context, message string, options ...interface{}) (interface{}, error)
+	Run(input interface{}, opts ...interface{}) (models.RunResponse, error)
 	GetName() string
 }
 
 // Team interface (should be imported from team package)
 type Team interface {
-	Run(ctx context.Context, message string, options ...interface{}) (interface{}, error)
+	Run(prompt string) (models.RunResponse, error)
 	GetName() string
 }
 
@@ -140,6 +145,13 @@ func WithStrictValidation(strict bool) StepOption {
 	}
 }
 
+// WithStepStreaming enables streaming response
+func WithStepStreaming(stream bool) StepOption {
+	return func(s *Step) {
+		s.Stream = stream
+	}
+}
+
 // GetExecutorName returns the name of the current executor
 func (s *Step) GetExecutorName() string {
 	switch s.executorType {
@@ -203,7 +215,7 @@ func (s *Step) validateExecutorConfig() error {
 // setActiveExecutor sets the active executor based on what was provided
 func (s *Step) setActiveExecutor() {
 	if s.Agent != nil {
-		s.activeExecutor = &agentExecutor{agent: s.Agent}
+		s.activeExecutor = &agentExecutor{agent: s.Agent, stream: s.Stream}
 		s.executorType = "agent"
 	} else if s.Team != nil {
 		s.activeExecutor = &teamExecutor{team: s.Team}
@@ -316,9 +328,60 @@ func (s *Step) validateInput(input *StepInput) error {
 
 // Executor adapters
 
+// extractContentFromRunResponse extracts readable text content from a RunResponse
+// This prevents JSON serialization of the entire response object
+func extractContentFromRunResponse(response models.RunResponse) string {
+	// Priority 1: Use TextContent field (primary text output)
+	if response.TextContent != "" {
+		return response.TextContent
+	}
+
+	// Priority 2: Join all messages
+	var textParts []string
+	for _, msg := range response.Messages {
+		if msg.Content != "" {
+			textParts = append(textParts, msg.Content)
+		}
+	}
+	if len(textParts) > 0 {
+		return strings.Join(textParts, "\n\n")
+	}
+
+	// Priority 3: Check Output field
+	if response.Output != nil {
+		if strVal, ok := response.Output.(string); ok && strVal != "" {
+			return strVal
+		}
+		// Try to extract from map
+		if contentMap, ok := response.Output.(map[string]interface{}); ok {
+			for _, fieldName := range []string{"text", "content", "message", "output", "result"} {
+				if val, exists := contentMap[fieldName]; exists {
+					if strVal, ok := val.(string); ok && strVal != "" {
+						return strVal
+					}
+				}
+			}
+		}
+		// Fallback to string representation of Output
+		return fmt.Sprintf("%v", response.Output)
+	}
+
+	// Priority 4: Check ParsedOutput (deprecated but might still be used)
+	if response.ParsedOutput != nil {
+		if strVal, ok := response.ParsedOutput.(string); ok && strVal != "" {
+			return strVal
+		}
+		return fmt.Sprintf("%v", response.ParsedOutput)
+	}
+
+	// Last resort: empty string
+	return ""
+}
+
 // agentExecutor adapts an Agent to the StepExecutor interface
 type agentExecutor struct {
-	agent Agent
+	agent  Agent
+	stream bool
 }
 
 func (e *agentExecutor) Execute(ctx context.Context, input *StepInput) (*StepOutput, error) {
@@ -327,13 +390,26 @@ func (e *agentExecutor) Execute(ctx context.Context, input *StepInput) (*StepOut
 		message = fmt.Sprintf("%v", input.PreviousStepContent)
 	}
 
-	result, err := e.agent.Run(ctx, message)
+	var result models.RunResponse
+	var err error
+
+	if e.stream {
+		result, err = e.agent.Run(message, agent.WithStream(true))
+	} else {
+		result, err = e.agent.Run(message)
+	}
 	if err != nil {
 		return nil, err
 	}
 
+	// Extract readable text content from RunResponse
+	content := extractContentFromRunResponse(result)
+
 	return &StepOutput{
-		Content: result,
+		Content: content,
+		Metadata: map[string]interface{}{
+			"model": result.Model,
+		},
 	}, nil
 }
 
@@ -348,13 +424,19 @@ func (e *teamExecutor) Execute(ctx context.Context, input *StepInput) (*StepOutp
 		message = fmt.Sprintf("%v", input.PreviousStepContent)
 	}
 
-	result, err := e.team.Run(ctx, message)
+	result, err := e.team.Run(message)
 	if err != nil {
 		return nil, err
 	}
 
+	// Extract readable text content from RunResponse
+	content := extractContentFromRunResponse(result)
+
 	return &StepOutput{
-		Content: result,
+		Content: content,
+		Metadata: map[string]interface{}{
+			"model": result.Model,
+		},
 	}, nil
 }
 
