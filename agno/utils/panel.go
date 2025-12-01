@@ -25,6 +25,8 @@ const (
 type ContentUpdateMsg struct {
 	PanelName MessageType
 	Content   string
+	AgentName string // Name of the agent producing this content
+	Color     string // Color code for the panel (e.g., "cyan", "green", "yellow", "magenta")
 }
 
 // Global renderer instance
@@ -131,14 +133,29 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 		var responseAccumulator string
 		var panelHeight int
 		isFirstUpdate := true
+		var lastAgentName string
 
 		for update := range contentChan {
 			if update.PanelName == MessageResponse {
 				responseAccumulator += update.Content
 
+				// Check if agent changed to print header
+				if update.AgentName != "" && update.AgentName != lastAgentName {
+					if lastAgentName != "" && panelHeight > 0 {
+						// Print newline to separate agents
+						fmt.Println()
+					}
+					// Print agent header with color
+					fmt.Printf("\n▼ %s\n", formatAgentHeader(update.AgentName, update.Color))
+					lastAgentName = update.AgentName
+					isFirstUpdate = true
+					panelHeight = 0
+				}
+
 				// Render the updated content to get the new panel
 				duration := time.Since(start).Seconds()
-				panel := globalRenderer.RenderResponse(responseAccumulator, duration)
+				agentContent := update.Content
+				panel := renderAgentResponse(agentContent, duration, update.Color)
 				newLines := strings.Split(panel, "\n")
 
 				if isFirstUpdate {
@@ -147,29 +164,8 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 					panelHeight = len(newLines)
 					isFirstUpdate = false
 				} else {
-					// Subsequent updates - clear and redraw in place
-					// Move cursor up to the start of the panel
-					if panelHeight > 0 {
-						fmt.Printf("\033[%dA", panelHeight)
-					}
-
-					// Clear the entire panel area line by line
-					for i := 0; i < panelHeight; i++ {
-						fmt.Print("\033[K") // Clear current line
-						if i < panelHeight-1 {
-							fmt.Print("\033[B") // Move down one line
-						}
-					}
-
-					// Move back to the start position
-					if panelHeight > 1 {
-						fmt.Printf("\033[%dA", panelHeight-1)
-					}
-
-					// Print the updated panel
-					fmt.Print(panel)
-
-					// Update panel height for next update
+					// Subsequent updates - just append new content
+					fmt.Print(update.Content)
 					panelHeight = len(newLines)
 				}
 			} else {
@@ -188,6 +184,41 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 	}()
 
 	return contentChan
+}
+
+// formatAgentHeader formats the agent name with color for professional display
+func formatAgentHeader(agentName string, color string) string {
+	colorCode := getColorCode(color)
+	resetCode := "\033[0m"
+	return fmt.Sprintf("%s🤖 %s%s", colorCode, agentName, resetCode)
+}
+
+// getColorCode returns ANSI color code for the specified color
+func getColorCode(color string) string {
+	switch color {
+	case "cyan":
+		return "\033[36m"
+	case "blue":
+		return "\033[34m"
+	case "green":
+		return "\033[32m"
+	case "yellow":
+		return "\033[33m"
+	case "magenta":
+		return "\033[35m"
+	case "red":
+		return "\033[31m"
+	case "white":
+		return "\033[37m"
+	default:
+		return "\033[37m"
+	}
+}
+
+// renderAgentResponse renders content with agent-specific formatting and markdown support
+func renderAgentResponse(content string, duration float64, color string) string {
+	// Apply markdown rendering if enabled
+	return globalRenderer.RenderMarkdown(content)
 }
 
 // printPanel prints a panel based on its type
