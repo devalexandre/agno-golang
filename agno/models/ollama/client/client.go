@@ -74,7 +74,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 	if showToolsCall != nil && showToolsCall.(bool) {
 		toolsJosn, _ := json.MarshalIndent(_tools, "", "  ")
-		fmt.Printf("🛠️  Tools: %s\n", string(toolsJosn))
+		utils.ToolCallPanel(string(toolsJosn))
 	}
 
 	var responseTools []api.Message
@@ -252,7 +252,6 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {
 	// Get debug and tools flags from context
-	debugmod := ctx.Value(models.DebugKey)
 	showToolsCall := ctx.Value(models.ShowToolsCallKey)
 	var msgs []api.Message
 
@@ -365,38 +364,14 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 		}
 	}
 
-	var buffer strings.Builder
-	//lastFlush := time.Now()
-	req.Tools = nil
-	if debugmod != nil && debugmod.(bool) {
-		jsonDebugReq, _ := json.MarshalIndent(req, "", "  ")
-		utils.DebugPanel(string(jsonDebugReq))
-	}
-
 	err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
-
 		if resp.Message.Content != "" {
-			buffer.WriteString(resp.Message.Content)
-			if stopSentence(resp.Message.Content) {
-				callOptions.StreamingFunc(ctx, []byte(buffer.String()))
-				buffer.Reset()
-				//	lastFlush = time.Now()
-
-				fmt.Println(buffer.String())
+			if err := callOptions.StreamingFunc(ctx, []byte(resp.Message.Content)); err != nil {
+				return err
 			}
 		}
-
 		return nil
 	})
-
-	// add last response in req
-	if buffer.Len() > 0 {
-		msg := api.Message{
-			Role:    "assistant",
-			Content: buffer.String(),
-		}
-		req.Messages = append(req.Messages, msg)
-	}
 
 	return err
 
