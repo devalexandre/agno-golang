@@ -67,6 +67,19 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	if err != nil {
 		return nil, err
 	}
+
+	// Convert max_tokens to num_predict for Ollama API
+	if val, ok := opts["max_tokens"]; ok && val != nil {
+		opts["num_predict"] = val
+		delete(opts, "max_tokens")
+	}
+
+	// Debug: Log the options being sent
+	if debugmod != nil && debugmod.(bool) {
+		fmt.Printf("DEBUG: CallOptions MaxTokens = %v\n", callOptions.MaxTokens)
+		fmt.Printf("DEBUG: Final opts map: %v\n", opts)
+	}
+
 	req.Options = opts
 
 	_tools, maptools, _ := c.prepareTools(callOptions.ToolCall)
@@ -282,6 +295,13 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 	if err != nil {
 		return err
 	}
+
+	// Convert max_tokens to num_predict for Ollama API
+	if val, ok := opts["max_tokens"]; ok && val != nil {
+		opts["num_predict"] = val
+		delete(opts, "max_tokens")
+	}
+
 	//remove ToolCall from options
 	opts["ToolCall"] = nil
 	req.Options = opts

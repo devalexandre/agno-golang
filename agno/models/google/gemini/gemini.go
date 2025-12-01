@@ -44,6 +44,12 @@ func (g *Gemini) GetClientOptions() *models.ClientOptions {
 
 // Invoke sends a chat completion request and parses the response into a MessageResponse.
 func (g *Gemini) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
+	// Apply client-level options (e.g., MaxTokens) if not already set in call options
+	if g.opts.MaxTokens != nil {
+		// Prepend the client MaxTokens to options so it acts as a default
+		// (call options can still override it)
+		options = append([]models.Option{models.WithMaxTokens(*g.opts.MaxTokens)}, options...)
+	}
 
 	resp, err := g.client.CreateChatCompletion(ctx, messages, options...)
 	if err != nil {
@@ -78,6 +84,12 @@ func (g *Gemini) AInvoke(ctx context.Context, messages []models.Message, options
 
 // InvokeStream implements the streaming method for continuous responses.
 func (g *Gemini) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
+	// Apply client-level options (e.g., MaxTokens) if not already set in call options
+	if g.opts.MaxTokens != nil {
+		// Prepend the client MaxTokens to options so it acts as a default
+		// (call options can still override it)
+		options = append([]models.Option{models.WithMaxTokens(*g.opts.MaxTokens)}, options...)
+	}
 
 	err := g.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
