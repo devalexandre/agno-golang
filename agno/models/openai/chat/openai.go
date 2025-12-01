@@ -51,6 +51,13 @@ func (o *OpenAIChat) ChatCompletion(ctx context.Context, messages []models.Messa
 
 // Invoke sends a chat completion request and parses the response into a Message.
 func (o *OpenAIChat) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
+	// Apply client-level options (e.g., MaxTokens) if not already set in call options
+	if o.opts.MaxTokens != nil {
+		// Prepend the client MaxTokens to options so it acts as a default
+		// (call options can still override it)
+		options = append([]models.Option{models.WithMaxTokens(*o.opts.MaxTokens)}, options...)
+	}
+
 	resp, err := o.ChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
@@ -98,6 +105,13 @@ func (o *OpenAIChat) AInvoke(ctx context.Context, messages []models.Message, opt
 
 // InvokeStream sends a streaming chat completion request and converts each chunk into a Message.
 func (o *OpenAIChat) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
+	// Apply client-level options (e.g., MaxTokens) if not already set in call options
+	if o.opts.MaxTokens != nil {
+		// Prepend the client MaxTokens to options so it acts as a default
+		// (call options can still override it)
+		options = append([]models.Option{models.WithMaxTokens(*o.opts.MaxTokens)}, options...)
+	}
+
 	err := o.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return err
