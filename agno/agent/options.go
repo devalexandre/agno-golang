@@ -45,6 +45,8 @@ type RunOptions struct {
 	Metadata map[string]interface{}
 	// DebugMode enables detailed debug logging
 	DebugMode *bool
+	// SmartMemoryManager configuration for this run
+	SmartMemoryManager *SmartMemoryManagerOptions
 }
 
 // WithStream enables streaming response
@@ -166,6 +168,13 @@ func WithMetadata(metadata map[string]interface{}) RunOption {
 	}
 }
 
+// WithSmartMemoryManager configures smart memory manager for this run
+func WithSmartMemoryManager(opts SmartMemoryManagerOptions) RunOption {
+	return func(o *RunOptions) {
+		o.SmartMemoryManager = &opts
+	}
+}
+
 // Media types for agent inputs
 
 // Audio represents an audio input
@@ -199,6 +208,21 @@ type File struct {
 	URL      string `json:"url,omitempty"`
 	Data     []byte `json:"data,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
+}
+
+// SmartMemoryManagerOptions contains configuration options for smart memory management
+// Used with WithSmartMemoryManager() option function
+type SmartMemoryManagerOptions struct {
+	// Enable smart memory manager
+	Enabled bool
+	// Model to use for memory management (if different from main agent model)
+	Model interface{} // models.AgnoModelInterface
+	// Custom prompt for memory extraction
+	Prompt string
+	// Maximum tokens for memory content
+	MaxTokens int
+	// Cache size for processed memories
+	CacheSize int
 }
 
 // MarshalJSON implements custom serialization for RunOptions.

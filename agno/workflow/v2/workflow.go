@@ -1471,6 +1471,15 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 	var mu sync.Mutex
 	var currentStepName string
 
+	// Map of step names to colors for professional visual distinction
+	stepColors := map[string]string{
+		"Analysis":   "cyan",
+		"Planning":   "blue",
+		"Execution":  "green",
+		"Validation": "yellow",
+		"Debugging":  "magenta",
+	}
+
 	// Clear any existing StepOutputEvent handlers to prevent accumulation
 	w.mu.Lock()
 	w.eventHandlers[StepOutputEvent] = nil
@@ -1495,11 +1504,19 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 				// Add this chunk to the global content
 				globalContent.WriteString(content)
 
-				// Send only the new chunk to the panel (not the entire accumulated content)
+				// Get color for this step
+				color := stepColors[output.StepName]
+				if color == "" {
+					color = "white"
+				}
+
+				// Send only the new chunk to the panel with agent info and color
 				select {
 				case contentChan <- utils.ContentUpdateMsg{
 					PanelName: "Response",
 					Content:   content,
+					AgentName: output.StepName,
+					Color:     color,
 				}:
 				default:
 					// Channel is full or closed, skip
