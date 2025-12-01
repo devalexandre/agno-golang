@@ -80,15 +80,27 @@ func main() {
 	// }
 
 	// model, err := openrouter.NewOpenRouterChat(
-	// 	models.WithID("qwen/qwen3-235b-a22b:free"),
+	// 	models.WithID("moonshotai/kimi-k2:free"),
 	// )
-	// if err != nil {
-	// 	log.Fatalf("Failed to create OpenRouter chat: %v", err)
-	// }
 
+	apiKey := os.Getenv("OLLAMA_API_KEY")
+	if apiKey == "" {
+		log.Fatal("OLLAMA_API_KEY environment variable is required")
+	}
+
+	// Create Ollama Cloud model
 	model, err := ollama.NewOllamaChat(
-		models.WithID("cogito:3b"),
+		models.WithID("kimi-k2:1t-cloud"),
+		models.WithBaseURL("https://ollama.com"),
+		models.WithAPIKey(apiKey),
 	)
+	if err != nil {
+		log.Fatalf("Failed to create OpenRouter chat: %v", err)
+	}
+
+	// model, err := ollama.NewOllamaChat(
+	// 	models.WithID("cogito:3b"),
+	// )
 	if err != nil {
 		log.Fatalf("Failed to create Ollama chat: %v", err)
 	}
@@ -113,55 +125,18 @@ func main() {
 		Context: ctx,
 		Model:   model,
 		Name:    "CodeAnalyzer",
-		Instructions: fmt.Sprintf(`ROLE: Intelligent code analysis expert
-CURRENT WORKING DIRECTORY: %s
+		Stream:  true,
+		Instructions: fmt.Sprintf(`ROLE: Code analysis expert
+DIR: %s
 
-TASK: Analyze the user's request, find relevant files, and provide structured feedback.
+1. Find files related to: user request
+2. Read and analyze them
+3. Report findings
 
-CRITICAL WORKFLOW:
-1. FIRST, parse the user's prompt to identify:
-   - What action they want (review, analyze, refactor, add, fix, etc.)
-   - Any file paths, directory paths, or patterns mentioned
-   - The specific requirements or concerns
-
-2. USE TOOLS TO FIND FILES:
-   - If a specific file path is mentioned, use FileTool.ReadFile to read it
-   - If a directory is mentioned, use FileTool.ListDirectory to explore it
-   - If you need to search for files, use FileTool.SearchFiles or ShellTool.Execute with 'find' or 'grep'
-   - Use ShellTool.Execute with commands like:
-     * 'find . -name "*.go"' to find Go files
-     * 'grep -r "pattern" .' to search for patterns
-     * 'cat <file>' to read file contents
-     * 'ls -la <dir>' to list directory contents
-
-3. ANALYZE THE CODE:
-   - Read the relevant files using FileTool.ReadFile
-   - Understand the code structure and purpose
-   - Identify issues based on the user's request
-
-ANALYSIS CATEGORIES (as applicable):
-- Architecture & Structure
-- Security vulnerabilities
-- Performance bottlenecks
-- Code quality & maintainability
-- Best practices compliance
-
-OUTPUT FORMAT (strict markdown):
-## 📊 Code Analysis
-
-### Files Analyzed
-- [list of files found and analyzed]
-
-### Summary
-[Brief summary of what was found]
-
-### Findings
-[Detailed findings based on user's request]
-
-### Recommendations
-[Actionable recommendations]
-
-NEVER assume file contents - ALWAYS use tools to read them first.`, cwd),
+## Output Format
+### Files Analyzed: [list]
+### Issues: [key findings]
+### Recommendations: [fixes]`, cwd),
 		Tools:                   toolsList,
 		Memory:                  mem,
 		MaxToolCallsFromHistory: 5,
@@ -177,42 +152,16 @@ NEVER assume file contents - ALWAYS use tools to read them first.`, cwd),
 		Context: ctx,
 		Model:   model,
 		Name:    "CodePlanner",
-		Instructions: fmt.Sprintf(`ROLE: Senior developer planning implementation
-CURRENT WORKING DIRECTORY: %s
+		Stream:  true,
+		Instructions: fmt.Sprintf(`ROLE: Developer planner
+DIR: %s
 
-TASK: Create executable implementation plans based on the analysis.
+Create step-by-step implementation plan.
 
-WORKFLOW:
-1. Review the analysis from the previous step
-2. If you need more context, use FileTool.ReadFile or ShellTool.Execute to gather information
-3. Create a detailed, step-by-step plan
-
-PLANNING STEPS:
-1. Understand requirements from analysis report
-2. Break into atomic, sequential tasks
-3. Identify required files and modifications
-4. Define verification steps for each change
-
-OUTPUT FORMAT (strict markdown):
-## 🎯 Implementation Plan
-
-### Files to Modify
-- [path/to/file.go]: [purpose]
-
-### Step-by-Step Implementation
-1. **Task**: [specific action]
-   - File: [path]
-   - Changes: [exact code changes]
-   - Verification: [command to verify]
-
-2. **Task**: [next action]
-   [continue as needed]
-
-### Validation Plan
-- Command: [exact command to run]
-- Expected output: [what success looks like]
-
-NO commentary outside this format.`, cwd),
+## Output Format
+### Files to Modify: [list]
+### Steps: [numbered actions]
+### Verification: [test commands]`, cwd),
 		Tools:                   toolsList,
 		Memory:                  mem,
 		MaxToolCallsFromHistory: 5,
@@ -227,38 +176,15 @@ NO commentary outside this format.`, cwd),
 		Context: ctx,
 		Model:   model,
 		Name:    "CodeExecutor",
+		Stream:  true,
 		Instructions: fmt.Sprintf(`ROLE: Code executor
-CURRENT WORKING DIRECTORY: %s
+DIR: %s
 
-OBJECTIVE:
-Execute implementation plans step-by-step.
+Modify files and run commands to implement the plan.
 
-TOOLS AVAILABLE:
-- FileTool: Read/write files, manage directories
-- ShellTool: Execute commands, run tests
-
-WORKFLOW:
-1. **Analyze Input**: Read the plan AND any feedback/errors from previous attempts (if any).
-2. **Execute**: Modify files and run commands to implement the plan or fix the reported errors.
-3. **Verify**: Run quick checks to ensure changes were applied.
-
-OUTPUT FORMAT (Markdown):
-
-## 🔨 Execution Report
-
-### Modified Files
-- **file.go**: [Changes made]
-
-### Implemented Features
-- [x] [Feature description]
-
-### Fixes Applied (if retrying)
-- [x] [Fix description]
-
-### Results
-- **Status**: ✅ Success | ⚠️ Partial | ❌ Failure
-
-Execute commands using ShellTool and modify files using FileTool.`, cwd),
+## Output Format
+### Modified Files: [list]
+### Status: ✅ Success | ❌ Failure`, cwd),
 		Tools:                   toolsList,
 		Memory:                  mem,
 		MaxToolCallsFromHistory: 5,
@@ -273,36 +199,16 @@ Execute commands using ShellTool and modify files using FileTool.`, cwd),
 		Context: ctx,
 		Model:   model,
 		Name:    "CodeValidator",
+		Stream:  true,
 		Instructions: fmt.Sprintf(`ROLE: Code validator
-CURRENT WORKING DIRECTORY: %s
+DIR: %s
 
-OBJECTIVE:
-Verify if the implementation meets the requirements and works correctly.
+Run tests and build commands to verify implementation.
 
-TOOLS AVAILABLE:
-- FileTool: Read files to check content
-- ShellTool: Run tests, build commands, or scripts
-
-WORKFLOW:
-1. **Read Requirements**: Understand what was supposed to be done.
-2. **Verify**: Run commands (go build, go test, etc.) or check file contents.
-3. **Report**: Return success or failure with details.
-
-IMPORTANT:
-- If validation PASSES, you MUST set "success": true in your output metadata.
-- If validation FAILS, you MUST set "success": false in your output metadata and provide error details.
-
-OUTPUT FORMAT (Markdown):
-
-## 🔍 Validation Report
-
-### Checks Performed
-- [x] [Check description]
-
-### Outcome
-- **Success**: [Yes/No]
-- **Errors**: [List of errors if any]
-`, cwd),
+## Output Format
+### Checks: [list]
+### Success: Yes/No
+### Errors: [if any]`, cwd),
 		Tools:                   toolsList,
 		Memory:                  mem,
 		MaxToolCallsFromHistory: 5,
@@ -317,34 +223,16 @@ OUTPUT FORMAT (Markdown):
 		Context: ctx,
 		Model:   model,
 		Name:    "CodeDebugger",
+		Stream:  true,
 		Instructions: fmt.Sprintf(`ROLE: Code debugger
-CURRENT WORKING DIRECTORY: %s
+DIR: %s
 
-OBJECTIVE:
-Analyze validation failures and provide a fix strategy.
+Analyze failures and propose fixes.
 
-TOOLS AVAILABLE:
-- FileTool: Read files to understand the code
-- ShellTool: Run commands if needed to reproduce
-
-WORKFLOW:
-1. **Analyze Error**: Read the validation report and the code.
-2. **Identify Cause**: Determine why it failed.
-3. **Propose Fix**: Provide specific instructions or code blocks to fix the issue.
-
-OUTPUT FORMAT (Markdown):
-
-## 🐞 Debug Analysis
-
-### Error Analysis
-- [Error description]
-
-### Root Cause
-- [Explanation]
-
-### Fix Strategy
-- [Specific instructions for Executor]
-`, cwd),
+## Output Format
+### Error: [error description]
+### Root Cause: [explanation]
+### Fix: [specific instructions]`, cwd),
 		Tools:                   toolsList,
 		Memory:                  mem,
 		MaxToolCallsFromHistory: 5,
@@ -427,7 +315,7 @@ OUTPUT FORMAT (Markdown):
 	workflow := v2.NewWorkflow(
 		v2.WithWorkflowName("Agno Coder Workflow"),
 		v2.WithWorkflowDescription("Workflow for code analysis, planning, execution and validation"),
-		v2.WithStreaming(true, true),
+		v2.WithStreaming(false, false),
 		v2.WithWorkflowSteps([]interface{}{
 			analyzeStep,
 			planStep,
@@ -440,5 +328,45 @@ OUTPUT FORMAT (Markdown):
 	pterm.Println()
 
 	// Execute workflow with the user's prompt
-	workflow.PrintResponse(prompt, true)
+	result, err := workflow.Run(ctx, prompt)
+	if err != nil {
+		pterm.FgRed.Printf("✗ Erro: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print final result cleanly
+	if result != nil && result.Content != nil {
+		pterm.Println()
+		fmt.Println(result.Content)
+	}
+}
+
+// SmartStreamPrinter prints streaming responses with intelligent pauses at natural breakpoints
+func SmartStreamPrinter(response string) {
+	buffer := ""
+	breakPoints := []string{".", "!", "?", "\n"}
+
+	for i, char := range response {
+		buffer += string(char)
+
+		// Check if we hit a natural break point
+		isBreakPoint := false
+		for _, bp := range breakPoints {
+			if strings.HasSuffix(buffer, bp) {
+				isBreakPoint = true
+				break
+			}
+		}
+
+		// Print at break points or every 50 chars if no punctuation
+		if isBreakPoint || (i+1)%50 == 0 {
+			fmt.Print(buffer)
+			buffer = ""
+		}
+	}
+
+	// Print remaining buffer
+	if buffer != "" {
+		fmt.Print(buffer)
+	}
 }

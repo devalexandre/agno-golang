@@ -1,8 +1,3 @@
-// Package main demonstrates how to use the OpenRouter integration with Agno.
-// OpenRouter provides access to multiple LLM providers through a unified API.
-//
-// OpenRouter is fully compatible with the OpenAI API, so this implementation
-// uses the existing OpenAI-like client internally.
 package main
 
 import (

@@ -1495,11 +1495,11 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 				// Add this chunk to the global content
 				globalContent.WriteString(content)
 
-				// Send the entire accumulated content to the panel
+				// Send only the new chunk to the panel (not the entire accumulated content)
 				select {
 				case contentChan <- utils.ContentUpdateMsg{
 					PanelName: "Response",
-					Content:   globalContent.String(),
+					Content:   content,
 				}:
 				default:
 					// Channel is full or closed, skip
