@@ -455,4 +455,4 @@ For detailed implementation plans and technical specifications, see:
 
 **Last Updated**: 2025-11-29
 
-**Version**: Pre-release (v0.9.0)
+**Version**: Pre-release (v0.6.0)

@@ -2,9 +2,9 @@ package utils
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/devalexandre/agno-golang/agno/utils/terminal"
 )
 
@@ -129,30 +129,61 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 
 	go func() {
 		var responseAccumulator string
-		var lastHeight int
+		var panelHeight int
+		isFirstUpdate := true
 
 		for update := range contentChan {
 			if update.PanelName == MessageResponse {
 				responseAccumulator += update.Content
 
-				// Calculate height of previous print to clear
-				if lastHeight > 0 {
-					fmt.Printf("\033[%dA", lastHeight) // Move up
-					fmt.Print("\033[J")                // Clear below
-				}
-
-				// Render new panel
+				// Render the updated content to get the new panel
 				duration := time.Since(start).Seconds()
 				panel := globalRenderer.RenderResponse(responseAccumulator, duration)
+				newLines := strings.Split(panel, "\n")
 
-				fmt.Print(panel)
-				fmt.Println() // Add newline for visual separation
+				if isFirstUpdate {
+					// First time - just print the panel
+					fmt.Print(panel)
+					panelHeight = len(newLines)
+					isFirstUpdate = false
+				} else {
+					// Subsequent updates - clear and redraw in place
+					// Move cursor up to the start of the panel
+					if panelHeight > 0 {
+						fmt.Printf("\033[%dA", panelHeight)
+					}
 
-				// Calculate new height (including the extra newline)
-				lastHeight = lipgloss.Height(panel) + 1
+					// Clear the entire panel area line by line
+					for i := 0; i < panelHeight; i++ {
+						fmt.Print("\033[K") // Clear current line
+						if i < panelHeight-1 {
+							fmt.Print("\033[B") // Move down one line
+						}
+					}
+
+					// Move back to the start position
+					if panelHeight > 1 {
+						fmt.Printf("\033[%dA", panelHeight-1)
+					}
+
+					// Print the updated panel
+					fmt.Print(panel)
+
+					// Update panel height for next update
+					panelHeight = len(newLines)
+				}
 			} else {
+				// For non-response panels, reset the tracking
+				if panelHeight > 0 {
+					isFirstUpdate = true
+					panelHeight = 0
+				}
 				printPanel(update.PanelName, update.Content, sp, start, markdown)
 			}
+		}
+		// Print final newline after streaming completes
+		if panelHeight > 0 {
+			fmt.Println()
 		}
 	}()
 

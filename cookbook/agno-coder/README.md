@@ -1,267 +1,136 @@
-# 🤖 Agno Coder
+# 🤖 Agno Coder CLI
 
-A powerful CLI tool for code analysis, planning, and execution using AI-powered workflows with Qwen Coder.
+A powerful AI-powered CLI for code analysis, planning, and execution. Simply describe what you want to do in natural language, and Agno Coder will find the files, analyze them, and execute the task.
 
 ## ✨ Features
 
-- 🔍 **Smart Code Analysis** - Analyze Go code with detailed feedback on architecture, security, performance, and maintainability
-- 🎯 **Custom Prompts** - Pass custom instructions for any coding task
-- 📁 **File & Folder Support** - Analyze individual files or entire directories
-- ✅ **Environment Validation** - Automatic dependency checking before execution
-- 🔄 **Multi-Step Workflow** - Analysis → Planning → Execution with memory
-- 🛠️ **Tool Integration** - Built-in file and shell tools for code manipulation
-- 📊 **Formatted Output** - Clean, readable markdown output (no JSON!)
+- **Natural Language Interface**: Just describe what you want in plain text
+- **Smart File Discovery**: Automatically finds and reads relevant files
+- **Code Analysis**: Security reviews, best practices, performance analysis
+- **Implementation Planning**: Creates detailed step-by-step plans
+- **Auto-Execution**: Implements changes with validation and debugging loops
 
 ## 🚀 Quick Start
 
-### Installation
+### Build
 
 ```bash
-# Clone the repository
-git clone https://github.com/devalexandre/agno-golang
-cd agno-golang/cookbook/agno-coder
-
-# Build
-go build -o agno-coder main.go validation.go
-
-# Or run directly
-go run main.go validation.go --help
+cd cookbook/agno-coder
+./build.sh
 ```
 
-### Prerequisites
-
-**Required:**
-- Go 1.21+
-- OLLAMA_API_KEY environment variable
-
-**Optional:**
-- Git (for version control operations)
-- Go tools (for compilation, testing)
-
-### Environment Setup
+Or manually:
 
 ```bash
-# Set your Ollama API key
-export OLLAMA_API_KEY=your_api_key_here
+go build -o agno-coder .
 ```
 
-## 📖 Usage
-
-### Basic Commands
+### Usage
 
 ```bash
-# Analyze a file
-agno-coder --analyze path/to/file.go
-
-# Implement a feature
-agno-coder --implement "Add error handling to main function"
-
-# General task
-agno-coder --task "Refactor authentication module"
+agno-coder "<your prompt>"
 ```
 
-### Custom Prompts (New! 🎉)
+That's it! Just describe what you want to do, including any file paths or directories.
 
-Pass custom instructions for any task:
+## 📝 Examples
+
+### Code Review
 
 ```bash
-# Custom prompt without path (general task)
-agno-coder --prompt "Explain how dependency injection works in Go"
+# Review a specific file for security issues
+agno-coder "Review this code for security issues and best practices cookbook/agno-coder/main.go"
 
-# Custom prompt with file
-agno-coder --prompt "Add comprehensive error handling" --path main.go
-
-# Custom prompt with folder
-agno-coder --prompt "Review code quality and suggest improvements" --path ./api
-
-# Complex refactoring
-agno-coder --prompt "Refactor to use interfaces and add unit tests" --path ./services
+# Analyze all Go files in a directory
+agno-coder "Analyze all Go files in ./agno/tools for potential improvements"
 ```
 
-## 💡 Use Cases
-
-### 1. Code Review
+### Code Modifications
 
 ```bash
-agno-coder --prompt "Review this code for security issues and best practices" --path ./handlers
+# Add error handling
+agno-coder "Add error handling to all functions in ./cmd"
+
+# Refactor code
+agno-coder "Refactor the authentication module in auth/ to use interfaces"
+
+# Add new features
+agno-coder "Create a new REST endpoint for user management in api/handlers/"
 ```
 
-### 2. Performance Optimization
+### Code Search
 
 ```bash
-agno-coder --prompt "Identify performance bottlenecks and suggest optimizations" --path ./database
+# Find patterns
+agno-coder "Find all TODO comments in the project and list them"
+
+# Search for specific code
+agno-coder "Find all places where we use deprecated functions"
 ```
 
-### 3. Refactoring
+### Documentation
 
 ```bash
-agno-coder --prompt "Suggest refactoring opportunities to improve maintainability" --path ./legacy-code
-```
+# Generate docs
+agno-coder "Add documentation comments to all exported functions in ./pkg"
 
-### 4. Documentation
-
-```bash
-agno-coder --prompt "Generate comprehensive documentation with examples" --path ./pkg/client
-```
-
-### 5. Security Audit
-
-```bash
-agno-coder --prompt "Find potential security vulnerabilities (SQL injection, XSS, etc)" --path ./api
-```
-
-### 6. Add Features
-
-```bash
-agno-coder --prompt "Add structured logging using logrus" --path ./cmd
-```
-
-## 🎓 Best Practices
-
-### Be Specific in Prompts
-
-❌ **Bad**: `--prompt "improve code"`
-
-✅ **Good**: `--prompt "Improve error handling by adding context and wrapping errors using fmt.Errorf"`
-
-### Use Appropriate Scope
-
-❌ **Bad**: `--path .` (too broad)
-
-✅ **Good**: `--path ./api/handlers` (focused scope)
-
-### Combine Analysis with Action
-
-```bash
-# First analyze
-agno-coder --analyze main.go
-
-# Then refactor based on analysis
-agno-coder --prompt "Refactor based on previous analysis" --path main.go
+# Create README
+agno-coder "Create a README.md for the project in ./myproject"
 ```
 
 ## 🔧 How It Works
 
-The CLI uses a three-agent workflow:
+Agno Coder uses a multi-agent workflow:
 
-1. **CodeAnalyzer** - Analyzes code structure, patterns, and issues
-2. **CodePlanner** - Creates executable implementation plans
-3. **CodeExecutor** - Executes the plan using available tools
+1. **CodeAnalyzer**: Parses your request, finds relevant files using system tools (find, grep, cat, ls), reads file contents, and provides structured analysis.
 
-Each agent has access to:
-- **FileTool** - Read/write files, list directories, search code
-- **ShellTool** - Execute system commands, get system info
+2. **CodePlanner**: Creates a detailed implementation plan based on the analysis.
 
-## 🎯 Command Reference
+3. **CodeExecutor**: Implements the changes step-by-step.
 
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--analyze` | Analyze a file | `--analyze main.go` |
-| `--implement` | Implement a feature | `--implement "Add logging"` |
-| `--task` | General task | `--task "Refactor module"` |
-| `--prompt` | Custom instruction | `--prompt "Your instruction"` |
-| `--path` | File or folder path | `--path ./api` |
+4. **CodeValidator**: Verifies the implementation works correctly.
 
-## 🛡️ Environment Validation
+5. **CodeDebugger**: If validation fails, analyzes errors and provides fix strategies.
 
-The CLI automatically validates your environment before running:
+The workflow includes an automatic retry loop that continues until the implementation is successful or max iterations are reached.
 
-**Required Checks:**
-- ✅ OLLAMA_API_KEY configured
+## 🛠️ Available Tools
 
-**Optional Checks:**
-- ⚠️ Git installed
-- ⚠️ Go installed
+The agents have access to:
 
-Example output:
-```
-Checking environment...
-✓ OLLAMA_API_KEY: configured
-✓ Git: git version 2.39.2
-✓ Go: go version go1.21.0 linux/amd64
+### FileTool
+- `ReadFile`: Read file contents
+- `WriteFile`: Write/modify files
+- `ListDirectory`: List directory contents
+- `SearchFiles`: Search for files by pattern
+- `CreateDirectory`: Create directories
+- `DeleteFile`: Delete files/directories
 
-Initializing models... ✓ Ready
-```
+### ShellTool
+- `Execute`: Run shell commands (find, grep, cat, ls, etc.)
+- `ListFiles`: List files in current directory
+- `GetCurrentDirectory`: Get current working directory
+- `SystemInfo`: Get system information
 
-## 📊 Examples
+## ⚙️ Configuration
 
-### Example 1: Add Error Handling
+The CLI uses OpenRouter API by default. Set your API key:
 
 ```bash
-agno-coder --prompt "Add comprehensive error handling with context" --path ./api/handlers/user.go
+export OPENROUTER_API_KEY="your-api-key"
 ```
 
-### Example 2: Security Review
+Or modify the model configuration in `main.go` to use a different provider.
 
-```bash
-agno-coder --prompt "Perform security audit and identify vulnerabilities" --path ./auth
-```
+## 📋 Requirements
 
-### Example 3: Generate Tests
+- Go 1.21+
+- OpenRouter API key (or configure another LLM provider)
 
-```bash
-agno-coder --prompt "Generate unit tests with >80% coverage" --path ./services/payment.go
-```
+## 🔒 Security Note
 
-### Example 4: Refactor for Performance
+The CLI has write access enabled by default to allow code modifications. Use with caution and always review changes before committing.
 
-```bash
-agno-coder --prompt "Optimize database queries and add connection pooling" --path ./repository
-```
+## 📄 License
 
-## 🐛 Troubleshooting
-
-### Error: OLLAMA_API_KEY not set
-
-```bash
-export OLLAMA_API_KEY=your_key_here
-```
-
-### Error: Path not found
-
-Make sure the path exists and is relative to your current directory.
-
-### Tool Call Errors
-
-If you see "unknown action" errors, ensure you're using the latest version:
-
-```bash
-go build -o agno-coder main.go validation.go
-```
-
-## 🔄 Recent Updates
-
-### v2.0 (Phase 2 Complete)
-- ✅ Custom prompt support with `--prompt` flag
-- ✅ File and folder analysis with `--path` flag
-- ✅ Environment validation
-- ✅ Improved error messages
-- ✅ Fixed JSON output issue (clean text output)
-
-### v1.0 (Phase 1)
-- ✅ Basic analyze/implement/task commands
-- ✅ Multi-agent workflow
-- ✅ Tool integration (FileTool, ShellTool)
-- ✅ Memory and context management
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📝 License
-
-This project is part of the Agno framework.
-
-## 🔗 Links
-
-- [Agno Framework](https://github.com/devalexandre/agno-golang)
-- [Documentation](https://docs.agno.com)
-- [Issues](https://github.com/devalexandre/agno-golang/issues)
-
-## 💬 Support
-
-For questions and support, please open an issue on GitHub.
-
----
-
-Made with ❤️ using [Agno Framework](https://github.com/devalexandre/agno-golang) and Qwen Coder
+MIT License
