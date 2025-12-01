@@ -91,6 +91,20 @@ type AgentConfig struct {
 	// OutputModelPrompt allows customizing the prompt used by the OutputModel
 	// If not provided, a default prompt will be used
 	OutputModelPrompt string
+	// ParserModel is a separate AI model used to parse and structure unstructured responses
+	// This is useful when the main model returns free-form text that needs to be converted to structured data
+	// Different from OutputModel which is used for JSON formatting
+	ParserModel models.AgnoModelInterface
+	// ParserModelPrompt allows customizing the prompt used by the ParserModel
+	// If not provided, a default prompt will be used
+	ParserModelPrompt string
+
+	// Culture Manager for cultural knowledge management
+	CultureManager          interface{} // *culture.CultureManager
+	EnableAgenticCulture    bool
+	UpdateCulturalKnowledge bool
+	AddCultureToContext     bool
+
 	// ParseResponse controls whether to parse the response into the OutputSchema
 	ParseResponse bool
 
@@ -218,7 +232,16 @@ type Agent struct {
 	outputSchema      interface{}
 	outputModel       models.AgnoModelInterface
 	outputModelPrompt string
-	parseResponse     bool
+	parserModel       models.AgnoModelInterface
+	parserModelPrompt string
+
+	// Culture Manager
+	cultureManager          interface{}
+	enableAgenticCulture    bool
+	updateCulturalKnowledge bool
+	addCultureToContext     bool
+
+	parseResponse bool
 
 	// Hooks
 	preHooks        []func(ctx context.Context, input interface{}) error
@@ -354,7 +377,16 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		outputSchema:      config.OutputSchema,
 		outputModel:       config.OutputModel,
 		outputModelPrompt: config.OutputModelPrompt,
-		parseResponse:     config.ParseResponse,
+		parserModel:       config.ParserModel,
+		parserModelPrompt: config.ParserModelPrompt,
+
+		// Culture Manager
+		cultureManager:          config.CultureManager,
+		enableAgenticCulture:    config.EnableAgenticCulture,
+		updateCulturalKnowledge: config.UpdateCulturalKnowledge,
+		addCultureToContext:     config.AddCultureToContext,
+
+		parseResponse: config.ParseResponse,
 
 		// Hooks
 		preHooks:        config.PreHooks,
@@ -1145,6 +1177,63 @@ CRITICAL RULES:
 	return a.unmarshalIntoSchema(cleaned)
 }
 
+// parseResponseWithParserModel uses the ParserModel to parse and structure unstructured responses
+// This is different from OutputModel - ParserModel is used when the main model returns free-form text
+// that needs to be converted to structured data, while OutputModel is used for JSON formatting
+func (a *Agent) parseResponseWithParserModel(response string) (string, error) {
+	if a.debug {
+		fmt.Printf("\n=== DEBUG: Using ParserModel for response parsing ===\n")
+		fmt.Printf("Original response length: %d\n", len(response))
+		fmt.Printf("ParserModel: %T\n", a.parserModel)
+		fmt.Printf("=====================================================\n\n")
+	}
+
+	// Prepare prompt for the parser model
+	var systemPrompt string
+	if a.parserModelPrompt != "" {
+		systemPrompt = a.parserModelPrompt
+	} else {
+		systemPrompt = `You are a response parsing assistant. Your task is to parse and structure the provided text into a clear, well-formatted response.
+
+CRITICAL RULES:
+- Extract key information and structure it logically
+- Maintain the original meaning and intent
+- Remove unnecessary verbosity
+- Format the response in a clear, readable way
+- If the response is already well-structured, return it as-is`
+	}
+
+	userPrompt := fmt.Sprintf("Parse and structure the following response:\n\n%s", response)
+
+	messages := []models.Message{
+		{
+			Role:    models.TypeSystemRole,
+			Content: systemPrompt,
+		},
+		{
+			Role:    models.TypeUserRole,
+			Content: userPrompt,
+		},
+	}
+
+	// Invoke the parser model
+	resp, err := a.parserModel.Invoke(a.ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("parser model invocation failed: %w", err)
+	}
+
+	parsed := strings.TrimSpace(resp.Content)
+
+	if a.debug {
+		fmt.Printf("\n=== DEBUG: ParserModel Response ===\n")
+		fmt.Printf("Parsed response length: %d\n", len(parsed))
+		fmt.Printf("Response preview (first 500 chars):\n%s\n", truncateString(parsed, 500))
+		fmt.Printf("===================================\n\n")
+	}
+
+	return parsed, nil
+}
+
 // unmarshalIntoSchema unmarshals JSON string into the output schema struct
 func (a *Agent) unmarshalIntoSchema(jsonStr string) (interface{}, error) {
 	// Get schema type
@@ -1431,12 +1520,19 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 		}
 	}
 
-	// Parse output using ApplyOutputFormatting method
-	// This provides TWO outputs when OutputModel is configured:
-	// 1. resp.Content (TextContent) = Original creative response from main model
-	// 2. parsedContent (Output) = Structured JSON formatted by OutputModel
-	// This allows using expensive models for content and cheap models for formatting
-	parsedContent, err := a.ApplyOutputFormatting(resp.Content)
+	// Step 1: Parse response with ParserModel if configured
+	responseContent := resp.Content
+	if a.parserModel != nil {
+		parsed, err := a.parseResponseWithParserModel(resp.Content)
+		if err != nil {
+			log.Printf("Warning: ParserModel failed, using original response: %v", err)
+		} else {
+			responseContent = parsed
+		}
+	}
+
+	// Step 2: Parse output using ApplyOutputFormatting method
+	parsedContent, err := a.ApplyOutputFormatting(responseContent)
 	if err != nil {
 		return models.RunResponse{}, err
 	}
@@ -1666,23 +1762,28 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 	// Prepare model options
 	modelOptions := []models.Option{models.WithTools(a.tools)}
 
-	for attempt := 0; attempt <= retries; attempt++ {
-		if a.debug && attempt > 0 {
-			fmt.Printf("Retry attempt %d/%d\n", attempt, retries)
-		}
-
-		resp, lastErr = a.model.Invoke(a.ctx, messages, modelOptions...)
-		if lastErr == nil {
-			break
-		}
-
-		if attempt < retries {
-			// Apply exponential backoff if enabled
-			delay := time.Duration(a.delayBetweenRetries) * time.Second
-			if a.exponentialBackoff && attempt > 0 {
-				delay = delay * time.Duration(1<<uint(attempt)) // 2^attempt
+	// Check if streaming is enabled
+	if options.Stream != nil && *options.Stream {
+		resp, lastErr = a.runWithStreaming(prompt, messages)
+	} else {
+		for attempt := 0; attempt <= retries; attempt++ {
+			if a.debug && attempt > 0 {
+				fmt.Printf("Retry attempt %d/%d\n", attempt, retries)
 			}
-			time.Sleep(delay)
+
+			resp, lastErr = a.model.Invoke(a.ctx, messages, modelOptions...)
+			if lastErr == nil {
+				break
+			}
+
+			if attempt < retries {
+				// Apply exponential backoff if enabled
+				delay := time.Duration(a.delayBetweenRetries) * time.Second
+				if a.exponentialBackoff && attempt > 0 {
+					delay = delay * time.Duration(1<<uint(attempt)) // 2^attempt
+				}
+				time.Sleep(delay)
+			}
 		}
 	}
 
@@ -1725,12 +1826,19 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 		}
 	}
 
-	// Parse output using ApplyOutputFormatting method
-	// This provides TWO outputs when OutputModel is configured:
-	// 1. resp.Content (TextContent) = Original creative response from main model
-	// 2. parsedContent (Output) = Structured JSON formatted by OutputModel
-	// This allows using expensive models for content and cheap models for formatting
-	parsedContent, err := a.ApplyOutputFormatting(resp.Content)
+	// Step 1: Parse response with ParserModel if configured
+	responseContent := resp.Content
+	if a.parserModel != nil {
+		parsed, err := a.parseResponseWithParserModel(resp.Content)
+		if err != nil {
+			log.Printf("Warning: ParserModel failed, using original response: %v", err)
+		} else {
+			responseContent = parsed
+		}
+	}
+
+	// Step 2: Parse output using ApplyOutputFormatting method
+	parsedContent, err := a.ApplyOutputFormatting(responseContent)
 	if err != nil {
 		return models.RunResponse{}, err
 	}
@@ -2094,6 +2202,28 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 	if a.additionalContext != "" {
 		systemMessage += fmt.Sprintf("\n<additional_context>\n%s\n</additional_context>\n", a.additionalContext)
 		originalSystemMessage += fmt.Sprintf("\n<additional_context>\n%s\n</additional_context>\n", a.additionalContext)
+	}
+
+	// Add cultural context if enabled
+	if a.addCultureToContext && a.cultureManager != nil {
+		// Try to cast cultureManager to the correct type
+		if cm, ok := a.cultureManager.(interface {
+			AddCultureToContext(ctx context.Context, userID string) (string, error)
+		}); ok {
+			// Use UserID if available, otherwise use a default
+			userID := a.userID
+			if userID == "" {
+				userID = "default_user"
+			}
+
+			culturalContext, err := cm.AddCultureToContext(a.ctx, userID)
+			if err != nil {
+				log.Printf("Warning: Failed to add cultural context: %v", err)
+			} else if culturalContext != "" {
+				systemMessage += culturalContext
+				originalSystemMessage += culturalContext
+			}
+		}
 	}
 
 	if a.debug {
