@@ -11,7 +11,7 @@ import (
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/memory/sqlite"
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/openrouter"
+	"github.com/devalexandre/agno-golang/agno/models/ollama"
 	"github.com/devalexandre/agno-golang/agno/tools"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
@@ -70,24 +70,28 @@ func main() {
 	}
 
 	// Get API key from environment variable
-	apiKey := os.Getenv("OPENROUTER_API_KEY")
-	if apiKey == "" {
-		pterm.FgRed.Println("✗ OPENROUTER_API_KEY environment variable not set")
-		pterm.Println()
-		pterm.FgGray.Println("Please set your OpenRouter API key:")
-		pterm.Println("  export OPENROUTER_API_KEY=your-api-key")
-		os.Exit(1)
-	}
+	// apiKey := os.Getenv("OPENROUTER_API_KEY")
+	// if apiKey == "" {
+	// 	pterm.FgRed.Println("✗ OPENROUTER_API_KEY environment variable not set")
+	// 	pterm.Println()
+	// 	pterm.FgGray.Println("Please set your OpenRouter API key:")
+	// 	pterm.Println("  export OPENROUTER_API_KEY=your-api-key")
+	// 	os.Exit(1)
+	// }
 
-	model, err := openrouter.NewOpenRouterChat(
-		models.WithID("moonshotai/kimi-k2:free"),
-		models.WithAPIKey(apiKey),
+	// model, err := openrouter.NewOpenRouterChat(
+	// 	models.WithID("qwen/qwen3-235b-a22b:free"),
+	// )
+	// if err != nil {
+	// 	log.Fatalf("Failed to create OpenRouter chat: %v", err)
+	// }
+
+	model, err := ollama.NewOllamaChat(
+		models.WithID("cogito:3b"),
 	)
-
 	if err != nil {
-		log.Fatalf("Failed to create model: %v", err)
+		log.Fatalf("Failed to create Ollama chat: %v", err)
 	}
-
 	db, err := sqlite.NewSqliteMemoryDb("user_memories", "agno_coder.db")
 	if err != nil {
 		pterm.Println()
@@ -158,8 +162,10 @@ OUTPUT FORMAT (strict markdown):
 [Actionable recommendations]
 
 NEVER assume file contents - ALWAYS use tools to read them first.`, cwd),
-		Tools:  toolsList,
-		Memory: mem,
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create analysis agent: %v\n", err)
@@ -207,8 +213,10 @@ OUTPUT FORMAT (strict markdown):
 - Expected output: [what success looks like]
 
 NO commentary outside this format.`, cwd),
-		Tools:  toolsList,
-		Memory: mem,
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create planning agent: %v\n", err)
@@ -251,8 +259,10 @@ OUTPUT FORMAT (Markdown):
 - **Status**: ✅ Success | ⚠️ Partial | ❌ Failure
 
 Execute commands using ShellTool and modify files using FileTool.`, cwd),
-		Tools:  toolsList,
-		Memory: mem,
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create execution agent: %v\n", err)
@@ -293,8 +303,10 @@ OUTPUT FORMAT (Markdown):
 - **Success**: [Yes/No]
 - **Errors**: [List of errors if any]
 `, cwd),
-		Tools:  toolsList,
-		Memory: mem,
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create validator agent: %v\n", err)
@@ -333,8 +345,10 @@ OUTPUT FORMAT (Markdown):
 ### Fix Strategy
 - [Specific instructions for Executor]
 `, cwd),
-		Tools:  toolsList,
-		Memory: mem,
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create debugger agent: %v\n", err)

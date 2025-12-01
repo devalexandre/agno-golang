@@ -131,7 +131,6 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 		var responseAccumulator string
 		var panelHeight int
 		isFirstUpdate := true
-		var responsePanelPosition int // Track where the response panel starts
 
 		for update := range contentChan {
 			if update.PanelName == MessageResponse {
@@ -145,15 +144,13 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 				if isFirstUpdate {
 					// First time - just print the panel
 					fmt.Print(panel)
-					fmt.Println()                   // Add newline for visual separation
-					panelHeight = len(newLines) + 1 // +1 for the extra newline
-					responsePanelPosition = 0       // Panel starts at current cursor position
+					panelHeight = len(newLines)
 					isFirstUpdate = false
 				} else {
 					// Subsequent updates - clear and redraw in place
-					// Move cursor to the start of the panel
-					if responsePanelPosition > 0 {
-						fmt.Printf("\033[%dA", responsePanelPosition)
+					// Move cursor up to the start of the panel
+					if panelHeight > 0 {
+						fmt.Printf("\033[%dA", panelHeight)
 					}
 
 					// Clear the entire panel area line by line
@@ -171,21 +168,22 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 
 					// Print the updated panel
 					fmt.Print(panel)
-					fmt.Println() // Add newline for visual separation
 
 					// Update panel height for next update
-					panelHeight = len(newLines) + 1
-					responsePanelPosition = panelHeight - 1 // Position for next update
+					panelHeight = len(newLines)
 				}
 			} else {
 				// For non-response panels, reset the tracking
 				if panelHeight > 0 {
 					isFirstUpdate = true
 					panelHeight = 0
-					responsePanelPosition = 0
 				}
 				printPanel(update.PanelName, update.Content, sp, start, markdown)
 			}
+		}
+		// Print final newline after streaming completes
+		if panelHeight > 0 {
+			fmt.Println()
 		}
 	}()
 
