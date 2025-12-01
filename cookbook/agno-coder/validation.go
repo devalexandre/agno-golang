@@ -21,17 +21,17 @@ type EnvironmentCheck struct {
 func ValidateEnvironment() error {
 	checks := []EnvironmentCheck{
 		{
-			Name:     "OLLAMA_API_KEY",
+			Name:     "OPENROUTER_API_KEY",
 			Required: true,
 			CheckFunc: func() (bool, string) {
-				key := os.Getenv("OLLAMA_API_KEY")
+				key := os.Getenv("OPENROUTER_API_KEY")
 				if key == "" {
-					return false, ""
+					return false, "not set"
 				}
 				return true, "configured"
 			},
-			ErrorMsg:   "OLLAMA_API_KEY is required but not set",
-			Suggestion: "Set environment variable: export OLLAMA_API_KEY=your_key",
+			ErrorMsg:   "OPENROUTER_API_KEY not set",
+			Suggestion: "Set your API key: export OPENROUTER_API_KEY=your_key",
 		},
 		{
 			Name:     "Git",

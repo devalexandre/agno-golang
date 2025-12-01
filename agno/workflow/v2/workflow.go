@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,44 +90,45 @@ type WorkflowSteps interface{}
 // Workflow represents a pipeline-based workflow execution
 type Workflow struct {
 	// Workflow identification
-	WorkflowID  string
-	Name        string
-	Description string
+	WorkflowID  string `json:"workflow_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 
 	// Workflow configuration
-	Steps WorkflowSteps
+	Steps WorkflowSteps `json:"steps"`
 
 	// Storage
-	Storage Storage
+	Storage Storage `json:"storage"`
 
 	// Session management
-	SessionID            string
-	SessionName          string
-	UserID               string
-	WorkflowSessionID    string
-	WorkflowSessionState map[string]interface{}
+	SessionID            string                 `json:"session_id"`
+	SessionName          string                 `json:"session_name"`
+	UserID               string                 `json:"user_id"`
+	WorkflowSessionID    string                 `json:"workflow_session_id"`
+	WorkflowSessionState map[string]interface{} `json:"workflow_session_state"`
 
 	// Runtime state
-	RunID       string
-	RunResponse *WorkflowRunResponse
+	RunID       string               `json:"run_id"`
+	RunResponse *WorkflowRunResponse `json:"run_response"`
 
 	// Workflow session for storage
-	WorkflowSession *WorkflowSession
-	DebugMode       bool
+	WorkflowSession *WorkflowSession `json:"workflow_session"`
+
+	DebugMode bool `json:"debug_mode"`
 
 	// Streaming configuration
-	Stream                  bool
-	StreamIntermediateSteps bool
+	Stream                  bool `json:"stream"`
+	StreamIntermediateSteps bool `json:"stream_intermediate_steps"`
 
 	// Event handling
-	StoreEvents  bool
-	EventsToSkip []WorkflowRunEvent
+	StoreEvents  bool               `json:"store_events"`
+	EventsToSkip []WorkflowRunEvent `json:"events_to_skip"`
 
 	// Input validation
-	InputSchema interface{}
+	InputSchema interface{} `json:"input_schema"`
 
 	// WebSocket streaming
-	WebSocketHandler WebSocketHandler
+	WebSocketHandler WebSocketHandler `json:"web_socket_handler"`
 
 	// Internal state
 	mu            sync.RWMutex
@@ -252,6 +254,126 @@ func WithWebSocketHandler(handler WebSocketHandler) WorkflowOption {
 	}
 }
 
+// StreamingAgent interface for agents that support streaming
+type StreamingAgent interface {
+	Agent
+	RunStream(prompt string, fn func([]byte) error) error
+}
+
+// RunWithStream executes the workflow with streaming support
+// When stream is true, it will use the agent's streaming capabilities if available
+func (w *Workflow) RunWithStream(ctx context.Context, input interface{}, stream bool) (*WorkflowRunResponse, error) {
+	// If not streaming, just use regular Run
+	if !stream {
+		return w.Run(ctx, input)
+	}
+
+	// Validate input if schema is configured
+	if err := w.validateInput(input); err != nil {
+		return nil, fmt.Errorf("input validation failed: %w", err)
+	}
+
+	// Initialize run
+	w.RunID = GenerateID()
+	w.metrics.RunID = w.RunID
+	w.metrics.StartTime = time.Now()
+
+	// Create workflow execution input
+	execInput := w.createExecutionInput(input)
+
+	// Emit workflow started event
+	w.emitEvent(&WorkflowRunResponseEvent{
+		Event:     WorkflowStartedEvent,
+		Timestamp: time.Now(),
+		Metadata: map[string]interface{}{
+			"workflow_id": w.WorkflowID,
+			"run_id":      w.RunID,
+			"input":       execInput.ToMap(),
+		},
+	})
+
+	// Execute workflow steps with streaming
+	var finalOutput *StepOutput
+	var err error
+
+	switch steps := w.Steps.(type) {
+	case []*Step:
+		finalOutput, err = w.executeStepSequenceWithStream(ctx, steps, execInput)
+	case []interface{}:
+		finalOutput, err = w.executeInterfaceSequenceWithStream(ctx, steps, execInput)
+	case []ExecutorFunc:
+		// Convert to interface slice
+		interfaceSteps := make([]interface{}, len(steps))
+		for i, s := range steps {
+			interfaceSteps[i] = s
+		}
+		finalOutput, err = w.executeInterfaceSequenceWithStream(ctx, interfaceSteps, execInput)
+	case ExecutorFunc:
+		finalOutput, err = w.executeFunctionWorkflowWithStream(ctx, steps, execInput)
+	case func(*StepInput) (*StepOutput, error):
+		finalOutput, err = w.executeFunctionWorkflowWithStream(ctx, ExecutorFunc(steps), execInput)
+	default:
+		err = fmt.Errorf("unsupported workflow steps type: %T", steps)
+	}
+
+	// Update metrics
+	w.metrics.EndTime = time.Now()
+	w.metrics.DurationMs = w.metrics.EndTime.Sub(w.metrics.StartTime).Milliseconds()
+
+	// Determine status
+	status := RunStatusCompleted
+	if err != nil {
+		status = RunStatusFailed
+		w.metrics.Success = false
+		w.metrics.Error = err.Error()
+	} else {
+		w.metrics.Success = true
+	}
+
+	// Create response
+	var content interface{}
+	if finalOutput != nil {
+		content = finalOutput.Content
+	}
+
+	response := &WorkflowRunResponse{
+		RunID:      w.RunID,
+		WorkflowID: w.WorkflowID,
+		Status:     status,
+		Content:    content,
+		Metrics:    w.metrics,
+		CreatedAt:  w.metrics.StartTime,
+		UpdatedAt:  w.metrics.EndTime,
+	}
+
+	// Create final output if nil
+	if finalOutput == nil {
+		finalOutput = &StepOutput{
+			Content: "Workflow completed with no output",
+		}
+	}
+
+	// Emit workflow completed event
+	w.emitEvent(&WorkflowRunResponseEvent{
+		Event:     WorkflowCompletedEvent,
+		Timestamp: time.Now(),
+		Metadata: map[string]interface{}{
+			"workflow_id": w.WorkflowID,
+			"run_id":      w.RunID,
+			"status":      status,
+			"metrics":     w.metrics.ToMap(),
+		},
+	})
+
+	// Save session if storage is configured
+	if w.Storage != nil && w.SessionID != "" {
+		w.saveSession(ctx)
+	}
+
+	w.RunResponse = response
+	return response, err
+}
+
 // Run executes the workflow with the given input
 func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResponse, error) {
 	// Validate input if schema is configured
@@ -360,6 +482,444 @@ func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResp
 	return response, err
 }
 
+// executeStepSequenceWithStream executes a sequence of steps with streaming support
+func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*Step, execInput *WorkflowExecutionInput) (*StepOutput, error) {
+	var lastOutput *StepOutput
+	stepInput := &StepInput{
+		Message:             execInput.Message,
+		AdditionalData:      execInput.AdditionalData,
+		Images:              execInput.Images,
+		Videos:              execInput.Videos,
+		Audio:               execInput.Audio,
+		PreviousStepOutputs: make(map[string]*StepOutput),
+	}
+
+	for i, step := range steps {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		// 🔁 Atualiza PreviousStepOutputs com TODAS as saídas armazenadas no workflow
+		w.mu.RLock()
+		for k, v := range w.stepOutputs {
+			stepInput.PreviousStepOutputs[k] = v
+		}
+		w.mu.RUnlock()
+
+		// 🔄 Atualiza PreviousStepContent com a saída do passo anterior
+		if lastOutput != nil {
+			stepInput.PreviousStepContent = lastOutput.Content
+		}
+
+		// Get step name for events
+		stepName := fmt.Sprintf("step_%d", i)
+		if step.Name != "" {
+			stepName = step.Name
+		}
+
+		// Emit step started event
+		w.emitEvent(&WorkflowRunResponseEvent{
+			Event:     StepStartedEvent,
+			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"step_name":  stepName,
+				"step_index": i,
+			},
+		})
+
+		// Execute step
+		stepMetrics := &StepMetrics{
+			StartTime: time.Now(),
+		}
+
+		// Check if step agent supports streaming
+		var output *StepOutput
+		var err error
+
+		if step.Agent != nil {
+			// Try to cast to streaming agent
+			if streamingAgent, ok := step.Agent.(interface {
+				RunStream(prompt string, fn func([]byte) error) error
+			}); ok {
+				// Use streaming
+				contentChan := make(chan string, 100)
+				errChan := make(chan error, 1)
+
+				// Start streaming in goroutine
+				go func() {
+					err := streamingAgent.RunStream(stepInput.GetMessageAsString(), func(chunk []byte) error {
+						select {
+						case contentChan <- string(chunk):
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+						return nil
+					})
+					errChan <- err
+				}()
+
+				// Collect streaming content
+				var fullContent string
+				streamingDone := false
+				for !streamingDone {
+					select {
+					case chunk := <-contentChan:
+						fullContent += chunk
+						// Emit streaming event
+						w.emitEvent(&WorkflowRunResponseEvent{
+							Event:     StepOutputEvent,
+							Timestamp: time.Now(),
+							Data: &StepOutput{
+								Content:      chunk,
+								StepName:     stepName,
+								ExecutorName: step.GetExecutorName(),
+								ExecutorType: step.GetExecutorType(),
+							},
+							Metadata: map[string]interface{}{
+								"step_name":  stepName,
+								"step_index": i,
+							},
+						})
+					case err := <-errChan:
+						if err != nil {
+							stepMetrics.Success = false
+							stepMetrics.Error = err.Error()
+							w.metrics.StepsFailed++
+							if !step.SkipOnFailure {
+								return nil, fmt.Errorf("step '%s' failed: %w", stepName, err)
+							}
+						} else {
+							stepMetrics.Success = true
+							w.metrics.StepsSucceeded++
+						}
+						streamingDone = true
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}
+
+				output = &StepOutput{
+					Content:      fullContent,
+					StepName:     stepName,
+					ExecutorName: step.GetExecutorName(),
+					ExecutorType: step.GetExecutorType(),
+				}
+			} else {
+				// Fallback to regular execution
+				output, err = step.Execute(ctx, stepInput)
+				if err != nil {
+					stepMetrics.Success = false
+					stepMetrics.Error = err.Error()
+					w.metrics.StepsFailed++
+					if !step.SkipOnFailure {
+						return nil, fmt.Errorf("step '%s' failed: %w", stepName, err)
+					}
+				} else {
+					stepMetrics.Success = true
+					w.metrics.StepsSucceeded++
+				}
+			}
+		} else {
+			// Non-agent steps use regular execution
+			output, err = step.Execute(ctx, stepInput)
+			if err != nil {
+				stepMetrics.Success = false
+				stepMetrics.Error = err.Error()
+				w.metrics.StepsFailed++
+				if !step.SkipOnFailure {
+					return nil, fmt.Errorf("step '%s' failed: %w", stepName, err)
+				}
+			} else {
+				stepMetrics.Success = true
+				w.metrics.StepsSucceeded++
+			}
+		}
+
+		stepMetrics.EndTime = time.Now()
+		stepMetrics.DurationMs = stepMetrics.EndTime.Sub(stepMetrics.StartTime).Milliseconds()
+
+		// Store step output and metrics
+		w.mu.Lock()
+		w.stepOutputs[stepName] = output
+		w.metrics.StepMetrics[stepName] = stepMetrics
+		w.metrics.StepsExecuted++
+		w.mu.Unlock()
+
+		// Update step input for next iteration
+		stepInput.PreviousStepOutputs[stepName] = output
+
+		// Emit step completed event
+		w.emitEvent(&WorkflowRunResponseEvent{
+			Event:     StepCompletedEvent,
+			Timestamp: time.Now(),
+			Data:      output,
+			Metadata: map[string]interface{}{
+				"step_name":  stepName,
+				"step_index": i,
+				"metrics":    stepMetrics.ToMap(),
+			},
+		})
+
+		lastOutput = output
+	}
+
+	return lastOutput, nil
+}
+
+// executeInterfaceSequenceWithStream executes a sequence of mixed step types with streaming
+func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps []interface{}, execInput *WorkflowExecutionInput) (*StepOutput, error) {
+	var lastOutput *StepOutput
+	stepInput := &StepInput{
+		Message:             execInput.Message,
+		AdditionalData:      execInput.AdditionalData,
+		Images:              execInput.Images,
+		Videos:              execInput.Videos,
+		Audio:               execInput.Audio,
+		PreviousStepOutputs: make(map[string]*StepOutput),
+	}
+
+	// Emit steps execution started event
+	w.emitEvent(&WorkflowRunResponseEvent{
+		Event:     StepsExecutionStartedEvent,
+		Timestamp: time.Now(),
+		Metadata: map[string]interface{}{
+			"total_steps": len(steps),
+		},
+	})
+
+	for i, item := range steps {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		// Atualiza o conteúdo anterior com a saída do passo anterior
+		// 🔁 Atualiza PreviousStepOutputs com TODAS as saídas armazenadas no workflow
+		w.mu.RLock()
+		for k, v := range w.stepOutputs {
+			stepInput.PreviousStepOutputs[k] = v
+		}
+		w.mu.RUnlock()
+
+		if lastOutput != nil {
+			stepInput.PreviousStepContent = lastOutput.Content
+		}
+
+		var output *StepOutput
+		var err error
+
+		// Executa o passo com base no tipo
+		switch v := item.(type) {
+		case *Step:
+			// Check if step agent supports streaming
+			if v.Agent != nil {
+				// Try to cast to streaming agent
+				if streamingAgent, ok := v.Agent.(interface {
+					RunStream(prompt string, fn func([]byte) error) error
+				}); ok {
+					// Use streaming
+					contentChan := make(chan string, 100)
+					errChan := make(chan error, 1)
+
+					// Start streaming in goroutine
+					go func() {
+						err := streamingAgent.RunStream(stepInput.GetMessageAsString(), func(chunk []byte) error {
+							select {
+							case contentChan <- string(chunk):
+							case <-ctx.Done():
+								return ctx.Err()
+							}
+							return nil
+						})
+						errChan <- err
+					}()
+
+					// Collect streaming content
+					var fullContent string
+					streamingDone := false
+					for !streamingDone {
+						select {
+						case chunk := <-contentChan:
+							fullContent += chunk
+							// Emit streaming event
+							w.emitEvent(&WorkflowRunResponseEvent{
+								Event:     StepOutputEvent,
+								Timestamp: time.Now(),
+								Data: &StepOutput{
+									Content:      chunk,
+									StepName:     v.Name,
+									ExecutorName: v.GetExecutorName(),
+									ExecutorType: v.GetExecutorType(),
+								},
+								Metadata: map[string]interface{}{
+									"step_name":  v.Name,
+									"step_index": i,
+								},
+							})
+						case err := <-errChan:
+							if err != nil {
+								w.metrics.StepsFailed++
+								return nil, err
+							} else {
+								w.metrics.StepsSucceeded++
+							}
+							streamingDone = true
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					}
+
+					output = &StepOutput{
+						Content:      fullContent,
+						StepName:     v.Name,
+						ExecutorName: v.GetExecutorName(),
+						ExecutorType: v.GetExecutorType(),
+					}
+				} else {
+					// Fallback to regular execution
+					output, err = v.Execute(ctx, stepInput)
+				}
+			} else {
+				// Non-agent steps use regular execution
+				output, err = v.Execute(ctx, stepInput)
+			}
+		case ExecutorFunc:
+			output, err = v(stepInput)
+		case func(*StepInput) (*StepOutput, error):
+			output, err = v(stepInput)
+		case *Loop:
+			// Executa o loop
+			output, err = v.Execute(ctx, stepInput)
+			if err != nil {
+				return nil, err
+			}
+			// ✅ Armazena a saída do loop inteiro
+			w.mu.Lock()
+			w.stepOutputs[v.Name] = output
+			w.mu.Unlock()
+			// ✅ Armazena todas as saídas internas do loop (ex: "research")
+			if v.CollectOutputs {
+				for _, innerOutput := range v.outputs {
+					if innerOutput.StepName != "" {
+						w.mu.Lock()
+						w.stepOutputs[innerOutput.StepName] = innerOutput
+						w.mu.Unlock()
+					}
+				}
+			}
+			// ✅ Atualiza lastOutput para o próximo passo
+			lastOutput = output
+		case *Parallel:
+			output, err = v.Execute(ctx, stepInput)
+		case *Condition:
+			output, err = v.Execute(ctx, stepInput)
+		case *Router:
+			output, err = v.Execute(ctx, stepInput)
+		default:
+			return nil, fmt.Errorf("unsupported step type at index %d: %T", i, v)
+		}
+
+		// Determina o nome do passo
+		stepName := fmt.Sprintf("step_%d", i)
+		if output != nil && output.StepName != "" {
+			stepName = output.StepName
+		}
+
+		// Trata erro
+		if err != nil {
+			w.metrics.StepsFailed++
+			return nil, err
+		}
+
+		// Atualiza métricas
+		w.metrics.StepsExecuted++
+		w.metrics.StepsSucceeded++
+
+		// Emite eventos
+		w.emitEvent(&WorkflowRunResponseEvent{
+			Event:     StepStartedEvent,
+			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"step_name":  stepName,
+				"step_index": i,
+			},
+		})
+
+		w.emitEvent(&WorkflowRunResponseEvent{
+			Event:     StepCompletedEvent,
+			Timestamp: time.Now(),
+			Data:      output,
+			Metadata: map[string]interface{}{
+				"step_name":  stepName,
+				"step_index": i,
+			},
+		})
+
+		// Armazena a saída do passo atual (incluindo loops, steps, etc)
+		if output != nil {
+			w.mu.Lock()
+			w.stepOutputs[stepName] = output
+			if w.metrics.StepMetrics == nil {
+				w.metrics.StepMetrics = make(map[string]*StepMetrics)
+			}
+			w.metrics.StepMetrics[stepName] = &StepMetrics{
+				Success: true,
+			}
+			w.mu.Unlock()
+
+			// Atualiza o PreviousStepOutputs para os próximos passos
+			stepInput.PreviousStepOutputs[stepName] = output
+			lastOutput = output
+		}
+	}
+
+	return lastOutput, nil
+}
+
+// executeFunctionWorkflowWithStream executes a function-based workflow with streaming
+func (w *Workflow) executeFunctionWorkflowWithStream(ctx context.Context, fn ExecutorFunc, execInput *WorkflowExecutionInput) (*StepOutput, error) {
+	stepInput := &StepInput{
+		Message:        execInput.Message,
+		AdditionalData: execInput.AdditionalData,
+		Images:         execInput.Images,
+		Videos:         execInput.Videos,
+		Audio:          execInput.Audio,
+	}
+
+	// Emit step started event
+	w.emitEvent(&WorkflowRunResponseEvent{
+		Event:     StepStartedEvent,
+		Timestamp: time.Now(),
+		Metadata: map[string]interface{}{
+			"step_name": "function_workflow",
+		},
+	})
+
+	output, err := fn(stepInput)
+	if err != nil {
+		w.metrics.StepsFailed++
+	} else {
+		w.metrics.StepsExecuted++
+		w.metrics.StepsSucceeded++
+	}
+
+	// Emit step completed event
+	w.emitEvent(&WorkflowRunResponseEvent{
+		Event:     StepCompletedEvent,
+		Timestamp: time.Now(),
+		Data:      output,
+		Metadata: map[string]interface{}{
+			"step_name": "function_workflow",
+		},
+	})
+
+	return output, err
+}
+
 // executeStepSequence executes a sequence of steps
 func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execInput *WorkflowExecutionInput) (*StepOutput, error) {
 	var lastOutput *StepOutput
@@ -412,9 +972,7 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 		stepMetrics := &StepMetrics{
 			StartTime: time.Now(),
 		}
-
 		output, err := step.Execute(ctx, stepInput)
-
 		stepMetrics.EndTime = time.Now()
 		stepMetrics.DurationMs = stepMetrics.EndTime.Sub(stepMetrics.StartTime).Milliseconds()
 
@@ -422,7 +980,6 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 			stepMetrics.Success = false
 			stepMetrics.Error = err.Error()
 			w.metrics.StepsFailed++
-
 			if !step.SkipOnFailure {
 				return nil, fmt.Errorf("step '%s' failed: %w", stepName, err)
 			}
@@ -516,12 +1073,10 @@ func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interfa
 			if err != nil {
 				return nil, err
 			}
-
 			// ✅ Armazena a saída do loop inteiro
 			w.mu.Lock()
 			w.stepOutputs[v.Name] = output
 			w.mu.Unlock()
-
 			// ✅ Armazena todas as saídas internas do loop (ex: "research")
 			if v.CollectOutputs {
 				for _, innerOutput := range v.outputs {
@@ -532,7 +1087,6 @@ func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interfa
 					}
 				}
 			}
-
 			// ✅ Atualiza lastOutput para o próximo passo
 			lastOutput = output
 		case *Parallel:
@@ -622,7 +1176,6 @@ func (w *Workflow) executeFunctionWorkflow(ctx context.Context, fn ExecutorFunc,
 	})
 
 	output, err := fn(stepInput)
-
 	if err != nil {
 		w.metrics.StepsFailed++
 	} else {
@@ -681,9 +1234,20 @@ func (w *Workflow) emitEvent(event *WorkflowRunResponseEvent) {
 		// TODO: Implement event storage
 	}
 
-	// Stream event if configured
-	if w.Stream && (w.StreamIntermediateSteps || event.Event == WorkflowCompletedEvent) {
-		// TODO: Implement streaming
+	// Call registered event handlers
+	w.mu.RLock()
+	handlers := w.eventHandlers[event.Event]
+	w.mu.RUnlock()
+
+	for _, handler := range handlers {
+		handler(event)
+	}
+
+	// Stream via WebSocket if configured
+	if w.WebSocketHandler != nil && w.Stream {
+		if w.StreamIntermediateSteps || event.Event == WorkflowCompletedEvent {
+			w.WebSocketHandler.SendEvent(event)
+		}
 	}
 }
 
@@ -808,9 +1372,8 @@ func (w *Workflow) GetMetrics() *WorkflowMetrics {
 // PrintResponse prints the workflow response in a formatted way
 func (w *Workflow) PrintResponse(input interface{}, markdown bool) {
 	utils.SetMarkdownMode(markdown)
-
 	if w.Stream {
-		w.printStreamingResponse(input, markdown)
+		w.printStreamingResponse(input, markdown, w.Stream)
 	} else {
 		w.printStaticResponse(input, markdown)
 	}
@@ -821,9 +1384,18 @@ func (w *Workflow) printStaticResponse(input interface{}, markdown bool) {
 	start := time.Now()
 	ctx := context.Background()
 
-	// Thinking panel
-	spinnerResponse := utils.ThinkingPanel("Executing workflow...")
+	// Thinking panel use input
+	msg := input
+	switch v := input.(type) {
+	case string:
+		msg = v
+	case *WorkflowExecutionInput:
+		msg = v.Message
+	case WorkflowExecutionInput:
+		msg = v.Message
+	}
 
+	spinnerResponse := utils.ThinkingPanel(msg.(string))
 	response, err := w.Run(ctx, input)
 	if err != nil {
 		utils.ErrorPanel(err)
@@ -873,69 +1445,87 @@ func (w *Workflow) printStaticResponse(input interface{}, markdown bool) {
 	utils.ResponsePanel(content, spinnerResponse, start, markdown)
 }
 
-// printStreamingResponse prints a streaming workflow response
-func (w *Workflow) printStreamingResponse(input interface{}, markdown bool) {
+// printStreamingResponse prints a streaming workflow response with real-time UI updates
+func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stream bool) {
 	start := time.Now()
 	ctx := context.Background()
 
+	msg := input
+	switch v := input.(type) {
+	case string:
+		msg = v
+	case *WorkflowExecutionInput:
+		msg = v.Message
+	case WorkflowExecutionInput:
+		msg = v.Message
+	}
+
 	// Thinking panel
-	spinnerResponse := utils.ThinkingPanel("Executing workflow...")
+	spinnerResponse := utils.ThinkingPanel(msg.(string))
 
 	// Start streaming panel
 	contentChan := utils.StartSimplePanel(spinnerResponse, start, markdown)
 
-	// Register event handlers for streaming
-	w.OnEvent(StepCompletedEvent, func(event *WorkflowRunResponseEvent) {
-		if event.Data != nil {
-			stepOutput, ok := event.Data.(*StepOutput)
-			if ok && stepOutput.Content != nil {
-				var content string
-				switch v := stepOutput.Content.(type) {
-				case string:
-					content = v
-				default:
-					data, _ := json.Marshal(v)
-					content = string(data)
+	// Buffer for accumulating content before sending to panel
+	var streamBuffer strings.Builder
+
+	// Create an event handler to capture streaming events
+	w.OnEvent(StepOutputEvent, func(event *WorkflowRunResponseEvent) {
+		if output, ok := event.Data.(*StepOutput); ok {
+			if content, ok := output.Content.(string); ok {
+				// Add content to buffer
+				streamBuffer.WriteString(content)
+
+				// Check if we should flush buffer
+				shouldFlush := false
+				bufferContent := streamBuffer.String()
+
+				// Flush if finding period, exclamation or question mark
+				if strings.Contains(bufferContent, ".") ||
+					strings.Contains(bufferContent, "!") ||
+					strings.Contains(bufferContent, "?") {
+					shouldFlush = true
 				}
 
-				contentChan <- utils.ContentUpdateMsg{
-					PanelName: utils.MessageResponse,
-					Content:   content,
+				// Flush if buffer gets too large
+				if streamBuffer.Len() > 50 {
+					shouldFlush = true
+				}
+
+				if shouldFlush {
+					// Send accumulated content
+					contentChan <- utils.ContentUpdateMsg{
+						PanelName: "Response",
+						Content:   streamBuffer.String(),
+					}
+					streamBuffer.Reset() // Clear buffer
 				}
 			}
 		}
 	})
 
-	// Run workflow
-	response, err := w.Run(ctx, input)
-	if err != nil {
+	// Run workflow with streaming
+	_, err := w.RunWithStream(ctx, input, stream)
+
+	// Flush any remaining content in buffer
+	if streamBuffer.Len() > 0 {
 		contentChan <- utils.ContentUpdateMsg{
-			PanelName: utils.MessageError,
-			Content:   err.Error(),
+			PanelName: "Response",
+			Content:   streamBuffer.String(),
 		}
-		close(contentChan)
+	}
+
+	// Close the content channel to stop streaming
+	close(contentChan)
+
+	// Wait a bit for UI to finish rendering
+	time.Sleep(100 * time.Millisecond)
+
+	if err != nil {
+		utils.ErrorPanel(err)
 		return
 	}
 
-	// Send final response if not already streamed
-	if response.Content != nil && !w.StreamIntermediateSteps {
-		var content string
-		switch v := response.Content.(type) {
-		case string:
-			content = v
-		default:
-			data, _ := json.MarshalIndent(v, "", "  ")
-			content = string(data)
-		}
-
-		contentChan <- utils.ContentUpdateMsg{
-			PanelName: utils.MessageResponse,
-			Content:   content,
-		}
-	}
-
-	close(contentChan)
-
-	// Small delay to ensure final rendering
-	time.Sleep(100 * time.Millisecond)
+	// Response is already shown through streaming events
+	// No need to print final content
 }

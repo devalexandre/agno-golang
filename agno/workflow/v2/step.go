@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devalexandre/agno-golang/agno/agent"
 	"github.com/devalexandre/agno-golang/agno/models"
 )
 
@@ -43,6 +42,7 @@ type Step struct {
 // Agent interface (should be imported from agent package)
 type Agent interface {
 	Run(input interface{}, opts ...interface{}) (models.RunResponse, error)
+	RunStream(prompt string, fn func([]byte) error) error
 	GetName() string
 }
 
@@ -393,13 +393,56 @@ func (e *agentExecutor) Execute(ctx context.Context, input *StepInput) (*StepOut
 	var result models.RunResponse
 	var err error
 
+	// If streaming is enabled, use the streaming version
 	if e.stream {
-		result, err = e.agent.Run(message, agent.WithStream(true))
+		// Create a channel to collect the streaming content
+		contentChan := make(chan string, 100)
+		errChan := make(chan error, 1)
+
+		// Start streaming in a goroutine
+		go func() {
+			err := e.agent.RunStream(message, func(chunk []byte) error {
+				select {
+				case contentChan <- string(chunk):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				return nil
+			})
+			errChan <- err
+		}()
+
+		// Collect streaming content
+		var fullContent strings.Builder
+		streamingDone := false
+		for !streamingDone {
+			select {
+			case chunk := <-contentChan:
+				fullContent.WriteString(chunk)
+			case err := <-errChan:
+				if err != nil {
+					return nil, err
+				}
+				streamingDone = true
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		// Create a result with the collected content
+		result = models.RunResponse{
+			TextContent: fullContent.String(),
+		}
 	} else {
+		// Note: We don't use agent.WithStream(true) here because it triggers
+		// terminal UI functions (ThinkingPanel, StartSimplePanel) that conflict
+		// with the workflow's own UI management. The workflow handles streaming
+		// at a higher level through its own event system.
 		result, err = e.agent.Run(message)
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			fmt.Printf("DEBUG: Agent execution failed: %v\n", err)
+			return nil, err
+		}
 	}
 
 	// Extract readable text content from RunResponse
