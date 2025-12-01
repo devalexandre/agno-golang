@@ -239,3 +239,17 @@ func (r *PanelRenderer) RenderCustom(emoji, title, content string, color lipglos
 
 	return panel
 }
+
+// RenderMarkdown renders markdown content if markdown mode is enabled
+func (r *PanelRenderer) RenderMarkdown(content string) string {
+	if !r.Markdown || r.glamourRdr == nil {
+		return content
+	}
+	
+	rendered, err := r.glamourRdr.Render(content)
+	if err != nil {
+		return content
+	}
+	
+	return strings.TrimSpace(rendered)
+}
