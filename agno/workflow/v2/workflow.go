@@ -1466,39 +1466,43 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 	// Start streaming panel
 	contentChan := utils.StartSimplePanel(spinnerResponse, start, markdown)
 
-	// Buffer for accumulating content before sending to panel
-	var streamBuffer strings.Builder
+	// Shared state for accumulating ALL content from ALL steps
+	var globalContent strings.Builder
+	var mu sync.Mutex
+	var currentStepName string
 
-	// Create an event handler to capture streaming events
+	// Clear any existing StepOutputEvent handlers to prevent accumulation
+	w.mu.Lock()
+	w.eventHandlers[StepOutputEvent] = nil
+	w.mu.Unlock()
+
+	// Create an event handler to capture streaming events from ALL steps
 	w.OnEvent(StepOutputEvent, func(event *WorkflowRunResponseEvent) {
 		if output, ok := event.Data.(*StepOutput); ok {
 			if content, ok := output.Content.(string); ok {
-				// Add content to buffer
-				streamBuffer.WriteString(content)
+				mu.Lock()
+				defer mu.Unlock()
 
-				// Check if we should flush buffer
-				shouldFlush := false
-				bufferContent := streamBuffer.String()
-
-				// Flush if finding period, exclamation or question mark
-				if strings.Contains(bufferContent, ".") ||
-					strings.Contains(bufferContent, "!") ||
-					strings.Contains(bufferContent, "?") {
-					shouldFlush = true
-				}
-
-				// Flush if buffer gets too large
-				if streamBuffer.Len() > 50 {
-					shouldFlush = true
-				}
-
-				if shouldFlush {
-					// Send accumulated content
-					contentChan <- utils.ContentUpdateMsg{
-						PanelName: "Response",
-						Content:   streamBuffer.String(),
+				// Check if we're starting a new step
+				if output.StepName != "" && output.StepName != currentStepName {
+					// New step starting - add a separator if not the first step
+					if currentStepName != "" && globalContent.Len() > 0 {
+						globalContent.WriteString("\n\n")
 					}
-					streamBuffer.Reset() // Clear buffer
+					currentStepName = output.StepName
+				}
+
+				// Add this chunk to the global content
+				globalContent.WriteString(content)
+
+				// Send the entire accumulated content to the panel
+				select {
+				case contentChan <- utils.ContentUpdateMsg{
+					PanelName: "Response",
+					Content:   globalContent.String(),
+				}:
+				default:
+					// Channel is full or closed, skip
 				}
 			}
 		}
@@ -1507,19 +1511,13 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 	// Run workflow with streaming
 	_, err := w.RunWithStream(ctx, input, stream)
 
-	// Flush any remaining content in buffer
-	if streamBuffer.Len() > 0 {
-		contentChan <- utils.ContentUpdateMsg{
-			PanelName: "Response",
-			Content:   streamBuffer.String(),
-		}
-	}
-
 	// Close the content channel to stop streaming
 	close(contentChan)
 
-	// Wait a bit for UI to finish rendering
-	time.Sleep(100 * time.Millisecond)
+	// Clear the event handler after use to prevent memory leaks
+	w.mu.Lock()
+	w.eventHandlers[StepOutputEvent] = nil
+	w.mu.Unlock()
 
 	if err != nil {
 		utils.ErrorPanel(err)
