@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
 	"github.com/devalexandre/agno-golang/agno/memory"
@@ -29,35 +29,26 @@ func main() {
 	pterm.Println(pterm.FgGray.Sprint("CLI for code analysis, planning and execution"))
 	pterm.Println()
 
-	var task string
-	var analyze string
-	var implement string
-	var prompt string
-	var path string
-
-	flag.StringVar(&task, "task", "", "General task for the coder")
-	flag.StringVar(&analyze, "analyze", "", "Code or file to analyze")
-	flag.StringVar(&implement, "implement", "", "Implementation to be done")
-	flag.StringVar(&prompt, "prompt", "", "Custom prompt/instruction for the task")
-	flag.StringVar(&path, "path", "", "Path to file or folder to analyze")
-	flag.Parse()
-
-	if task == "" && analyze == "" && implement == "" && prompt == "" {
-		pterm.FgRed.Println("✗ Required parameters not provided")
+	// Get prompt from command line arguments
+	args := os.Args[1:]
+	if len(args) == 0 {
+		pterm.FgRed.Println("✗ No prompt provided")
 		pterm.Println()
 		pterm.FgBlue.Println("Usage:")
-		pterm.Println("  agno-coder --task <task>")
-		pterm.Println("  agno-coder --analyze <code>")
-		pterm.Println("  agno-coder --implement <implementation>")
-		pterm.Println("  agno-coder --prompt <custom_prompt> --path <file_or_folder>")
+		pterm.Println("  agno-coder \"<your prompt>\"")
 		pterm.Println()
 		pterm.FgGray.Println("Examples:")
-		pterm.Println("  agno-coder --analyze main.go")
-		pterm.Println("  agno-coder --prompt 'Add error handling' --path ./cmd")
-		pterm.Println("  agno-coder --task 'Refactor authentication module'")
+		pterm.Println("  agno-coder \"Review this code for security issues cookbook/agno-coder/main.go\"")
+		pterm.Println("  agno-coder \"Add error handling to all functions in ./cmd\"")
+		pterm.Println("  agno-coder \"Refactor the authentication module in auth/\"")
+		pterm.Println("  agno-coder \"Find all TODO comments in the project and list them\"")
+		pterm.Println("  agno-coder \"Create a new REST endpoint for user management\"")
 		pterm.Println()
 		os.Exit(1)
 	}
+
+	// Join all arguments as the prompt
+	prompt := strings.Join(args, " ")
 
 	ctx := context.Background()
 
@@ -72,17 +63,35 @@ func main() {
 	// Silent initialization
 	pterm.FgGray.Print("Initializing models... ")
 
-	model, err := ollama.NewOllamaChat(
-		models.WithID("qwen3-coder:480b-cloud"),
-		models.WithBaseURL("https://ollama.com"),
-		models.WithAPIKey(os.Getenv("OLLAMA_API_KEY")),
-	)
+	// Get current working directory for context
+	cwd, err := os.Getwd()
 	if err != nil {
-		pterm.Println()
-		pterm.FgRed.Printf("✗ Failed to initialize model: %v\n", err)
-		os.Exit(1)
+		cwd = "."
 	}
 
+	// Get API key from environment variable
+	// apiKey := os.Getenv("OPENROUTER_API_KEY")
+	// if apiKey == "" {
+	// 	pterm.FgRed.Println("✗ OPENROUTER_API_KEY environment variable not set")
+	// 	pterm.Println()
+	// 	pterm.FgGray.Println("Please set your OpenRouter API key:")
+	// 	pterm.Println("  export OPENROUTER_API_KEY=your-api-key")
+	// 	os.Exit(1)
+	// }
+
+	// model, err := openrouter.NewOpenRouterChat(
+	// 	models.WithID("qwen/qwen3-235b-a22b:free"),
+	// )
+	// if err != nil {
+	// 	log.Fatalf("Failed to create OpenRouter chat: %v", err)
+	// }
+
+	model, err := ollama.NewOllamaChat(
+		models.WithID("cogito:3b"),
+	)
+	if err != nil {
+		log.Fatalf("Failed to create Ollama chat: %v", err)
+	}
 	db, err := sqlite.NewSqliteMemoryDb("user_memories", "agno_coder.db")
 	if err != nil {
 		pterm.Println()
@@ -99,109 +108,115 @@ func main() {
 	pterm.FgGreen.Println("✓ Ready")
 	pterm.Println()
 
-	// Criar agentes silenciosamente
+	// CodeAnalyzer Agent - Smart file discovery and analysis
 	analyzer, err := agent.NewAgent(agent.AgentConfig{
 		Context: ctx,
 		Model:   model,
 		Name:    "CodeAnalyzer",
-		Instructions: `You are a Go code analyst specialized in using Qwen Coder.
+		Instructions: fmt.Sprintf(`ROLE: Intelligent code analysis expert
+CURRENT WORKING DIRECTORY: %s
 
-OBJECTIVE:
-Analyze Go code files and provide structured feedback on architecture, security, performance, and maintainability.
+TASK: Analyze the user's request, find relevant files, and provide structured feedback.
 
-WORKFLOW:
-1. **Read the file** - If given a file path, use FileTool.ReadFile to read its contents
-2. **Analyze the code** - Review structure, patterns, issues
-3. **Provide feedback** - Format as markdown below
+CRITICAL WORKFLOW:
+1. FIRST, parse the user's prompt to identify:
+   - What action they want (review, analyze, refactor, add, fix, etc.)
+   - Any file paths, directory paths, or patterns mentioned
+   - The specific requirements or concerns
 
-TOOLS AVAILABLE:
-- FileTool: Read files, list directories, search code
-- ShellTool: Execute commands, get system info
+2. USE TOOLS TO FIND FILES:
+   - If a specific file path is mentioned, use FileTool.ReadFile to read it
+   - If a directory is mentioned, use FileTool.ListDirectory to explore it
+   - If you need to search for files, use FileTool.SearchFiles or ShellTool.Execute with 'find' or 'grep'
+   - Use ShellTool.Execute with commands like:
+     * 'find . -name "*.go"' to find Go files
+     * 'grep -r "pattern" .' to search for patterns
+     * 'cat <file>' to read file contents
+     * 'ls -la <dir>' to list directory contents
 
-OUTPUT FORMAT (Markdown):
+3. ANALYZE THE CODE:
+   - Read the relevant files using FileTool.ReadFile
+   - Understand the code structure and purpose
+   - Identify issues based on the user's request
 
+ANALYSIS CATEGORIES (as applicable):
+- Architecture & Structure
+- Security vulnerabilities
+- Performance bottlenecks
+- Code quality & maintainability
+- Best practices compliance
+
+OUTPUT FORMAT (strict markdown):
 ## 📊 Code Analysis
 
-### General Structure
-- Architecture and design patterns
-- Dependencies and imports
+### Files Analyzed
+- [list of files found and analyzed]
 
-### Critical Issues
-- **Security**: Vulnerabilities, validations
-- **Performance**: Bottlenecks, complexity
-- **Maintainability**: Code duplication, long functions
+### Summary
+[Brief summary of what was found]
 
-### Quality Issues
-- Go conventions
-- Naming and documentation
+### Findings
+[Detailed findings based on user's request]
 
-### Improvements
-- Refactoring suggestions
-- Best practices to adopt
+### Recommendations
+[Actionable recommendations]
 
-### Metrics
-- Complexity score
-- Maintainability (1-10)
-
-Be objective and actionable.`,
-		Tools:  toolsList,
-		Memory: mem,
+NEVER assume file contents - ALWAYS use tools to read them first.`, cwd),
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create analysis agent: %v\n", err)
 		os.Exit(1)
 	}
 
+	// CodePlanner Agent - Creates implementation plans
 	planner, err := agent.NewAgent(agent.AgentConfig{
 		Context: ctx,
 		Model:   model,
 		Name:    "CodePlanner",
-		Instructions: `You are a code planner using Qwen Coder.
+		Instructions: fmt.Sprintf(`ROLE: Senior developer planning implementation
+CURRENT WORKING DIRECTORY: %s
 
-OBJECTIVE:
-Create clear, executable implementation plans.
+TASK: Create executable implementation plans based on the analysis.
 
-TOOLS AVAILABLE:
-- FileTool: Read/write files, list directories, search
-- ShellTool: Execute commands, check environment
+WORKFLOW:
+1. Review the analysis from the previous step
+2. If you need more context, use FileTool.ReadFile or ShellTool.Execute to gather information
+3. Create a detailed, step-by-step plan
 
-OUTPUT FORMAT (Markdown):
+PLANNING STEPS:
+1. Understand requirements from analysis report
+2. Break into atomic, sequential tasks
+3. Identify required files and modifications
+4. Define verification steps for each change
 
+OUTPUT FORMAT (strict markdown):
 ## 🎯 Implementation Plan
 
-### Context
-- Objective: [What needs to be done]
-- Scope: [What's included]
-- Constraints: [Limitations]
+### Files to Modify
+- [path/to/file.go]: [purpose]
 
-### Steps
-1. **Preparation**
-   - Check dependencies
-   - Setup environment
-   - Create backups if needed
+### Step-by-Step Implementation
+1. **Task**: [specific action]
+   - File: [path]
+   - Changes: [exact code changes]
+   - Verification: [command to verify]
 
-2. **Implementation**
-   - [Specific steps]
+2. **Task**: [next action]
+   [continue as needed]
 
-3. **Testing**
-   - Unit tests
-   - Integration tests
-   - Validation
+### Validation Plan
+- Command: [exact command to run]
+- Expected output: [what success looks like]
 
-### Resources Needed
-- Dependencies
-- Tools
-- Infrastructure
-
-### Risks
-- [Risk]: [Mitigation]
-
-### Success Criteria
-- [Measurable outcomes]
-
-Make it executable by a senior developer.`,
-		Tools:  toolsList,
-		Memory: mem,
+NO commentary outside this format.`, cwd),
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create planning agent: %v\n", err)
@@ -212,7 +227,8 @@ Make it executable by a senior developer.`,
 		Context: ctx,
 		Model:   model,
 		Name:    "CodeExecutor",
-		Instructions: `You are a code executor using Qwen Coder.
+		Instructions: fmt.Sprintf(`ROLE: Code executor
+CURRENT WORKING DIRECTORY: %s
 
 OBJECTIVE:
 Execute implementation plans step-by-step.
@@ -222,10 +238,9 @@ TOOLS AVAILABLE:
 - ShellTool: Execute commands, run tests
 
 WORKFLOW:
-1. Validate the plan
-2. Execute each step carefully
-3. Test changes
-4. Document results
+1. **Analyze Input**: Read the plan AND any feedback/errors from previous attempts (if any).
+2. **Execute**: Modify files and run commands to implement the plan or fix the reported errors.
+3. **Verify**: Run quick checks to ensure changes were applied.
 
 OUTPUT FORMAT (Markdown):
 
@@ -237,20 +252,106 @@ OUTPUT FORMAT (Markdown):
 ### Implemented Features
 - [x] [Feature description]
 
-### Tests Performed
-- [x] [Test description]
+### Fixes Applied (if retrying)
+- [x] [Fix description]
 
 ### Results
 - **Status**: ✅ Success | ⚠️ Partial | ❌ Failure
-- **Tests**: [Pass/Fail count]
-- **Notes**: [Important observations]
 
-Execute commands using ShellTool and modify files using FileTool.`,
-		Tools:  toolsList,
-		Memory: mem,
+Execute commands using ShellTool and modify files using FileTool.`, cwd),
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
 	})
 	if err != nil {
 		pterm.FgRed.Printf("✗ Failed to create execution agent: %v\n", err)
+		os.Exit(1)
+	}
+
+	validator, err := agent.NewAgent(agent.AgentConfig{
+		Context: ctx,
+		Model:   model,
+		Name:    "CodeValidator",
+		Instructions: fmt.Sprintf(`ROLE: Code validator
+CURRENT WORKING DIRECTORY: %s
+
+OBJECTIVE:
+Verify if the implementation meets the requirements and works correctly.
+
+TOOLS AVAILABLE:
+- FileTool: Read files to check content
+- ShellTool: Run tests, build commands, or scripts
+
+WORKFLOW:
+1. **Read Requirements**: Understand what was supposed to be done.
+2. **Verify**: Run commands (go build, go test, etc.) or check file contents.
+3. **Report**: Return success or failure with details.
+
+IMPORTANT:
+- If validation PASSES, you MUST set "success": true in your output metadata.
+- If validation FAILS, you MUST set "success": false in your output metadata and provide error details.
+
+OUTPUT FORMAT (Markdown):
+
+## 🔍 Validation Report
+
+### Checks Performed
+- [x] [Check description]
+
+### Outcome
+- **Success**: [Yes/No]
+- **Errors**: [List of errors if any]
+`, cwd),
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
+	})
+	if err != nil {
+		pterm.FgRed.Printf("✗ Failed to create validator agent: %v\n", err)
+		os.Exit(1)
+	}
+
+	debugger, err := agent.NewAgent(agent.AgentConfig{
+		Context: ctx,
+		Model:   model,
+		Name:    "CodeDebugger",
+		Instructions: fmt.Sprintf(`ROLE: Code debugger
+CURRENT WORKING DIRECTORY: %s
+
+OBJECTIVE:
+Analyze validation failures and provide a fix strategy.
+
+TOOLS AVAILABLE:
+- FileTool: Read files to understand the code
+- ShellTool: Run commands if needed to reproduce
+
+WORKFLOW:
+1. **Analyze Error**: Read the validation report and the code.
+2. **Identify Cause**: Determine why it failed.
+3. **Propose Fix**: Provide specific instructions or code blocks to fix the issue.
+
+OUTPUT FORMAT (Markdown):
+
+## 🐞 Debug Analysis
+
+### Error Analysis
+- [Error description]
+
+### Root Cause
+- [Explanation]
+
+### Fix Strategy
+- [Specific instructions for Executor]
+`, cwd),
+		Tools:                   toolsList,
+		Memory:                  mem,
+		MaxToolCallsFromHistory: 5,
+		NumHistoryRuns:          4,
+	})
+	if err != nil {
+		pterm.FgRed.Printf("✗ Failed to create debugger agent: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -282,52 +383,62 @@ Execute commands using ShellTool and modify files using FileTool.`,
 		log.Fatal("Error creating execution step:", err)
 	}
 
+	validateStep, err := v2.NewStep(
+		v2.WithName("Validation"),
+		v2.WithAgent(validator),
+		v2.WithStepStreaming(true),
+	)
+	if err != nil {
+		log.Fatal("Error creating validation step:", err)
+	}
+
+	debugStep, err := v2.NewStep(
+		v2.WithName("Debugging"),
+		v2.WithAgent(debugger),
+		v2.WithStepStreaming(true),
+	)
+	if err != nil {
+		log.Fatal("Error creating debugging step:", err)
+	}
+
+	// Conditional Debugging: Only run if validation failed
+	conditionalDebug := v2.NewCondition(
+		v2.WithConditionName("ConditionalDebug"),
+		v2.WithIf(func(input *v2.StepInput) bool {
+			if valOutput, ok := input.PreviousStepOutputs["Validation"]; ok {
+				if success, ok := valOutput.Metadata["success"].(bool); ok {
+					return !success
+				}
+			}
+			return false
+		}),
+		v2.WithThen(debugStep),
+	)
+
+	// Loop: Execute -> Validate -> (If Fail) Debug -> Repeat
+	executionLoop := v2.NewLoop(
+		v2.WithLoopName("ImplementationLoop"),
+		v2.WithLoopSteps(executeStep, validateStep, conditionalDebug),
+		v2.WithMaxIterations(5),
+		v2.WithLoopCondition(v2.UntilSuccess()),
+	)
+
 	// Workflow
 	workflow := v2.NewWorkflow(
 		v2.WithWorkflowName("Agno Coder Workflow"),
-		v2.WithWorkflowDescription("Workflow for code analysis, planning and execution"),
-		v2.WithWorkflowSteps([]*v2.Step{
+		v2.WithWorkflowDescription("Workflow for code analysis, planning, execution and validation"),
+		v2.WithStreaming(true, true),
+		v2.WithWorkflowSteps([]interface{}{
 			analyzeStep,
 			planStep,
-			executeStep,
+			executionLoop,
 		}),
 	)
 
-	// Determine input based on flags
-	var input string
-
-	// Priority 1: Custom prompt with path
-	if prompt != "" {
-		if path != "" {
-			// Check if path is a directory or file
-			fileInfo, err := os.Stat(path)
-			if err != nil {
-				pterm.Error.Printf("Path not found: %s\n", path)
-				os.Exit(1)
-			}
-
-			if fileInfo.IsDir() {
-				input = fmt.Sprintf("%s\n\nAnalyze all files in the directory: %s", prompt, path)
-			} else {
-				input = fmt.Sprintf("%s\n\nRead and analyze the file at path: %s", prompt, path)
-			}
-		} else {
-			input = prompt
-		}
-	} else if analyze != "" {
-		// Priority 2: Legacy analyze flag
-		input = fmt.Sprintf("Read and analyze the file at path: %s\nProvide a detailed analysis with improvement suggestions.", analyze)
-	} else if implement != "" {
-		// Priority 3: Implement flag
-		input = fmt.Sprintf("Implement: %s", implement)
-	} else {
-		// Priority 4: General task
-		input = task
-	}
-
-	// Execute workflow
-	pterm.FgGray.Println("Running workflow...")
+	// Display the prompt
+	pterm.FgCyan.Printf("📝 Task: %s\n", prompt)
 	pterm.Println()
 
-	workflow.PrintResponse(input, true)
+	// Execute workflow with the user's prompt
+	workflow.PrintResponse(prompt, true)
 }
