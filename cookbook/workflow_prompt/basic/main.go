@@ -6,7 +6,7 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/agent"
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/openrouter"
+	"github.com/devalexandre/agno-golang/agno/models/ollama"
 	"github.com/devalexandre/agno-golang/agno/tools"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
@@ -14,8 +14,9 @@ import (
 
 func main() {
 	// Create Ollama model
-	ollamaModel, err := openrouter.NewOpenRouterChat(
-		models.WithID("x-ai/grok-4.1-fast:free"),
+	ollamaModel, err := ollama.NewOllamaChat(
+		models.WithID("cogito:3b"),
+		models.WithClientMaxTokens(100),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -75,6 +76,6 @@ func main() {
 		v2.WithStreaming(true, true),
 	)
 
-	input := "Create a blog post about AI agents"
+	input := "Create a blog post about AI "
 	workflow.PrintResponse(input, true)
 }

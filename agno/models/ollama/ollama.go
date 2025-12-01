@@ -75,6 +75,13 @@ func (o *OllamaChat) GetClientOptions() *models.ClientOptions {
 
 // Invoke executes a synchronous call to the Ollama model
 func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
+	// Apply client-level options (e.g., MaxTokens) if not already set in call options
+	if o.opts.MaxTokens != nil {
+		// Prepend the client MaxTokens to options so it acts as a default
+		// (call options can still override it)
+		options = append([]models.Option{models.WithMaxTokens(*o.opts.MaxTokens)}, options...)
+	}
+
 	resp, err := o.client.CreateChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
@@ -130,6 +137,13 @@ func (o *OllamaChat) AInvoke(ctx context.Context, messages []models.Message, opt
 
 // InvokeStream executes a streaming call to the Ollama model
 func (o *OllamaChat) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
+	// Apply client-level options (e.g., MaxTokens) if not already set in call options
+	if o.opts.MaxTokens != nil {
+		// Prepend the client MaxTokens to options so it acts as a default
+		// (call options can still override it)
+		options = append([]models.Option{models.WithMaxTokens(*o.opts.MaxTokens)}, options...)
+	}
+
 	err := o.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return err
