@@ -1258,6 +1258,15 @@ func (w *Workflow) OnEvent(event WorkflowRunEvent, handler func(*WorkflowRunResp
 	w.eventHandlers[event] = append(w.eventHandlers[event], handler)
 }
 
+// formatAgentOutput formats and displays agent output with visual styling
+// This mirrors the improvements made in agno-coder for better UX
+func formatAgentOutput(output string, stepName string) string {
+	if output == "" {
+		return fmt.Sprintf("[No output from agent - %s]", stepName)
+	}
+	return output
+}
+
 // saveSession saves the current workflow session
 func (w *Workflow) saveSession(ctx context.Context) error {
 	if w.Storage == nil || w.SessionID == "" {
@@ -1379,7 +1388,7 @@ func (w *Workflow) PrintResponse(input interface{}, markdown bool) {
 	}
 }
 
-// printStaticResponse prints a static workflow response
+// printStaticResponse prints a static workflow response with improved output visibility
 func (w *Workflow) printStaticResponse(input interface{}, markdown bool) {
 	start := time.Now()
 	ctx := context.Background()
@@ -1402,7 +1411,7 @@ func (w *Workflow) printStaticResponse(input interface{}, markdown bool) {
 		return
 	}
 
-	// Response panel
+	// Response panel - ensure content is always visible (improvement from agno-coder)
 	content := ""
 	if response.Content != nil {
 		switch v := response.Content.(type) {
@@ -1440,6 +1449,11 @@ func (w *Workflow) printStaticResponse(input interface{}, markdown bool) {
 				content = fmt.Sprintf("%v", v)
 			}
 		}
+	}
+
+	// Format output to ensure it's always visible
+	if content == "" {
+		content = formatAgentOutput("", "Workflow Result")
 	}
 
 	utils.ResponsePanel(content, spinnerResponse, start, markdown)
@@ -1486,6 +1500,7 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 	w.mu.Unlock()
 
 	// Create an event handler to capture streaming events from ALL steps
+	// This event handler now uses formatAgentOutput to ensure all outputs are visible
 	w.OnEvent(StepOutputEvent, func(event *WorkflowRunResponseEvent) {
 		if output, ok := event.Data.(*StepOutput); ok {
 			if content, ok := output.Content.(string); ok {
@@ -1501,8 +1516,11 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 					currentStepName = output.StepName
 				}
 
+				// Format output to ensure it's always visible (improvement from agno-coder)
+				formattedContent := formatAgentOutput(content, output.StepName)
+
 				// Add this chunk to the global content
-				globalContent.WriteString(content)
+				globalContent.WriteString(formattedContent)
 
 				// Get color for this step
 				color := stepColors[output.StepName]
@@ -1514,7 +1532,7 @@ func (w *Workflow) printStreamingResponse(input interface{}, markdown bool, stre
 				select {
 				case contentChan <- utils.ContentUpdateMsg{
 					PanelName: "Response",
-					Content:   content,
+					Content:   formattedContent,
 					AgentName: output.StepName,
 					Color:     color,
 				}:
