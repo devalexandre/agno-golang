@@ -30,11 +30,10 @@ func (mt *MockTool) TestMethod(params MockParams) (int, error) {
 
 func createMockTool() *MockTool {
 	tool := &MockTool{
-		Toolkit: toolkit.Toolkit{
-			Name:        "mock",
-			Description: "Mock tool for testing",
-		},
+		Toolkit: toolkit.NewToolkit(),
 	}
+	tool.Name = "mock"
+	tool.Description = "Mock tool for testing"
 	tool.Register("test_method", "Mock tool for testing", tool, tool.TestMethod, MockParams{})
 	return tool
 }

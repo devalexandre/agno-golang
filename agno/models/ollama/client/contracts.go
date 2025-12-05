@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/tools"
 )
 
@@ -29,16 +30,17 @@ type CompletionChunk struct {
 }
 
 type CompletionResponse struct {
-	Model        string      `json:"model"`
-	CreatedAt    string      `json:"created_at"`
-	Message      ChatMessage `json:"message"`
-	Done         bool        `json:"done"`
-	Context      []int       `json:"context"`
-	EvalCount    int         `json:"eval_count"`
-	EvalTime     int64       `json:"eval_duration"`
-	PromptTokens int         `json:"prompt_eval_count"`
-	PromptTime   int64       `json:"prompt_eval_duration"`
-	TotalTime    int64       `json:"total_duration"`
+	Model        string              `json:"model"`
+	CreatedAt    string              `json:"created_at"`
+	Message      ChatMessage         `json:"message"`
+	Done         bool                `json:"done"`
+	Context      []int               `json:"context"`
+	EvalCount    int                 `json:"eval_count"`
+	EvalTime     int64               `json:"eval_duration"`
+	PromptTokens int                 `json:"prompt_eval_count"`
+	PromptTime   int64               `json:"prompt_eval_duration"`
+	TotalTime    int64               `json:"total_duration"`
+	ToolResults  []models.ToolResult `json:"tool_results,omitempty"` // Results from tool executions
 }
 
 // OllamaFunctionCall é uma versão personalizada de FunctionCall para o Ollama
