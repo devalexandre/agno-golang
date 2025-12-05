@@ -37,6 +37,14 @@ type AgentConfig struct {
 	Markdown       bool
 	ShowToolsCall  bool
 	Debug          bool
+	//--- ChainTool Configuration ---
+	// Enable ChainTool mode: Agent calls 1 tool, result propagates through all others
+	EnableChainTool bool
+	// ChainTool error handling configuration
+	ChainToolErrorConfig  *ChainToolErrorConfig
+	ChainToolErrorHandler ChainToolErrorHandler
+	// ChainTool result caching
+	ChainToolCache ChainToolCache
 	//--- Agent Reasoning ---
 	// Enable reasoning by working through the problem step by step.
 	Reasoning            bool
@@ -84,6 +92,10 @@ type AgentConfig struct {
 	// Pass a pointer to a struct to define the expected output structure
 	// The struct will be filled automatically with the parsed response
 	OutputSchema interface{}
+	// Dependencies - available to agent during run (passed to all tools/hooks)
+	Dependencies map[string]interface{}
+	// AddDependenciesToContext - if true, dependencies are added to the system message
+	AddDependenciesToContext bool
 	// OutputModel is a separate AI model used specifically for parsing the output JSON
 	// This allows using a different model (e.g., faster/cheaper) for JSON generation
 	// Similar to how SemanticModel is used for compression
@@ -185,6 +197,10 @@ type Agent struct {
 	markdown               bool
 	showToolsCall          bool
 	debug                  bool
+	enableChainTool        bool // If true, Agent calls 1 tool and propagates result
+	chainToolErrorConfig   *ChainToolErrorConfig
+	chainToolErrorHandler  ChainToolErrorHandler
+	chainToolCache         ChainToolCache
 
 	// Memory and Storage
 	memory                  memory.MemoryManager
@@ -234,6 +250,10 @@ type Agent struct {
 	outputModelPrompt string
 	parserModel       models.AgnoModelInterface
 	parserModelPrompt string
+
+	// Dependencies - available to agent during run
+	dependencies             map[string]interface{}
+	addDependenciesToContext bool
 
 	// Culture Manager
 	cultureManager          interface{}
@@ -320,20 +340,29 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 	}
 
 	agent := &Agent{
-		ctx:             config.Context,
-		model:           config.Model,
-		name:            config.Name,
-		role:            config.Role,
-		description:     config.Description,
-		goal:            config.Goal,
-		instructions:    config.Instructions,
-		expected_output: config.ExpectedOutput,
-		contextData:     config.ContextData,
-		tools:           config.Tools,
-		stream:          config.Stream,
-		markdown:        config.Markdown,
-		showToolsCall:   config.ShowToolsCall,
-		debug:           config.Debug,
+		ctx:                   config.Context,
+		model:                 config.Model,
+		name:                  config.Name,
+		role:                  config.Role,
+		description:           config.Description,
+		goal:                  config.Goal,
+		instructions:          config.Instructions,
+		expected_output:       config.ExpectedOutput,
+		contextData:           config.ContextData,
+		tools:                 config.Tools,
+		stream:                config.Stream,
+		markdown:              config.Markdown,
+		showToolsCall:         config.ShowToolsCall,
+		debug:                 config.Debug,
+		enableChainTool:       config.EnableChainTool,
+		chainToolErrorConfig:  config.ChainToolErrorConfig,
+		chainToolErrorHandler: config.ChainToolErrorHandler,
+		chainToolCache: func() ChainToolCache {
+			if config.ChainToolCache != nil {
+				return config.ChainToolCache
+			}
+			return &NoCache{}
+		}(),
 
 		// Memory and Storage
 		memory:                  config.Memory,
@@ -373,12 +402,14 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		enableSemanticCompression: config.EnableSemanticCompression,
 
 		// Input/Output Schema
-		inputSchema:       config.InputSchema,
-		outputSchema:      config.OutputSchema,
-		outputModel:       config.OutputModel,
-		outputModelPrompt: config.OutputModelPrompt,
-		parserModel:       config.ParserModel,
-		parserModelPrompt: config.ParserModelPrompt,
+		inputSchema:              config.InputSchema,
+		outputSchema:             config.OutputSchema,
+		dependencies:             config.Dependencies,
+		addDependenciesToContext: config.AddDependenciesToContext,
+		outputModel:              config.OutputModel,
+		outputModelPrompt:        config.OutputModelPrompt,
+		parserModel:              config.ParserModel,
+		parserModelPrompt:        config.ParserModelPrompt,
 
 		// Culture Manager
 		cultureManager:          config.CultureManager,
@@ -432,7 +463,7 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 	}
 
 	// Wrap tools with hooks if configured
-	if len(config.ToolBeforeHooks) > 0 || len(config.ToolAfterHooks) > 0 || len(config.ToolGuardrails) > 0 {
+	if len(config.ToolBeforeHooks) > 0 || len(config.ToolAfterHooks) > 0 || len(config.ToolGuardrails) > 0 || config.EnableChainTool {
 		agent.tools = agent.WrapToolsWithHooks(agent.tools)
 	}
 
@@ -543,12 +574,6 @@ func (a *Agent) GetReadChatHistory() bool {
 // GetReadToolCallHistory returns whether tool call history reading is enabled
 func (a *Agent) GetReadToolCallHistory() bool {
 	return a.enableReadToolCallHistoryTool
-}
-
-// activeRun represents an active run with its context and cancellation function
-type activeRun struct {
-	ctx    context.Context
-	cancel context.CancelFunc
 }
 
 // CancelRun attempts to cancel a running operation by its run ID
@@ -784,9 +809,7 @@ func (tw *ToolWrapper) Execute(methodName string, input json.RawMessage) (interf
 	var inputMap map[string]interface{}
 	if err := json.Unmarshal(input, &inputMap); err != nil {
 		inputMap = make(map[string]interface{})
-	}
-
-	// Execute tool guardrails
+	} // Execute tool guardrails
 	if len(tw.agent.toolGuardrails) > 0 {
 		toolCallData := map[string]interface{}{
 			"tool_name":   tw.GetName() + "." + methodName,
@@ -819,7 +842,7 @@ func (tw *ToolWrapper) Execute(methodName string, input json.RawMessage) (interf
 
 // WrapToolsWithHooks wraps tools with before/after hooks and guardrails if configured
 func (a *Agent) WrapToolsWithHooks(tools []toolkit.Tool) []toolkit.Tool {
-	if len(a.toolBeforeHooks) == 0 && len(a.toolAfterHooks) == 0 && len(a.toolGuardrails) == 0 {
+	if len(a.toolBeforeHooks) == 0 && len(a.toolAfterHooks) == 0 && len(a.toolGuardrails) == 0 && !a.enableChainTool {
 		return tools
 	}
 
@@ -842,50 +865,104 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// validateInput validates the input against the input schema if configured
-func (a *Agent) validateInput(input interface{}) error {
+// validateInput validates and converts input according to input schema (like Python's _validate_input)
+// Returns the validated/converted input and an error if validation fails
+// If no input schema is set, returns input unchanged
+func (a *Agent) validateInput(input interface{}) (interface{}, error) {
+	// If no input schema, return input unchanged (matches Python behavior)
 	if a.inputSchema == nil {
-		return nil
+		return input, nil
 	}
 
-	// Convert input to JSON and then validate by unmarshaling into schema type
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return fmt.Errorf("failed to marshal input: %w", err)
+	// Handle nil input
+	if input == nil {
+		return input, nil
 	}
 
-	// Create a new instance of the schema type
+	// Handle string input - parse as JSON first
+	if strInput, ok := input.(string); ok {
+		var parsed interface{}
+		err := json.Unmarshal([]byte(strInput), &parsed)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse input string as JSON: %w", err)
+		}
+		input = parsed
+	}
+
+	// Get the schema type
 	schemaType := reflect.TypeOf(a.inputSchema)
-	if schemaType.Kind() == reflect.Ptr {
-		schemaType = schemaType.Elem()
+	if schemaType == nil {
+		return input, nil
 	}
 
-	schemaInstance := reflect.New(schemaType).Interface()
+	// Handle map[string]interface{} input - convert to schema struct type
+	// This matches Pydantic's dict-to-model conversion
+	if mapInput, ok := input.(map[string]interface{}); ok {
+		// Create a new instance of the schema type
+		newInstance := reflect.New(schemaType.Elem()).Interface()
 
-	// Unmarshal and validate
-	if err := json.Unmarshal(inputJSON, schemaInstance); err != nil {
-		return fmt.Errorf("input validation failed: %w", err)
+		// Convert map to JSON and back to struct
+		data, err := json.Marshal(mapInput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal map input: %w", err)
+		}
+
+		err = json.Unmarshal(data, newInstance)
+		if err != nil {
+			return nil, fmt.Errorf("failed to validate dict input to %v: %w", schemaType, err)
+		}
+
+		return newInstance, nil
 	}
 
-	return nil
+	// Handle case where input is already a struct
+	inputType := reflect.TypeOf(input)
+	if inputType == schemaType {
+		// Already the correct type, return as-is
+		return input, nil
+	}
+
+	// Handle pointer to struct
+	if inputType.Kind() == reflect.Ptr && inputType.Elem() == schemaType.Elem() {
+		// Already the correct pointer type
+		return input, nil
+	}
+
+	// Try to convert to schema type if it's a struct we can unmarshal
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("cannot validate %T against input_schema: %w", input, err)
+	}
+
+	newInstance := reflect.New(schemaType.Elem()).Interface()
+	err = json.Unmarshal(data, newInstance)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse input into %v: %w", schemaType, err)
+	}
+
+	return newInstance, nil
 }
 
 // prepareInputWithSchema prepares input according to input schema if configured
 func (a *Agent) prepareInputWithSchema(input interface{}) (string, error) {
-	// If input is a string, return it directly (most common case)
+	// If input is a string, validate and return it
 	if str, ok := input.(string); ok {
+		// Validate string input against schema
+		_, err := a.validateInput(str)
+		if err != nil {
+			return "", err
+		}
 		return str, nil
 	}
 
-	// If input schema is configured, validate first
-	if a.inputSchema != nil {
-		if err := a.validateInput(input); err != nil {
-			return "", err
-		}
+	// Validate and convert input according to schema
+	validatedInput, err := a.validateInput(input)
+	if err != nil {
+		return "", err
 	}
 
 	// Marshal non-string input to JSON
-	data, err := json.Marshal(input)
+	data, err := json.Marshal(validatedInput)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal input: %w", err)
 	}
@@ -994,12 +1071,8 @@ func (a *Agent) parseOutputWithSchema(response string) (interface{}, error) {
 		if startIdx != -1 {
 			// Skip the opening ``` and optional "json"
 			cleaned = cleaned[startIdx+3:]
-			if strings.HasPrefix(cleaned, "json") {
-				cleaned = cleaned[4:]
-			}
-			cleaned = strings.TrimSpace(cleaned)
-
-			// Find the end (closing backticks)
+			cleaned = strings.TrimPrefix(cleaned, "json")
+			cleaned = strings.TrimSpace(cleaned) // Find the end (closing backticks)
 			endIdx := strings.Index(cleaned, "```")
 			if endIdx != -1 {
 				cleaned = cleaned[:endIdx]
@@ -1755,12 +1828,26 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 		}
 	}
 
+	// ChainTool mode will be handled during tool execution if enabled
+
 	// Retry logic
 	var resp *models.MessageResponse
 	var lastErr error
 
-	// Prepare model options
-	modelOptions := []models.Option{models.WithTools(a.tools)}
+	// Prepare model options - if ChainTool is enabled, only send the first tool
+	var toolsToSend []toolkit.Tool
+	if a.enableChainTool && len(a.tools) > 1 {
+		// ChainTool mode: Send only the first tool to the model
+		toolsToSend = []toolkit.Tool{a.tools[0]}
+		if a.debug {
+			utils.DebugPanel(fmt.Sprintf("ChainTool: Sending only first tool '%s' to model (hiding %d other tools)", a.tools[0].GetName(), len(a.tools)-1))
+		}
+	} else {
+		// Normal mode: Send all tools
+		toolsToSend = a.tools
+	}
+
+	modelOptions := []models.Option{models.WithTools(toolsToSend)}
 
 	// Check if streaming is enabled
 	if options.Stream != nil && *options.Stream {
@@ -1789,6 +1876,154 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 
 	if lastErr != nil {
 		return models.RunResponse{}, lastErr
+	}
+
+	// Debug: print response in json
+	if a.debug {
+		utils.ToolCallPanelWithArgs("resp", resp)
+	}
+
+	// Process tool results if present (tools were executed by the model client)
+	if len(resp.ToolResults) > 0 && a.enableChainTool && len(a.tools) > 1 {
+
+		// Get the first tool's result
+		firstToolResult := resp.ToolResults[0]
+
+		// Get the first tool's result as string (this is what we'll replace in model response)
+		var firstToolResultStr string
+		if str, ok := firstToolResult.Result.(string); ok {
+			firstToolResultStr = str
+		} else {
+			resultJSON, _ := json.Marshal(firstToolResult.Result)
+			firstToolResultStr = string(resultJSON)
+		}
+
+		// Start chain from the first tool's result
+		currentResult := firstToolResult.Result
+
+		// Execute remaining tools in sequence (tools[1], tools[2], ...)
+		for i := 1; i < len(a.tools); i++ {
+			tool := a.tools[i]
+
+			// Prepare arguments for the tool
+			args := a.prepareToolArgumentsForChain(tool, currentResult)
+
+			// Marshal arguments to JSON
+			argsJSON, err := json.Marshal(args)
+			if err != nil {
+				utils.ErrorPanel(fmt.Errorf("ChainTool: Failed to marshal arguments for %s: %v", tool.GetName(), err))
+				continue
+			}
+
+			// Get method name
+			methods := tool.GetMethods()
+			var methodName string
+			for name := range methods {
+				methodName = name
+				break
+			}
+
+			if a.debug {
+				utils.ToolCallPanelWithArgs(fmt.Sprintf("ChainTool: Executing tool[%d] %s", i, tool.GetName()), args)
+			}
+
+			// Execute the tool
+			toolResult, err := tool.Execute(methodName, json.RawMessage(argsJSON))
+			if err != nil {
+				utils.ErrorPanel(fmt.Errorf("ChainTool: Tool execution failed for %s: %v", tool.GetName(), err))
+				continue
+			}
+
+			if a.debug {
+				utils.ToolCallPanelWithArgs(fmt.Sprintf("ChainTool: Result from tool[%d] %s", i, tool.GetName()), toolResult)
+			}
+
+			// Update current result for next tool
+			currentResult = toolResult
+		}
+
+		// Get final result as string
+		var finalResult string
+		if str, ok := currentResult.(string); ok {
+			finalResult = str
+		} else {
+			resultJSON, _ := json.Marshal(currentResult)
+			finalResult = string(resultJSON)
+		}
+
+		// Replace the first tool's RESULT with the final chain result in the model's response
+		// e.g., replace "AGNO" (first tool result) with "_ONGA_" (final chain result)
+		modelResponse := resp.Content
+		if firstToolResultStr != "" && firstToolResultStr != finalResult {
+			idx := strings.Index(modelResponse, firstToolResultStr)
+			if idx != -1 {
+				modelResponse = modelResponse[:idx] + finalResult + modelResponse[idx+len(firstToolResultStr):]
+				if a.debug {
+					utils.InfoPanel(fmt.Sprintf("ChainTool: Substituting '%s' → '%s' in model response", firstToolResultStr, finalResult))
+				}
+			}
+		}
+
+		// Build response with substituted model response
+		parsedContent, err := a.ApplyOutputFormatting(modelResponse)
+		if err != nil {
+			return models.RunResponse{}, err
+		}
+
+		var outputContent interface{}
+		if parsedContent != modelResponse {
+			outputContent = parsedContent
+		}
+
+		runResponse := models.RunResponse{
+			TextContent:  modelResponse,
+			ContentType:  "text",
+			Event:        "RunResponse",
+			ParsedOutput: parsedContent,
+			Output:       outputContent,
+			Messages: []models.Message{
+				{
+					Role:    "assistant",
+					Content: modelResponse,
+				},
+			},
+			CreatedAt: time.Now().Unix(),
+		}
+
+		// Execute output guardrails
+		if len(a.outputGuardrails) > 0 {
+			if err := RunGuardrails(a.ctx, a.outputGuardrails, runResponse); err != nil {
+				return models.RunResponse{}, fmt.Errorf("output validation failed: %w", err)
+			}
+		}
+
+		// Execute post-hooks
+		if len(a.postHooks) > 0 {
+			for i, hook := range a.postHooks {
+				if err := hook(a.ctx, &runResponse); err != nil {
+					return models.RunResponse{}, fmt.Errorf("post-hook %d failed: %w", i, err)
+				}
+			}
+		}
+
+		return runResponse, nil
+	}
+
+	// Process tool calls if present (legacy path for non-ChainTool mode or when ToolResults not available)
+	if len(resp.ToolCalls) > 0 {
+		utils.InfoPanel(fmt.Sprintf("Processing %d tool calls", len(resp.ToolCalls)))
+
+		// Execute tool calls and get final result
+		finalResult, toolMessages, _, _, err := a.processToolCallsFromResponse(resp)
+		if err != nil {
+			return models.RunResponse{}, fmt.Errorf("tool call processing failed: %w", err)
+		}
+
+		// Update response content with tool results
+		resp.Content = finalResult
+
+		// Add tool messages to history
+		messages = append(messages, toolMessages...)
 	}
 
 	// Save run to storage if enabled
@@ -2607,4 +2842,329 @@ func (a *Agent) ApplySemanticCompression(message string) string {
 	}
 
 	return msgcompressed
+}
+
+// prepareToolArgumentsForChain prepares arguments for a tool in ChainTool mode
+func (a *Agent) prepareToolArgumentsForChain(tool toolkit.Tool, input interface{}) map[string]interface{} {
+	args := make(map[string]interface{})
+
+	// Get method names
+	methods := tool.GetMethods()
+	if len(methods) == 0 {
+		return args
+	}
+
+	// Use the first method (most tools have one method)
+	var methodName string
+	for name := range methods {
+		methodName = name
+		break
+	}
+
+	// Get the parameter schema
+	schema := tool.GetParameterStruct(methodName)
+
+	// Extract parameter names from schema
+	var paramNames []string
+	if props, ok := schema["properties"].(map[string]interface{}); ok {
+		for key := range props {
+			paramNames = append(paramNames, key)
+		}
+	}
+
+	// If no parameters defined, return empty args
+	if len(paramNames) == 0 {
+		return args
+	}
+
+	// Use the first parameter (most tools have one main input parameter)
+	firstParam := paramNames[0]
+
+	// Handle different input types
+	switch inputValue := input.(type) {
+	case string:
+		// Try to parse as JSON first
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(inputValue), &parsed); err == nil {
+			// Successfully parsed as JSON
+			args[firstParam] = parsed
+		} else {
+			// Use as string
+			args[firstParam] = inputValue
+		}
+	case map[string]interface{}:
+		// Pass map directly
+		args[firstParam] = inputValue
+	default:
+		// Convert to appropriate type
+		args[firstParam] = inputValue
+	}
+
+	return args
+}
+
+// processToolCallsFromResponse processes tool calls from model response and returns final result
+// Returns: (finalResult, toolMessages, chainToolExecuted, firstToolInput, error)
+func (a *Agent) processToolCallsFromResponse(resp *models.MessageResponse) (string, []models.Message, bool, string, error) {
+	utils.InfoPanel("Processing tool calls from model response")
+
+	var toolMessages []models.Message
+	var finalResult string
+	var chainToolWasExecuted bool
+	var firstToolInput string
+
+	// Process each tool call
+	for callIndex, toolCall := range resp.ToolCalls {
+		utils.InfoPanel(fmt.Sprintf("Executing tool call: %s", toolCall.Function.Name))
+
+		// Find the tool - check both wrapped and non-wrapped tools
+		var tool toolkit.Tool
+		for _, t := range a.tools {
+			// Check if it's a ToolWrapper
+			if wrapper, ok := t.(*ToolWrapper); ok {
+				if wrapper.GetName() == toolCall.Function.Name {
+					tool = wrapper
+					break
+				}
+			} else if t.GetName() == toolCall.Function.Name {
+				// Direct tool without wrapper
+				tool = t
+				break
+			}
+		}
+
+		if tool == nil {
+			return "", nil, false, "", fmt.Errorf("tool %s not found", toolCall.Function.Name)
+		}
+
+		// Get method name from tool
+		methods := tool.GetMethods()
+		var methodName string
+		for name := range methods {
+			methodName = name
+			break
+		}
+
+		// Capture the first tool's input for later substitution in ChainTool mode
+		if callIndex == 0 && a.enableChainTool {
+			var inputMap map[string]interface{}
+			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &inputMap); err == nil {
+				// Try to extract the first parameter value as string
+				if len(inputMap) > 0 {
+					for _, v := range inputMap {
+						if str, ok := v.(string); ok {
+							firstToolInput = str
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// Execute the tool with proper method name
+		argsJSON := json.RawMessage(toolCall.Function.Arguments)
+		result, err := tool.Execute(methodName, argsJSON)
+		if err != nil {
+			return "", nil, false, "", fmt.Errorf("tool execution failed for %s: %w", toolCall.Function.Name, err)
+		}
+
+		utils.InfoPanel(fmt.Sprintf("Tool %s completed, result: %v", toolCall.Function.Name, result))
+
+		// Add tool message to history
+		toolMessages = append(toolMessages, models.Message{
+			Role:       "tool",
+			Content:    fmt.Sprintf("%v", result),
+			ToolCallID: &toolCall.ID,
+		})
+
+		// DEBUG: Check ChainTool state
+		utils.InfoPanel(fmt.Sprintf("DEBUG: enableChainTool=%v, len(tools)=%d, callIndex=%d", a.enableChainTool, len(a.tools), callIndex))
+
+		// In ChainTool mode, check if this was the final result from the chain
+		if a.enableChainTool && len(a.tools) > 1 {
+			utils.InfoPanel(fmt.Sprintf("ChainTool: Tool execution completed with result: %v", result))
+			chainToolWasExecuted = true
+		}
+
+		// In ChainTool mode, execute remaining tools in sequence
+		if a.enableChainTool && len(a.tools) > 1 && callIndex == 0 {
+			// After first tool executes, run the chain for remaining tools
+			// Extract the unwrapped tool if it's a wrapper
+			var unwrappedTool toolkit.Tool = tool
+			if wrapper, ok := tool.(*ToolWrapper); ok {
+				unwrappedTool = wrapper.Tool
+			}
+
+			chainResult, err := a.executeChainFromTool(unwrappedTool, result)
+			if err != nil {
+				utils.InfoPanel(fmt.Sprintf("ChainTool: Chain execution warning: %v", err))
+			} else if chainResult != nil {
+				result = chainResult
+			}
+		}
+
+		// Convert result to string for final response
+		if str, ok := result.(string); ok {
+			finalResult = str
+		} else {
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				finalResult = fmt.Sprintf("%v", result)
+			} else {
+				finalResult = string(resultJSON)
+			}
+		}
+	}
+
+	return finalResult, toolMessages, chainToolWasExecuted, firstToolInput, nil
+}
+
+// executeChainFromTool executes remaining tools in sequence after the given tool was called by the model
+// This implements the ChainTool behavior where one tool call triggers the execution of all subsequent tools
+func (a *Agent) executeChainFromTool(executedTool toolkit.Tool, result interface{}) (interface{}, error) {
+	if a.debug {
+		utils.ToolCallPanel("Executing Chain Tools")
+	}
+	// Find the index of the executed tool
+	executedIndex := -1
+	for i, tool := range a.tools {
+		// Compare both wrapped and unwrapped tools
+		var toolToCompare toolkit.Tool
+		if wrapper, ok := tool.(*ToolWrapper); ok {
+			toolToCompare = wrapper.Tool
+		} else {
+			toolToCompare = tool
+		}
+
+		// Compare by identity and name
+		if toolToCompare == executedTool || toolToCompare.GetName() == executedTool.GetName() {
+			executedIndex = i
+			break
+		}
+	}
+
+	if executedIndex == -1 {
+		if a.debug {
+			utils.InfoPanel("ChainTool: Executed tool not found in agent tools list")
+		}
+		return result, nil // Tool not found, return original result
+	}
+
+	// If this was the last tool, no chaining needed
+	if executedIndex >= len(a.tools)-1 {
+		return result, nil
+	}
+
+	var currentInput interface{} = result
+	var finalResult interface{} = result
+
+	// Execute remaining tools in sequence
+	for i := executedIndex + 1; i < len(a.tools); i++ {
+		tool := a.tools[i]
+
+		// Prepare arguments for the tool
+		args := a.prepareToolArgumentsForChain(tool, currentInput)
+
+		// Execute before hooks
+		if err := a.ExecuteToolBeforeHooks(a.ctx, tool.GetName(), args); err != nil {
+			utils.ErrorPanel(fmt.Errorf("ChainTool: Before hook failed for %s: %v", tool.GetName(), err))
+			continue // Continue with chain even if hook fails
+		}
+
+		// Execute the tool
+		argsJSON, err := json.Marshal(args)
+		if err != nil {
+			utils.ErrorPanel(fmt.Errorf("ChainTool: Failed to marshal arguments for %s: %v", tool.GetName(), err))
+			continue
+		}
+
+		// Get method name
+		methods := tool.GetMethods()
+		var methodName string
+		for name := range methods {
+			methodName = name
+			break
+		}
+
+		if a.debug {
+			utils.ToolCallPanelWithArgs(fmt.Sprintf("Executing Tool Chain: %v", tool.GetName()), args)
+		}
+
+		toolResult, err := tool.Execute(methodName, json.RawMessage(argsJSON))
+		if err != nil {
+			utils.ErrorPanel(fmt.Errorf("ChainTool: Tool execution failed for %s: %v", tool.GetName(), err))
+			continue // Continue with chain even if tool fails
+		}
+
+		if a.debug {
+			utils.ToolCallPanelWithArgs(fmt.Sprintf("Result  Tool Chain: %v", tool.GetName()), toolResult)
+		}
+
+		// Execute after hooks
+		if err := a.ExecuteToolAfterHooks(a.ctx, tool.GetName(), args, toolResult); err != nil {
+			utils.ErrorPanel(fmt.Errorf("chainTool: After hook failed for %v: %v", tool.GetName(), err.Error()))
+			continue
+		}
+
+		// Update current input for next tool
+		currentInput = toolResult
+		finalResult = toolResult
+	}
+
+	return finalResult, nil
+}
+
+// AddTool adds a new tool to the agent dynamically at runtime
+func (a *Agent) AddTool(tool toolkit.Tool) error {
+	if tool == nil {
+		return fmt.Errorf("tool cannot be nil")
+	}
+
+	if tool.GetName() == "" {
+		return fmt.Errorf("tool name cannot be empty")
+	}
+
+	// Check if tool already exists
+	if a.GetToolByName(tool.GetName()) != nil {
+		return fmt.Errorf("tool with name '%s' already exists", tool.GetName())
+	}
+
+	a.tools = append(a.tools, tool)
+	return nil
+}
+
+// RemoveTool removes a tool from the agent by its name
+func (a *Agent) RemoveTool(toolName string) error {
+	if toolName == "" {
+		return fmt.Errorf("tool name cannot be empty")
+	}
+
+	for i, tool := range a.tools {
+		if tool.GetName() == toolName {
+			a.tools = append(a.tools[:i], a.tools[i+1:]...)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("tool '%s' not found", toolName)
+}
+
+// GetTools returns all tools currently in the agent
+func (a *Agent) GetTools() []toolkit.Tool {
+	return a.tools
+}
+
+// GetToolByName retrieves a specific tool by its name
+func (a *Agent) GetToolByName(name string) toolkit.Tool {
+	if name == "" {
+		return nil
+	}
+
+	for _, tool := range a.tools {
+		if tool.GetName() == name {
+			return tool
+		}
+	}
+
+	return nil
 }
