@@ -110,11 +110,12 @@ func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, opti
 	}
 
 	return &models.MessageResponse{
-		Model:     o.id,
-		Role:      resp.Message.Role,
-		Content:   resp.Message.Content,
-		Thinking:  resp.Message.Thinking,
-		ToolCalls: toolCalls,
+		Model:       o.id,
+		Role:        resp.Message.Role,
+		Content:     resp.Message.Content,
+		Thinking:    resp.Message.Thinking,
+		ToolCalls:   toolCalls,
+		ToolResults: resp.ToolResults, // Pass tool results from client
 	}, nil
 }
 

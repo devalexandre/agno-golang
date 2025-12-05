@@ -74,12 +74,6 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		delete(opts, "max_tokens")
 	}
 
-	// Debug: Log the options being sent
-	if debugmod != nil && debugmod.(bool) {
-		fmt.Printf("DEBUG: CallOptions MaxTokens = %v\n", callOptions.MaxTokens)
-		fmt.Printf("DEBUG: Final opts map: %v\n", opts)
-	}
-
 	req.Options = opts
 
 	_tools, maptools, _ := c.prepareTools(callOptions.ToolCall)
@@ -96,6 +90,10 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		jsonDebugReq, _ := json.MarshalIndent(req, "", "  ")
 		utils.DebugPanel(string(jsonDebugReq))
 	}
+
+	// Store tool results for returning to caller
+	var toolResults []models.ToolResult
+
 	err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
 		resp_ = resp
 		if len(resp.Message.ToolCalls) == 0 {
@@ -130,9 +128,19 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 
 				// Execute the tool with the corrected arguments
 				resTool, err := tool.Execute(tc.Function.Name, argsJSON)
+
+				// Capture tool result for returning to caller
+				toolResult := models.ToolResult{
+					ToolName:  tc.Function.Name,
+					ToolInput: string(argsJSON),
+					Result:    resTool,
+				}
 				if err != nil {
+					toolResult.Error = err.Error()
+					toolResults = append(toolResults, toolResult)
 					return fmt.Errorf("error executing tool %s: %w", tc.Function.Name, err)
 				}
+				toolResults = append(toolResults, toolResult)
 
 				// Tool call completion panel
 				if showToolsCall != nil && showToolsCall.(bool) {
@@ -232,7 +240,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			Content:  resp.Message.Content,
 			Thinking: "", // Will be populated from raw response if available
 		},
-		Done: resp.Done,
+		Done:        resp.Done,
+		ToolResults: toolResults, // Include tool results
 	}
 
 	// If there were tool calls, make a second request to get the final response
@@ -250,7 +259,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 					Content:  resp.Message.Content,
 					Thinking: "", // Will be populated from raw response if available
 				},
-				Done: resp.Done,
+				Done:        resp.Done,
+				ToolResults: toolResults, // Preserve tool results from first call
 			}
 			return nil
 		})

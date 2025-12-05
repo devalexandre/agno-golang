@@ -29,12 +29,21 @@ type Message struct {
 	Thinking   string           `json:"thinking,omitempty"`
 }
 
+// ToolResult represents the result of a tool execution
+type ToolResult struct {
+	ToolName  string      `json:"tool_name"`
+	ToolInput string      `json:"tool_input,omitempty"`
+	Result    interface{} `json:"result"`
+	Error     string      `json:"error,omitempty"`
+}
+
 type MessageResponse struct {
 	Model            string           `json:"model"`
 	Role             string           `json:"role"`
 	Content          string           `json:"content"`
 	Thinking         string           `json:"thinking,omitempty"`
 	ToolCalls        []tools.ToolCall `json:"tool_calls,omitempty"`
+	ToolResults      []ToolResult     `json:"tool_results,omitempty"` // Results from tool executions
 	ReasoningContent string           `json:"reasoning_content,omitempty"`
 }
 
