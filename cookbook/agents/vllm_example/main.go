@@ -12,7 +12,7 @@ import (
 func main() {
 	apiKey := os.Getenv("VLLM_API_KEY")
 	if apiKey == "" {
-		apiKey = "sk-IrR7Bwxtin0haWagUnPrBgq5PurnUz86" // fallback for demo
+		apiKey = "" // fallback for demo
 	}
 	baseURL := "https://z2bg1juojbhurv-8000.proxy.runpod.net/v1"
 	modelID := "EssentialAI/rnj-1-instruct"

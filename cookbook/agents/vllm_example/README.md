@@ -5,7 +5,7 @@ Este exemplo mostra como usar o agente Go para acessar um endpoint vLLM compatí
 ```
 curl -X POST "https://z2bg1juojbhurv-8000.proxy.runpod.net/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-IrR7Bwxtin0haWagUnPrBgq5PurnUz86" \
+  -H "Authorization: Bearer " \
   --data '{
     "model": "EssentialAI/rnj-1-instruct",
     "messages": [
