@@ -21,7 +21,7 @@ func main() {
 
 	// 1. Setup SQLite database for memory persistence
 	fmt.Println("💾 Setting up SQLite memory database...")
-	dbFile := "agent_memory.db"
+	dbFile := "/tmp/agent_memory.db"
 	memoryDB, err := memorysqlite.NewSqliteMemoryDb("user_memories", dbFile)
 	if err != nil {
 		log.Fatalf("Failed to create memory database: %v", err)
