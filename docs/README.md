@@ -10,6 +10,7 @@ Agno-Golang is a powerful AI agent framework that provides native compatibility 
 
 ### Core Modules
 - [📚 Knowledge Base](knowledge/) - PDF processing and knowledge management
+- [♻️ Learning Loop](learning/) - Continuous learning on top of knowledge
 - [🔍 Vector Database](vectordb/) - Vector storage and similarity search
 - [🧠 Embeddings](embedder/) - Text embedding generation
 - [🤖 Agents](agent/) - AI agent implementations
