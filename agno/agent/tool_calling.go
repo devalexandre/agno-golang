@@ -442,7 +442,7 @@ func (h *DefaultToolCallErrorHandler) HandleError(result ToolCallResult) error {
 		errorMsg += fmt.Sprintf(" (Attempt: %d, Duration: %v)", result.Attempt, result.Duration)
 	}
 
-	return fmt.Errorf(errorMsg)
+	return fmt.Errorf("%s", errorMsg)
 }
 
 // ValidateToolCallResponse valida a resposta de uma chamada de ferramenta

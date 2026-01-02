@@ -2,8 +2,9 @@ package culture
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -85,29 +86,39 @@ func (cm *CultureManager) AddCultureToContext(ctx context.Context, userID string
 		return "", nil
 	}
 
-	// Convert knowledge to JSON for context
-	knowledgeJSON, err := json.MarshalIndent(knowledge.Knowledge, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal knowledge: %w", err)
+	keys := make([]string, 0, len(knowledge.Knowledge))
+	for k := range knowledge.Knowledge {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var lines []string
+	for _, k := range keys {
+		v := knowledge.Knowledge[k]
+		if v == nil {
+			continue
+		}
+		s := fmt.Sprint(v)
+		s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+		if s == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", k, s))
+	}
+	if len(lines) == 0 {
+		return "", nil
 	}
 
 	contextStr := fmt.Sprintf(`
 
-=== USER CULTURAL PROFILE ===
-The following information describes this user's preferences and context. 
-IMPORTANT: Use this information to personalize your responses.
-
+<user_profile>
+User preferences & style (lightweight profile):
 %s
-
-INSTRUCTIONS:
-- Adapt your communication style based on the user's preferences
-- Reference their interests when suggesting topics
-- Consider their previous topics when making recommendations
-- Use their preferred language and communication style
-- Make your responses feel personalized and contextual
-
-================================
-`, string(knowledgeJSON))
+Instructions:
+- Adapt tone/style and examples to match the profile.
+- Do not treat this as factual knowledge; use it only for personalization.
+</user_profile>
+`, strings.Join(lines, "\n"))
 
 	return contextStr, nil
 }

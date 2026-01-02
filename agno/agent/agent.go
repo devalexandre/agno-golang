@@ -117,6 +117,11 @@ type AgentConfig struct {
 	UpdateCulturalKnowledge bool
 	AddCultureToContext     bool
 
+	// Learning Manager for continuous learning (RAG + post-run learning)
+	LearningManager interface{}
+	// Learning is an alias for LearningManager for simpler configuration.
+	Learning interface{}
+
 	// ParseResponse controls whether to parse the response into the OutputSchema
 	ParseResponse bool
 
@@ -261,6 +266,14 @@ type Agent struct {
 	updateCulturalKnowledge bool
 	addCultureToContext     bool
 
+	// Learning Manager
+	learningManager interface{}
+	lastTurnByUser  map[string]struct {
+		userMsg      string
+		assistantMsg string
+	}
+	lastLearningRetrievedIDsByUser map[string][]string
+
 	parseResponse bool
 
 	// Hooks
@@ -339,6 +352,10 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		config.KnowledgeMaxDocuments = 5
 	}
 
+	if config.LearningManager == nil && config.Learning != nil {
+		config.LearningManager = config.Learning
+	}
+
 	agent := &Agent{
 		ctx:                   config.Context,
 		model:                 config.Model,
@@ -412,10 +429,13 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		parserModelPrompt:        config.ParserModelPrompt,
 
 		// Culture Manager
-		cultureManager:          config.CultureManager,
-		enableAgenticCulture:    config.EnableAgenticCulture,
-		updateCulturalKnowledge: config.UpdateCulturalKnowledge,
-		addCultureToContext:     config.AddCultureToContext,
+		cultureManager:                 config.CultureManager,
+		enableAgenticCulture:           config.EnableAgenticCulture,
+		updateCulturalKnowledge:        config.UpdateCulturalKnowledge,
+		addCultureToContext:            config.AddCultureToContext,
+		learningManager:                config.LearningManager,
+		lastTurnByUser:                 make(map[string]struct{ userMsg, assistantMsg string }),
+		lastLearningRetrievedIDsByUser: make(map[string][]string),
 
 		parseResponse: config.ParseResponse,
 
@@ -1444,7 +1464,7 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 	}
 
 	// Add system message and history normally
-	baseMessages := a.prepareMessages(prompt)
+	baseMessages := a.prepareMessages(prompt, options.KnowledgeFilters)
 	for _, msg := range baseMessages {
 		if msg.Role == models.TypeUserRole {
 			messages = append(messages, msg)
@@ -1570,6 +1590,39 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 		if err := a.processMemories(prompt, resp.Content); err != nil && a.debug {
 			fmt.Printf("Warning: Failed to process memories: %v\n", err)
 		}
+	}
+
+	// Continuous learning: observe and optionally persist canonical learnings to the knowledge store.
+	if a.learningManager != nil && a.userID != "" {
+		if lm, ok := a.learningManager.(interface {
+			ObserveAndLearn(ctx context.Context, userID, userMsg, assistantMsg string, meta map[string]interface{}) error
+		}); ok {
+			prev := a.lastTurnByUser[a.userID]
+			meta := map[string]interface{}{
+				"session_id":             a.sessionID,
+				"previous_user_msg":      prev.userMsg,
+				"previous_assistant_msg": prev.assistantMsg,
+			}
+			if ids := a.lastLearningRetrievedIDsByUser[a.userID]; len(ids) > 0 {
+				meta["learning_retrieved_ids"] = ids
+				meta["learning_used"] = true
+			}
+			if options.KnowledgeFilters != nil {
+				meta["knowledge_filters"] = options.KnowledgeFilters
+			}
+			if err := lm.ObserveAndLearn(a.ctx, a.userID, prompt, resp.Content, meta); err != nil {
+				log.Printf("Warning: Learning observe failed: %v", err)
+			}
+			delete(a.lastLearningRetrievedIDsByUser, a.userID)
+		}
+	}
+
+	// Track last turn per user (used for learning promotion on confirmations).
+	if a.userID != "" {
+		a.lastTurnByUser[a.userID] = struct {
+			userMsg      string
+			assistantMsg string
+		}{userMsg: prompt, assistantMsg: resp.Content}
 	}
 
 	// Update message history for next interaction
@@ -1737,7 +1790,7 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 	}
 
 	// Add system message and history normally
-	baseMessages := a.prepareMessages(prompt)
+	baseMessages := a.prepareMessages(prompt, options.KnowledgeFilters)
 	for _, msg := range baseMessages {
 		if msg.Role == models.TypeUserRole {
 			messages = append(messages, msg)
@@ -2040,6 +2093,39 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 		}
 	}
 
+	// Continuous learning: observe and optionally persist canonical learnings to the knowledge store.
+	if a.learningManager != nil && a.userID != "" {
+		if lm, ok := a.learningManager.(interface {
+			ObserveAndLearn(ctx context.Context, userID, userMsg, assistantMsg string, meta map[string]interface{}) error
+		}); ok {
+			prev := a.lastTurnByUser[a.userID]
+			meta := map[string]interface{}{
+				"session_id":             a.sessionID,
+				"previous_user_msg":      prev.userMsg,
+				"previous_assistant_msg": prev.assistantMsg,
+			}
+			if ids := a.lastLearningRetrievedIDsByUser[a.userID]; len(ids) > 0 {
+				meta["learning_retrieved_ids"] = ids
+				meta["learning_used"] = true
+			}
+			if options.KnowledgeFilters != nil {
+				meta["knowledge_filters"] = options.KnowledgeFilters
+			}
+			if err := lm.ObserveAndLearn(a.ctx, a.userID, prompt, resp.Content, meta); err != nil {
+				log.Printf("Warning: Learning observe failed: %v", err)
+			}
+			delete(a.lastLearningRetrievedIDsByUser, a.userID)
+		}
+	}
+
+	// Track last turn per user (used for learning promotion on confirmations).
+	if a.userID != "" {
+		a.lastTurnByUser[a.userID] = struct {
+			userMsg      string
+			assistantMsg string
+		}{userMsg: prompt, assistantMsg: resp.Content}
+	}
+
 	// Update message history for next interaction
 	if a.addHistoryToMessages {
 		a.messages = append(a.messages, models.Message{
@@ -2134,7 +2220,7 @@ func (a *Agent) PrintResponse(prompt string, stream bool, markdown bool) {
 
 func (a *Agent) print_response(prompt string, markdown bool) {
 	start := time.Now()
-	messages := a.prepareMessages(prompt)
+	messages := a.prepareMessages(prompt, nil)
 
 	if a.debug {
 		fmt.Printf("DEBUG: Prepared %d messages for model\n", len(messages))
@@ -2174,7 +2260,7 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 
 func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	start := time.Now()
-	messages := a.prepareMessages(prompt)
+	messages := a.prepareMessages(prompt, nil)
 	// Thinking
 	spinnerResponse := utils.ThinkingPanel(prompt)
 	contentChan := utils.StartSimplePanel(spinnerResponse, start, markdown)
@@ -2300,7 +2386,7 @@ func (a *Agent) filterToolCallsFromHistory(messages []models.Message) []models.M
 	return filteredMessages
 }
 
-func (a *Agent) prepareMessages(prompt string) []models.Message {
+func (a *Agent) prepareMessages(prompt string, knowledgeFilters map[string]interface{}) []models.Message {
 	// If custom system message is provided and buildContext is false, use it directly
 	if a.systemMessage != "" && !a.buildContext {
 		messages := []models.Message{
@@ -2393,13 +2479,63 @@ func (a *Agent) prepareMessages(prompt string) []models.Message {
 		}
 	}
 
+	// Add learning memories (continuous learning) if configured
+	if a.learningManager != nil && a.userID != "" {
+		if lm, ok := a.learningManager.(interface {
+			RetrieveContextWithMeta(ctx context.Context, userID, query string, filters map[string]interface{}) (string, []string, error)
+		}); ok {
+			learningCtx, ids, err := lm.RetrieveContextWithMeta(a.ctx, a.userID, prompt, knowledgeFilters)
+			if err != nil {
+				log.Printf("Warning: Failed to retrieve learning context: %v", err)
+			} else if learningCtx != "" {
+				systemMessage += learningCtx
+				originalSystemMessage += learningCtx
+			}
+			if len(ids) > 0 {
+				a.lastLearningRetrievedIDsByUser[a.userID] = ids
+			} else {
+				delete(a.lastLearningRetrievedIDsByUser, a.userID)
+			}
+		} else if lm, ok := a.learningManager.(interface {
+			RetrieveContextWithFilters(ctx context.Context, userID, query string, filters map[string]interface{}) (string, error)
+		}); ok {
+			learningCtx, err := lm.RetrieveContextWithFilters(a.ctx, a.userID, prompt, knowledgeFilters)
+			if err != nil {
+				log.Printf("Warning: Failed to retrieve learning context: %v", err)
+			} else if learningCtx != "" {
+				systemMessage += learningCtx
+				originalSystemMessage += learningCtx
+			}
+			delete(a.lastLearningRetrievedIDsByUser, a.userID)
+		} else if lm, ok := a.learningManager.(interface {
+			RetrieveContext(ctx context.Context, userID, query string) (string, error)
+		}); ok {
+			learningCtx, err := lm.RetrieveContext(a.ctx, a.userID, prompt)
+			if err != nil {
+				log.Printf("Warning: Failed to retrieve learning context: %v", err)
+			} else if learningCtx != "" {
+				systemMessage += learningCtx
+				originalSystemMessage += learningCtx
+			}
+			delete(a.lastLearningRetrievedIDsByUser, a.userID)
+		}
+	}
+
 	if a.markdown {
 		a.additional_information = append(a.additional_information, "Use markdown to format your answers.")
 	}
 
 	//if have Knowledge, search for relevant documents
 	if a.knowledge != nil {
-		relevantDocs, err := a.knowledge.Search(a.ctx, prompt, a.knowledgeMaxDocuments)
+		var relevantDocs []*knowledge.SearchResult
+		var err error
+		if s, ok := a.knowledge.(interface {
+			SearchWithFilters(ctx context.Context, query string, numDocuments int, filters map[string]interface{}) ([]*knowledge.SearchResult, error)
+		}); ok && knowledgeFilters != nil {
+			relevantDocs, err = s.SearchWithFilters(a.ctx, prompt, a.knowledgeMaxDocuments, knowledgeFilters)
+		} else {
+			relevantDocs, err = a.knowledge.Search(a.ctx, prompt, a.knowledgeMaxDocuments)
+		}
 		if err == nil && len(relevantDocs) > 0 {
 			docContent := ""
 			for _, doc := range relevantDocs {
@@ -2707,7 +2843,7 @@ func (a *Agent) processMemories(userMessage, agentResponse string) error {
 }
 
 func (a *Agent) RunStream(prompt string, fn func([]byte) error) error {
-	messages := a.prepareMessages(prompt)
+	messages := a.prepareMessages(prompt, nil)
 
 	// Collect streaming content for memory processing
 	var fullResponse strings.Builder
