@@ -67,6 +67,46 @@ func (r *PanelRenderer) RenderThinking(content string) string {
 	return panel
 }
 
+func (r *PanelRenderer) RenderThink(content string, duration float64) string {
+	title := "Thinking"
+	if duration > 0 {
+		title = fmt.Sprintf("Thinking (%.1fs)", duration)
+	}
+	titleStyled := TitleStyle("", title, ThinkingColor)
+
+	panel := r.styles.Thinking.Render(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			titleStyled,
+			"",
+			content,
+		),
+	)
+
+	return panel
+}
+
+// RenderMessage renders a prompt/user message panel (green).
+func (r *PanelRenderer) RenderMessage(content string) string {
+	title := TitleStyle("", "Message", MessageColor)
+
+	panel := r.styles.Message.Render(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			title,
+			"",
+			content,
+		),
+	)
+
+	return panel
+}
+
+// RenderPrompt is kept for backward compatibility.
+func (r *PanelRenderer) RenderPrompt(content string) string {
+	return r.RenderMessage(content)
+}
+
 // RenderResponse renders a response panel with timing information
 func (r *PanelRenderer) RenderResponse(content string, duration float64) string {
 	title := TitleStyle("✨", fmt.Sprintf("Response (%.1fs)", duration), ResponseColor)
@@ -245,11 +285,11 @@ func (r *PanelRenderer) RenderMarkdown(content string) string {
 	if !r.Markdown || r.glamourRdr == nil {
 		return content
 	}
-	
+
 	rendered, err := r.glamourRdr.Render(content)
 	if err != nil {
 		return content
 	}
-	
+
 	return strings.TrimSpace(rendered)
 }

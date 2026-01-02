@@ -25,6 +25,7 @@ import (
 type AgentConfig struct {
 	Context        context.Context
 	Model          models.AgnoModelInterface
+	ModelOptions   []models.Option // Extra options passed to Model.Invoke/InvokeStream
 	Name           string
 	Role           string
 	Description    string
@@ -184,6 +185,7 @@ type AgentConfig struct {
 type Agent struct {
 	ctx                    context.Context
 	model                  models.AgnoModelInterface
+	modelOptions           []models.Option
 	name                   string
 	role                   string
 	description            string
@@ -342,6 +344,7 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 	agent := &Agent{
 		ctx:                   config.Context,
 		model:                 config.Model,
+		modelOptions:          config.ModelOptions,
 		name:                  config.Name,
 		role:                  config.Role,
 		description:           config.Description,
@@ -1624,9 +1627,10 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 		Output:       outputContent, // Structured output (pointer to filled struct)
 		Messages: []models.Message{
 			{
-				Role:     models.Role(resp.Role),
-				Content:  resp.Content,
-				Thinking: resp.Thinking,
+				Role:      models.Role(resp.Role),
+				Content:   resp.Content,
+				Thinking:  resp.Thinking,
+				ToolCalls: resp.ToolCalls,
 			},
 		},
 		Model:     resp.Model,
@@ -1848,6 +1852,9 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 	}
 
 	modelOptions := []models.Option{models.WithTools(toolsToSend)}
+	if len(a.modelOptions) > 0 {
+		modelOptions = append(modelOptions, a.modelOptions...)
+	}
 
 	// Check if streaming is enabled
 	if options.Stream != nil && *options.Stream {
@@ -2092,9 +2099,10 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 		Output:       outputContent, // Structured output (pointer to filled struct)
 		Messages: []models.Message{
 			{
-				Role:     models.Role(resp.Role),
-				Content:  resp.Content,
-				Thinking: resp.Thinking,
+				Role:      models.Role(resp.Role),
+				Content:   resp.Content,
+				Thinking:  resp.Thinking,
+				ToolCalls: resp.ToolCalls,
 			},
 		},
 		Model:     resp.Model,
@@ -2121,10 +2129,10 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 }
 
 func (a *Agent) PrintResponse(prompt string, stream bool, markdown bool) {
-	fmt.Println("Running agent  stream:", stream, "markdown:", markdown)
 	a.stream = stream
 	a.markdown = markdown
 	utils.SetMarkdownMode(markdown)
+	utils.PromptPanel(prompt)
 	if stream {
 		a.print_stream_response(prompt, markdown)
 	} else {
@@ -2144,13 +2152,16 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 		fmt.Printf("DEBUG: Using %d tools\n", len(a.tools))
 	}
 
-	spinnerResponse := utils.ThinkingPanel(prompt)
-
 	if a.debug {
 		fmt.Println("DEBUG: Calling model.Invoke...")
 	}
 
-	resp, err := a.model.Invoke(a.ctx, messages, models.WithTools(a.tools))
+	callOptions := []models.Option{models.WithTools(a.tools)}
+	if len(a.modelOptions) > 0 {
+		callOptions = append(callOptions, a.modelOptions...)
+	}
+
+	resp, err := a.model.Invoke(a.ctx, messages, callOptions...)
 	if err != nil {
 		fmt.Printf("ERROR: Model invoke failed: %v\n", err)
 		return
@@ -2164,7 +2175,8 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 		fmt.Printf("DEBUG: Response model: %s\n", resp.Model)
 	}
 
-	utils.ResponsePanel(resp.Content, spinnerResponse, start, markdown)
+	// ResponsePanel already extracts <think>...</think> and shows it via ThinkPanel.
+	utils.ResponsePanel(resp.Content, nil, start, markdown)
 
 	if a.debug {
 		fmt.Println("DEBUG: ResponsePanel called")
@@ -2175,14 +2187,43 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	start := time.Now()
 	messages := a.prepareMessages(prompt)
-	// Thinking
-	spinnerResponse := utils.ThinkingPanel(prompt)
-	contentChan := utils.StartSimplePanel(spinnerResponse, start, markdown)
+	contentChan := utils.StartSimplePanel(nil, start, markdown)
 
 	// Response
 	fullResponse := ""
-	var streamBuffer string // Mover para fora do callback
+	var streamBuffer string // buffer for response streaming
 	showResponse := false
+	parseBuffer := ""
+	inThink := false
+	seenThink := false
+	var thinkAccumulator strings.Builder
+
+	flushResponse := func(s string) {
+		if s == "" {
+			return
+		}
+		streamBuffer += s
+
+		shouldFlush := false
+		if strings.Contains(streamBuffer, ".") ||
+			strings.Contains(streamBuffer, "!") ||
+			strings.Contains(streamBuffer, "?") {
+			shouldFlush = true
+		}
+		if len(streamBuffer) > 50 {
+			shouldFlush = true
+		}
+
+		if shouldFlush {
+			contentChan <- utils.ContentUpdateMsg{
+				PanelName: utils.MessageResponse,
+				Content:   streamBuffer,
+				Replace:   false,
+			}
+			streamBuffer = ""
+		}
+	}
+
 	callOptions := []models.Option{
 		models.WithTools(a.tools),
 		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
@@ -2190,36 +2231,99 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 				showResponse = true
 			}
 
-			// Adicionar chunk ao buffer
-			streamBuffer += string(chunk)
-			fullResponse += string(chunk)
+			chunkStr := string(chunk)
+			fullResponse += chunkStr
+			parseBuffer += chunkStr
 
-			// Verificar se devemos fazer flush do buffer
-			shouldFlush := false
+			const (
+				startTag = "<think>"
+				endTag   = "</think>"
+			)
 
-			// Flush if finding period, exclamation or question mark
-			if strings.Contains(streamBuffer, ".") ||
-				strings.Contains(streamBuffer, "!") ||
-				strings.Contains(streamBuffer, "?") {
-				shouldFlush = true
-			}
+			for {
+				if !seenThink {
+					startIdx := strings.Index(parseBuffer, startTag)
+					if startIdx == -1 {
+						// No <think> yet: stream most of the buffer (keep small tail for partial tag)
+						keep := len(startTag) - 1
+						if keep < 0 {
+							keep = 0
+						}
+						if len(parseBuffer) > keep {
+							flushResponse(parseBuffer[:len(parseBuffer)-keep])
+							parseBuffer = parseBuffer[len(parseBuffer)-keep:]
+						}
+						break
+					}
 
-			// Flush se buffer ficar muito grande (mais de 50 caracteres)
-			if len(streamBuffer) > 50 {
-				shouldFlush = true
-			}
-
-			if shouldFlush {
-				// Send accumulated content
-				contentChan <- utils.ContentUpdateMsg{
-					PanelName: "Response",
-					Content:   streamBuffer,
+					// Stream anything before <think>
+					flushResponse(parseBuffer[:startIdx])
+					parseBuffer = parseBuffer[startIdx+len(startTag):]
+					seenThink = true
+					inThink = true
+					thinkAccumulator.Reset()
+					contentChan <- utils.ContentUpdateMsg{
+						PanelName: utils.MessageThinking,
+						Content:   "",
+						Replace:   true,
+					}
 				}
-				streamBuffer = "" // Limpar buffer
+
+				if inThink {
+					endIdx := strings.Index(parseBuffer, endTag)
+					if endIdx == -1 {
+						// Accumulate most of think buffer (keep tail for partial end tag)
+						keep := len(endTag) - 1
+						if keep < 0 {
+							keep = 0
+						}
+						if len(parseBuffer) > keep {
+							thinkChunk := parseBuffer[:len(parseBuffer)-keep]
+							thinkAccumulator.WriteString(thinkChunk)
+							contentChan <- utils.ContentUpdateMsg{
+								PanelName: utils.MessageThinking,
+								Content:   thinkChunk,
+								Replace:   false,
+							}
+							parseBuffer = parseBuffer[len(parseBuffer)-keep:]
+						}
+						break
+					}
+
+					thinkChunk := parseBuffer[:endIdx]
+					thinkAccumulator.WriteString(thinkChunk)
+					if thinkChunk != "" {
+						contentChan <- utils.ContentUpdateMsg{
+							PanelName: utils.MessageThinking,
+							Content:   thinkChunk,
+							Replace:   false,
+						}
+					}
+					parseBuffer = parseBuffer[endIdx+len(endTag):]
+					inThink = false
+					contentChan <- utils.ContentUpdateMsg{
+						PanelName: utils.MessageThinking,
+						Content:   "",
+						Replace:   false,
+						Finalize:  true,
+					}
+				}
+
+				// After think ends, everything else is answer
+				if seenThink && !inThink {
+					if parseBuffer != "" {
+						flushResponse(parseBuffer)
+						parseBuffer = ""
+					}
+					break
+				}
 			}
 
 			return nil
 		}),
+	}
+	if len(a.modelOptions) > 0 {
+		callOptions = append(callOptions, a.modelOptions...)
 	}
 
 	err := a.model.InvokeStream(a.ctx, messages, callOptions...)
@@ -2231,8 +2335,27 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 	// Flush any remaining content in buffer
 	if streamBuffer != "" {
 		contentChan <- utils.ContentUpdateMsg{
-			PanelName: "Response",
+			PanelName: utils.MessageResponse,
 			Content:   streamBuffer,
+			Replace:   false,
+		}
+	}
+
+	// Finalize response panel
+	contentChan <- utils.ContentUpdateMsg{
+		PanelName: utils.MessageResponse,
+		Content:   "",
+		Replace:   false,
+		Finalize:  true,
+	}
+
+	// If the model started a <think> block but never closed it, finalize the thinking panel.
+	if seenThink && inThink {
+		contentChan <- utils.ContentUpdateMsg{
+			PanelName: utils.MessageThinking,
+			Content:   "",
+			Replace:   false,
+			Finalize:  true,
 		}
 	}
 
@@ -2720,6 +2843,9 @@ func (a *Agent) RunStream(prompt string, fn func([]byte) error) error {
 
 			return fn(chunk)
 		}),
+	}
+	if len(a.modelOptions) > 0 {
+		opts = append(opts, a.modelOptions...)
 	}
 
 	err := a.model.InvokeStream(a.ctx, messages, opts...)
