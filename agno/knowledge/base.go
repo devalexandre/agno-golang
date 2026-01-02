@@ -554,6 +554,33 @@ func (k *BaseKnowledge) Search(ctx context.Context, query string, numDocuments i
 	return k.VectorDB.Search(ctx, query, numDocuments, filters)
 }
 
+// SearchWithFilters searches the knowledge base with additional per-query filters.
+// This is intentionally not part of the Knowledge interface to keep backwards compatibility.
+func (k *BaseKnowledge) SearchWithFilters(ctx context.Context, query string, numDocuments int, filters map[string]interface{}) ([]*SearchResult, error) {
+	if numDocuments <= 0 {
+		numDocuments = k.NumDocuments
+	}
+
+	if k.VectorDB == nil {
+		return nil, fmt.Errorf("vector database not configured")
+	}
+
+	merged := make(map[string]interface{})
+	if k.Filters != nil && k.Filters.Include != nil {
+		for key, value := range k.Filters.Include {
+			merged[key] = value
+		}
+	}
+	for key, value := range filters {
+		merged[key] = value
+	}
+	if len(merged) == 0 {
+		merged = nil
+	}
+
+	return k.VectorDB.Search(ctx, query, numDocuments, merged)
+}
+
 // Add adds documents to the knowledge base
 func (k *BaseKnowledge) Add(ctx context.Context, documents []document.Document) error {
 	if k.VectorDB == nil {
@@ -567,6 +594,27 @@ func (k *BaseKnowledge) Add(ctx context.Context, documents []document.Document) 
 	}
 
 	return k.VectorDB.Insert(ctx, docPtrs, nil)
+}
+
+// Upsert upserts documents into the knowledge base.
+// This is intentionally not part of the Knowledge interface to keep backwards compatibility.
+func (k *BaseKnowledge) Upsert(ctx context.Context, documents []document.Document) error {
+	if k.VectorDB == nil {
+		return fmt.Errorf("vector database not configured")
+	}
+
+	docPtrs := make([]*document.Document, len(documents))
+	for i := range documents {
+		docPtrs[i] = &documents[i]
+	}
+
+	return k.VectorDB.Upsert(ctx, docPtrs, nil)
+}
+
+// UpsertDocument upserts a single document into the knowledge base.
+// This is intentionally not part of the Knowledge interface to keep backwards compatibility.
+func (k *BaseKnowledge) UpsertDocument(ctx context.Context, doc document.Document) error {
+	return k.Upsert(ctx, []document.Document{doc})
 }
 
 // Exists checks if the knowledge base exists
