@@ -190,9 +190,21 @@ Demonstrates dynamic knowledge updates:
 - Vector database updates
 - Real-time knowledge refresh
 
+#### 14. [Learning Loop](./learning_loop/) ♻️
+Demonstrates continuous learning on top of the knowledge store:
+- Pre-run retrieval (RAG) formatted as short bullets
+- Post-run write-gate + dedupe to persist reusable memories
+- Candidate → verified promotion on user confirmation
+
+**Main features:**
+- `LearningManager`: `RetrieveContext()` + `ObserveAndLearn()`
+- Safety heuristics (avoid sensitive/unstable content)
+- Near-duplicate detection
+- Governable metadata (`type`, `status`, timestamps, etc.)
+
 ### Default Tools Examples
 
-#### 14. [Read Chat History](./read_chat_history/) 💬
+#### 15. [Read Chat History](./read_chat_history/) 💬
 Demonstrates chat history access:
 - Agent reads own chat history
 - Conversation analysis
@@ -205,7 +217,7 @@ Demonstrates chat history access:
 - Conversation continuity
 - Self-referential capabilities
 
-#### 15. [Read Tool Call History](./read_toolcall_history/) 🛠️
+#### 16. [Read Tool Call History](./read_toolcall_history/) 🛠️
 Demonstrates tool call tracking:
 - Tool execution history
 - Tool usage patterns

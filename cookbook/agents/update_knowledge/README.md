@@ -2,6 +2,11 @@
 
 This example demonstrates the **UpdateKnowledge** default tool, which allows agents to add information to and search their knowledge base.
 
+## Update Knowledge vs Learning Loop
+
+- **Update Knowledge** is explicit/manual: the model chooses to call `knowledge.add(...)` and you control what is stored.
+- **Learning Loop** is automatic: it can retrieve memories before the run and persist canonical “artifacts” after the run (with heuristics, dedupe, and promotion).
+
 ## Overview
 
 The `UpdateKnowledge` tool provides two methods:
