@@ -261,7 +261,15 @@ func WithBaseURL(url string) func(*ClientOptions) {
 // WithRequestParams sets additional request parameters.
 func WithRequestParams(params map[string]interface{}) Option {
 	return func(o *CallOptions) {
-		o.RequestParams = params
+		if len(params) == 0 {
+			return
+		}
+		if o.RequestParams == nil {
+			o.RequestParams = map[string]interface{}{}
+		}
+		for k, v := range params {
+			o.RequestParams[k] = v
+		}
 	}
 }
 
