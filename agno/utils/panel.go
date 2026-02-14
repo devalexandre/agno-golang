@@ -88,6 +88,12 @@ func DebugPanel(content string) {
 	fmt.Println(panel)
 }
 
+// SkillCallPanel displays a skill call panel with structured arguments
+func SkillCallPanel(title, content string) {
+	panel := globalRenderer.RenderCustom("🛠", title, content, terminal.InfoColor)
+	fmt.Println(panel)
+}
+
 // ErrorPanel displays an error panel
 func ErrorPanel(err error) {
 	panel := globalRenderer.RenderError(err)

@@ -14,6 +14,7 @@ import (
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/reasoning"
+	"github.com/devalexandre/agno-golang/agno/skill"
 
 	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
@@ -36,6 +37,7 @@ type AgentConfig struct {
 	Stream         bool
 	Markdown       bool
 	ShowToolsCall  bool
+	ShowSkillCall  bool
 	Debug          bool
 	//--- ChainTool Configuration ---
 	// Enable ChainTool mode: Agent calls 1 tool, result propagates through all others
@@ -122,6 +124,9 @@ type AgentConfig struct {
 	// Learning is an alias for LearningManager for simpler configuration.
 	Learning interface{}
 
+	// Skills provide structured instructions, reference docs, and scripts for agents
+	Skills *skill.Skills
+
 	// ParseResponse controls whether to parse the response into the OutputSchema
 	ParseResponse bool
 
@@ -201,6 +206,7 @@ type Agent struct {
 	stream                 bool
 	markdown               bool
 	showToolsCall          bool
+	showSkillCall          bool
 	debug                  bool
 	enableChainTool        bool // If true, Agent calls 1 tool and propagates result
 	chainToolErrorConfig   *ChainToolErrorConfig
@@ -265,6 +271,9 @@ type Agent struct {
 	enableAgenticCulture    bool
 	updateCulturalKnowledge bool
 	addCultureToContext     bool
+
+	// Skills
+	skills *skill.Skills
 
 	// Learning Manager
 	learningManager interface{}
@@ -370,6 +379,7 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		stream:                config.Stream,
 		markdown:              config.Markdown,
 		showToolsCall:         config.ShowToolsCall,
+		showSkillCall:         config.ShowSkillCall,
 		debug:                 config.Debug,
 		enableChainTool:       config.EnableChainTool,
 		chainToolErrorConfig:  config.ChainToolErrorConfig,
@@ -433,6 +443,7 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		enableAgenticCulture:           config.EnableAgenticCulture,
 		updateCulturalKnowledge:        config.UpdateCulturalKnowledge,
 		addCultureToContext:            config.AddCultureToContext,
+		skills:                         config.Skills,
 		learningManager:                config.LearningManager,
 		lastTurnByUser:                 make(map[string]struct{ userMsg, assistantMsg string }),
 		lastLearningRetrievedIDsByUser: make(map[string][]string),
@@ -495,6 +506,11 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 	})
 	if len(defaultTools) > 0 {
 		agent.tools = append(agent.tools, defaultTools...)
+	}
+
+	// Add skills tool if skills are configured
+	if agent.skills != nil {
+		agent.tools = append(agent.tools, agent.skills.GetTool())
 	}
 
 	// Set defaults
@@ -2250,6 +2266,23 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 		fmt.Printf("DEBUG: Response model: %s\n", resp.Model)
 	}
 
+	// Process tool calls if present
+	if len(resp.ToolCalls) > 0 {
+		if a.debug {
+			utils.InfoPanel(fmt.Sprintf("Processing %d tool calls", len(resp.ToolCalls)))
+		}
+
+		// Execute tool calls and get final result
+		finalResult, _, _, _, err := a.processToolCallsFromResponse(resp)
+		if err != nil {
+			fmt.Printf("ERROR: Tool call processing failed: %v\n", err)
+			return
+		}
+
+		// Update response content with tool results
+		resp.Content = finalResult
+	}
+
 	utils.ResponsePanel(resp.Content, spinnerResponse, start, markdown)
 
 	if a.debug {
@@ -2573,6 +2606,18 @@ func (a *Agent) prepareMessages(prompt string, knowledgeFilters map[string]inter
 	if a.additionalContext != "" {
 		systemMessage += fmt.Sprintf("\n<additional_context>\n%s\n</additional_context>\n", a.additionalContext)
 		originalSystemMessage += fmt.Sprintf("\n<additional_context>\n%s\n</additional_context>\n", a.additionalContext)
+	}
+
+	// Add skills system prompt snippet
+	if a.skills != nil {
+		if a.showSkillCall {
+			utils.SkillCallPanel("Adding skills to system prompt", fmt.Sprintf("Skills: %v", a.skills.GetSkillNames()))
+		}
+		skillsSnippet := a.skills.GetSystemPromptSnippet()
+		if skillsSnippet != "" {
+			systemMessage += fmt.Sprintf("\n%s\n", skillsSnippet)
+			originalSystemMessage += fmt.Sprintf("\n%s\n", skillsSnippet)
+		}
 	}
 
 	// Add cultural context if enabled

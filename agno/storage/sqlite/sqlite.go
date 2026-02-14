@@ -11,7 +11,7 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3" // SQLite driver
+	_ "modernc.org/sqlite" // SQLite driver
 )
 
 // SqliteStorage implements the Storage interface with SQLite backend
