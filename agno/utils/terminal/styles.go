@@ -7,6 +7,7 @@ import (
 // Color palette - Modern, vibrant colors
 var (
 	ThinkingColor = lipgloss.Color("#00D9FF") // Cyan
+	MessageColor  = lipgloss.Color("#10B981") // Green
 	ResponseColor = lipgloss.Color("#7C3AED") // Purple
 	ToolCallColor = lipgloss.Color("#F59E0B") // Amber
 	DebugColor    = lipgloss.Color("#6B7280") // Gray
@@ -19,6 +20,7 @@ var (
 // PanelStyles contains all the styled components for different panel types
 type PanelStyles struct {
 	Thinking lipgloss.Style
+	Message  lipgloss.Style
 	Response lipgloss.Style
 	ToolCall lipgloss.Style
 	Debug    lipgloss.Style
@@ -40,6 +42,11 @@ func NewPanelStyles() *PanelStyles {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ThinkingColor).
 			Foreground(ThinkingColor),
+
+		Message: baseStyle.Copy().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(MessageColor).
+			Foreground(MessageColor),
 
 		Response: baseStyle.Copy().
 			Border(lipgloss.RoundedBorder()).
@@ -81,6 +88,7 @@ func NewPanelStyles() *PanelStyles {
 // WithWidth sets the width for all panel styles
 func (ps *PanelStyles) WithWidth(width int) *PanelStyles {
 	ps.Thinking = ps.Thinking.Width(width)
+	ps.Message = ps.Message.Width(width)
 	ps.Response = ps.Response.Width(width)
 	ps.ToolCall = ps.ToolCall.Width(width)
 	ps.Debug = ps.Debug.Width(width)
@@ -96,5 +104,8 @@ func TitleStyle(emoji string, text string, color lipgloss.Color) string {
 	style := lipgloss.NewStyle().
 		Foreground(color).
 		Bold(true)
+	if emoji == "" {
+		return style.Render(text)
+	}
 	return style.Render(emoji + " " + text)
 }
