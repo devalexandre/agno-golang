@@ -2,10 +2,12 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/devalexandre/agno-golang/agno/utils/terminal"
+	"golang.org/x/term"
 )
 
 // MessageType for dynamic messages
@@ -27,6 +29,8 @@ type ContentUpdateMsg struct {
 	Content   string
 	AgentName string // Name of the agent producing this content
 	Color     string // Color code for the panel (e.g., "cyan", "green", "yellow", "magenta")
+	Replace   bool   // If true, replaces the current panel accumulator instead of appending
+	Finalize  bool   // If true, renders the final version of the panel (e.g., include duration)
 }
 
 // Global renderer instance
@@ -56,9 +60,38 @@ func ThinkingPanel(content string) interface{} {
 	return nil // Return nil for compatibility with old spinner interface
 }
 
+func ThinkPanel(content string) interface{} {
+	panel := globalRenderer.RenderThink(content, 0)
+	fmt.Println(panel)
+	return nil // Return nil for compatibility with old spinner interface
+}
+
+func ThinkPanelWithDuration(content string, duration float64) interface{} {
+	panel := globalRenderer.RenderThink(content, duration)
+	fmt.Println(panel)
+	return nil
+}
+
+func MessagePanel(content string) interface{} {
+	panel := globalRenderer.RenderMessage(content)
+	fmt.Println(panel)
+	return nil
+}
+
+// PromptPanel is kept for backward compatibility.
+func PromptPanel(content string) interface{} {
+	return MessagePanel(content)
+}
+
 // ResponsePanel displays a response panel with timing
 func ResponsePanel(content string, sp interface{}, start time.Time, markdown bool) {
 	duration := time.Since(start).Seconds()
+
+	thinking, final := ExtractThink(content)
+	if thinking != "" {
+		ThinkPanelWithDuration(thinking, duration)
+	}
+	content = final
 
 	// Update renderer if markdown setting changed
 	if markdown != globalRenderer.Markdown {
@@ -130,57 +163,125 @@ func StartSimplePanel(sp interface{}, start time.Time, markdown bool) chan<- Con
 	}
 
 	go func() {
-		var responseAccumulator string
+		var panelAccumulator strings.Builder
 		var panelHeight int
-		isFirstUpdate := true
 		var lastAgentName string
+		var activePanel MessageType
+		isPanelActive := false
 
-		for update := range contentChan {
-			if update.PanelName == MessageResponse {
-				responseAccumulator += update.Content
+		// Check if stdout is a TTY
+		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
 
-				// Check if agent changed to print header
-				if update.AgentName != "" && update.AgentName != lastAgentName {
-					if lastAgentName != "" && panelHeight > 0 {
-						// Print newline to separate agents
-						fmt.Println()
-					}
-					// Print agent header with color
-					fmt.Printf("\n▼ %s\n", formatAgentHeader(update.AgentName, update.Color))
-					lastAgentName = update.AgentName
-					isFirstUpdate = true
-					panelHeight = 0
-				}
+		countLines := func(s string) int {
+			if s == "" {
+				return 0
+			}
+			lines := strings.Split(s, "\n")
+			return len(lines)
+		}
 
-				// Render the updated content to get the new panel
-				duration := time.Since(start).Seconds()
-				agentContent := update.Content
-				panel := renderAgentResponse(agentContent, duration, update.Color)
-				newLines := strings.Split(panel, "\n")
+		redrawPanel := func(panel string) {
+			newHeight := countLines(panel)
 
-				if isFirstUpdate {
-					// First time - just print the panel
-					fmt.Print(panel)
-					panelHeight = len(newLines)
-					isFirstUpdate = false
-				} else {
-					// Subsequent updates - just append new content
-					fmt.Print(update.Content)
-					panelHeight = len(newLines)
-				}
+			if !isPanelActive {
+				fmt.Print(panel)
+				panelHeight = newHeight
+				isPanelActive = true
+				return
+			}
+
+			// Only redraw if we're in a TTY, otherwise just print new content
+			if !isTTY {
+				// Not a TTY - don't try to redraw, just skip
+				return
+			}
+
+			// Clear the previous panel and redraw
+			// We need to move up to the start of the previous panel
+			if panelHeight > 1 {
+				// Move cursor up to the first line of the previous panel
+				// panelHeight includes the final empty line, so we need panelHeight-1
+				fmt.Printf("\033[%dA", panelHeight-1)
+				// Move cursor to beginning of line
+				fmt.Print("\r")
+				// Clear from cursor to end of screen
+				fmt.Print("\033[J")
 			} else {
-				// For non-response panels, reset the tracking
-				if panelHeight > 0 {
-					isFirstUpdate = true
-					panelHeight = 0
+				// Just clear current line
+				fmt.Print("\r\033[K")
+			}
+
+			// Print new panel
+			fmt.Print(panel)
+			panelHeight = newHeight
+		}
+
+		finalizeActivePanel := func() {
+			if isPanelActive {
+				// Move to end of panel if not already there
+				fmt.Println()
+			}
+			panelAccumulator.Reset()
+			panelHeight = 0
+			activePanel = ""
+			isPanelActive = false
+		}
+
+		renderStreamingPanel := func(panelName MessageType, content string, duration float64, finalize bool) string {
+			switch panelName {
+			case MessageThinking:
+				if finalize {
+					return globalRenderer.RenderThink(content, duration)
 				}
-				printPanel(update.PanelName, update.Content, sp, start, markdown)
+				return globalRenderer.RenderThinking(content)
+			case MessageResponse:
+				return globalRenderer.RenderResponse(content, duration)
+			default:
+				return content
 			}
 		}
-		// Print final newline after streaming completes
-		if panelHeight > 0 {
-			fmt.Println()
+
+		for update := range contentChan {
+			isStreamingPanel := update.PanelName == MessageResponse || update.PanelName == MessageThinking
+
+			if isStreamingPanel {
+				// If switching panel types, finalize the previous streaming panel first.
+				if activePanel != "" && activePanel != update.PanelName {
+					finalizeActivePanel()
+				}
+				activePanel = update.PanelName
+
+				// For workflows, we support "agent" headers above each streaming panel.
+				if update.AgentName != "" && update.AgentName != lastAgentName {
+					if lastAgentName != "" {
+						finalizeActivePanel()
+					}
+					fmt.Printf("\n▼ %s\n", formatAgentHeader(update.AgentName, update.Color))
+					lastAgentName = update.AgentName
+				}
+
+				if update.Replace {
+					panelAccumulator.Reset()
+				}
+				panelAccumulator.WriteString(update.Content)
+
+				duration := time.Since(start).Seconds()
+				panel := renderStreamingPanel(update.PanelName, panelAccumulator.String(), duration, update.Finalize)
+
+				// Only redraw if TTY or if this is the final update
+				if isTTY || update.Finalize {
+					redrawPanel(panel)
+				}
+				continue
+			}
+
+			// Non-streaming panels: finalize any active streaming panel and print normally.
+			if isPanelActive {
+				finalizeActivePanel()
+			}
+			printPanel(update.PanelName, update.Content, sp, start, markdown)
 		}
+		finalizeActivePanel()
 	}()
 
 	return contentChan
@@ -215,12 +316,6 @@ func getColorCode(color string) string {
 	}
 }
 
-// renderAgentResponse renders content with agent-specific formatting and markdown support
-func renderAgentResponse(content string, duration float64, color string) string {
-	// Apply markdown rendering if enabled
-	return globalRenderer.RenderMarkdown(content)
-}
-
 // printPanel prints a panel based on its type
 func printPanel(panelName MessageType, content string, sp interface{}, start time.Time, markdown bool) {
 	switch panelName {
@@ -243,4 +338,41 @@ func printPanel(panelName MessageType, content string, sp interface{}, start tim
 		// Default to info panel
 		fmt.Println(globalRenderer.RenderCustom("ℹ", string(panelName), content, terminal.InfoColor))
 	}
+}
+
+func ExtractThink(content string) (thinking string, final string) {
+	const (
+		startTag = "<think>"
+		endTag   = "</think>"
+	)
+
+	start := strings.Index(content, startTag)
+	end := strings.Index(content, endTag)
+
+	// Caso exista bloco <think>...</think>
+	if start != -1 && end != -1 && end > start {
+		thinking := strings.TrimSpace(
+			content[start+len(startTag) : end],
+		)
+
+		// Remove o bloco <think>...</think> do conteúdo final
+		final = strings.TrimSpace(
+			content[:start] + content[end+len(endTag):],
+		)
+
+		return thinking, final
+	}
+
+	// Se não houver <think>, retorna tudo normalmente
+	return "", strings.TrimSpace(content)
+}
+
+// Think removes <think>...</think> from content and prints it using ThinkPanel.
+// Prefer ExtractThink + ThinkPanelWithDuration when duration is available.
+func Think(content string) string {
+	thinking, final := ExtractThink(content)
+	if thinking != "" {
+		ThinkPanel(thinking)
+	}
+	return final
 }
