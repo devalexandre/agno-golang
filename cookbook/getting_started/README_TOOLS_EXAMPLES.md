@@ -190,7 +190,7 @@ Key Takeaways:
 
 ---
 
-## Progressão de Aprendizado Recomendada
+## Recommended Learning Progression
 
 ### Nível 1: Iniciante
 1. Leia `04_simple_tools/main.go`

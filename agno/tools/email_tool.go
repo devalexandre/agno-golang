@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -19,8 +18,8 @@ import (
 	"github.com/emersion/go-message"
 )
 
-// EmailTool provides comprehensive email integration
-// Supports sending emails via SMTP and reading emails via IMAP
+// EmailTool provides comprehensive email integration.
+// Supports sending emails via SMTP and reading emails via IMAP.
 type EmailTool struct {
 	toolkit.Toolkit
 	smtpHost     string
@@ -34,7 +33,7 @@ type EmailTool struct {
 	fromAddress  string
 }
 
-// EmailConfig holds configuration for email operations
+// EmailConfig holds configuration for email operations.
 type EmailConfig struct {
 	SMTPHost     string
 	SMTPPort     int
@@ -47,21 +46,95 @@ type EmailConfig struct {
 	FromAddress  string
 }
 
-// NewEmailTool creates a new Email tool instance
-func NewEmailTool(config EmailConfig) *EmailTool {
-	if config.SMTPHost == "" {
-		panic("SMTP host is required")
+// Parameter structs
+
+type SendEmailParams struct {
+	To      []string `json:"to" description:"Recipient email addresses." required:"true"`
+	Subject string   `json:"subject" description:"Email subject." required:"true"`
+	Body    string   `json:"body" description:"Email body (plain text)." required:"true"`
+	Cc      []string `json:"cc,omitempty" description:"CC recipients."`
+	Bcc     []string `json:"bcc,omitempty" description:"BCC recipients."`
+}
+
+type SendHTMLEmailParams struct {
+	To      []string `json:"to" description:"Recipient email addresses." required:"true"`
+	Subject string   `json:"subject" description:"Email subject." required:"true"`
+	HTML    string   `json:"html" description:"Email body (HTML)." required:"true"`
+	Cc      []string `json:"cc,omitempty" description:"CC recipients."`
+	Bcc     []string `json:"bcc,omitempty" description:"BCC recipients."`
+}
+
+type ListEmailsParams struct {
+	Mailbox string `json:"mailbox,omitempty" description:"Mailbox name (default: INBOX)."`
+	Limit   int    `json:"limit,omitempty" description:"Number of emails to return. Default: 20."`
+	Unread  bool   `json:"unread,omitempty" description:"Only return unread emails."`
+}
+
+type ReadEmailParams struct {
+	Mailbox string `json:"mailbox,omitempty" description:"Mailbox name (default: INBOX)."`
+	UID     uint32 `json:"uid" description:"Email UID." required:"true"`
+}
+
+type SearchEmailsParams struct {
+	Mailbox string `json:"mailbox,omitempty" description:"Mailbox name (default: INBOX)."`
+	Query   string `json:"query" description:"Search query text." required:"true"`
+	Limit   int    `json:"limit,omitempty" description:"Number of results. Default: 20."`
+}
+
+type ListMailboxesParams struct{}
+
+type CreateMailboxParams struct {
+	Name string `json:"name" description:"Mailbox name to create." required:"true"`
+}
+
+type DeleteMailboxParams struct {
+	Name string `json:"name" description:"Mailbox name to delete." required:"true"`
+}
+
+type DeleteEmailParams struct {
+	Mailbox string `json:"mailbox,omitempty" description:"Mailbox name (default: INBOX)."`
+	UID     uint32 `json:"uid" description:"Email UID." required:"true"`
+}
+
+type MarkAsReadParams struct {
+	Mailbox string `json:"mailbox,omitempty" description:"Mailbox name (default: INBOX)."`
+	UID     uint32 `json:"uid" description:"Email UID." required:"true"`
+}
+
+type MarkAsUnreadParams struct {
+	Mailbox string `json:"mailbox,omitempty" description:"Mailbox name (default: INBOX)."`
+	UID     uint32 `json:"uid" description:"Email UID." required:"true"`
+}
+
+type MoveEmailParams struct {
+	SourceMailbox string `json:"source_mailbox" description:"Source mailbox name." required:"true"`
+	TargetMailbox string `json:"target_mailbox" description:"Target mailbox name." required:"true"`
+	UID           uint32 `json:"uid" description:"Email UID." required:"true"`
+}
+
+type WatchEmailsParams struct {
+	Mailbox       string `json:"mailbox,omitempty" description:"Mailbox to watch (default: INBOX)."`
+	SubjectFilter string `json:"subject_filter,omitempty" description:"Only return emails whose subject contains this text."`
+	SenderFilter  string `json:"sender_filter,omitempty" description:"Only return emails from this sender address."`
+	SinceMinutes  int    `json:"since_minutes,omitempty" description:"Only emails received in the last N minutes. Default: 60."`
+	Limit         int    `json:"limit,omitempty" description:"Max emails to return. Default: 10."`
+}
+
+// NewEmailTool creates a new Email tool instance.
+func NewEmailTool(config EmailConfig) (*EmailTool, error) {
+	if config.SMTPHost == "" && config.IMAPHost == "" {
+		return nil, fmt.Errorf("at least one of SMTPHost or IMAPHost is required")
 	}
 	if config.SMTPPort == 0 {
-		config.SMTPPort = 587 // Default SMTP port
+		config.SMTPPort = 587
 	}
 	if config.IMAPPort == 0 {
-		config.IMAPPort = 993 // Default IMAP port
+		config.IMAPPort = 993
 	}
 
 	tk := toolkit.NewToolkit()
 	tk.Name = "EmailTool"
-	tk.Description = "Comprehensive email integration - send emails via SMTP, read emails via IMAP, manage attachments"
+	tk.Description = "Comprehensive email integration: send emails via SMTP, read and monitor emails via IMAP, manage mailboxes."
 
 	tool := &EmailTool{
 		Toolkit:      tk,
@@ -78,315 +151,125 @@ func NewEmailTool(config EmailConfig) *EmailTool {
 
 	tool.registerMethods()
 
-	return tool
+	return tool, nil
 }
 
-// registerMethods registers all available email operations
 func (t *EmailTool) registerMethods() {
-	// Send operations
-	t.Register("send_email", "Send a plain text email", t, t.sendEmail, SendEmailParams{})
-	t.Register("send_html_email", "Send an HTML email", t, t.sendHTMLEmail, SendHTMLEmailParams{})
-
-	// Read operations
-	t.Register("list_emails", "List emails from a mailbox", t, t.listEmails, ListEmailsParams{})
-	t.Register("read_email", "Read a specific email by UID", t, t.readEmail, ReadEmailParams{})
-	t.Register("search_emails", "Search for emails", t, t.searchEmails, SearchEmailsParams{})
-
-	// Mailbox operations
-	t.Register("list_mailboxes", "List all mailboxes", t, t.listMailboxes, ListMailboxesParams{})
-	t.Register("create_mailbox", "Create a new mailbox", t, t.createMailbox, CreateMailboxParams{})
-	t.Register("delete_mailbox", "Delete a mailbox", t, t.deleteMailbox, DeleteMailboxParams{})
-
-	// Message operations
-	t.Register("delete_email", "Delete an email", t, t.deleteEmail, DeleteEmailParams{})
-	t.Register("mark_as_read", "Mark an email as read", t, t.markAsRead, MarkAsReadParams{})
-	t.Register("mark_as_unread", "Mark an email as unread", t, t.markAsUnread, MarkAsUnreadParams{})
-	t.Register("move_email", "Move an email to another mailbox", t, t.moveEmail, MoveEmailParams{})
+	t.Register("SendEmail", "Send a plain text email.", t, t.SendEmail, SendEmailParams{})
+	t.Register("SendHTMLEmail", "Send an HTML email.", t, t.SendHTMLEmail, SendHTMLEmailParams{})
+	t.Register("ListEmails", "List emails from a mailbox.", t, t.ListEmails, ListEmailsParams{})
+	t.Register("ReadEmail", "Read a specific email by UID.", t, t.ReadEmail, ReadEmailParams{})
+	t.Register("SearchEmails", "Search for emails by text query.", t, t.SearchEmails, SearchEmailsParams{})
+	t.Register("ListMailboxes", "List all mailboxes.", t, t.ListMailboxes, ListMailboxesParams{})
+	t.Register("CreateMailbox", "Create a new mailbox.", t, t.CreateMailbox, CreateMailboxParams{})
+	t.RegisterWithOptions("DeleteMailbox", "Delete a mailbox.", t, t.DeleteMailbox, DeleteMailboxParams{}, toolkit.WithConfirmation())
+	t.RegisterWithOptions("DeleteEmail", "Delete an email.", t, t.DeleteEmail, DeleteEmailParams{}, toolkit.WithConfirmation())
+	t.Register("MarkAsRead", "Mark an email as read.", t, t.MarkAsRead, MarkAsReadParams{})
+	t.Register("MarkAsUnread", "Mark an email as unread.", t, t.MarkAsUnread, MarkAsUnreadParams{})
+	t.Register("MoveEmail", "Move an email to another mailbox.", t, t.MoveEmail, MoveEmailParams{})
+	t.Register("WatchEmails", "Check for new unread emails, optionally filtered by subject or sender. Use this to monitor incoming emails and trigger actions.", t, t.WatchEmails, WatchEmailsParams{})
 }
 
-// Parameter structs
-type SendEmailParams struct {
-	To      []string `json:"to" description:"Recipient email addresses"`
-	Subject string   `json:"subject" description:"Email subject"`
-	Body    string   `json:"body" description:"Email body (plain text)"`
-	Cc      []string `json:"cc" description:"CC recipients (optional)"`
-	Bcc     []string `json:"bcc" description:"BCC recipients (optional)"`
-}
+// --- Send Operations ---
 
-type SendHTMLEmailParams struct {
-	To      []string `json:"to" description:"Recipient email addresses"`
-	Subject string   `json:"subject" description:"Email subject"`
-	HTML    string   `json:"html" description:"Email body (HTML)"`
-	Cc      []string `json:"cc" description:"CC recipients (optional)"`
-	Bcc     []string `json:"bcc" description:"BCC recipients (optional)"`
-}
-
-type ListEmailsParams struct {
-	Mailbox string `json:"mailbox" description:"Mailbox name (default: INBOX)"`
-	Limit   int    `json:"limit" description:"Number of emails to return"`
-	Unread  bool   `json:"unread" description:"Only return unread emails"`
-}
-
-type ReadEmailParams struct {
-	Mailbox string `json:"mailbox" description:"Mailbox name"`
-	UID     uint32 `json:"uid" description:"Email UID"`
-}
-
-type SearchEmailsParams struct {
-	Mailbox string `json:"mailbox" description:"Mailbox name (default: INBOX)"`
-	Query   string `json:"query" description:"Search query"`
-	Limit   int    `json:"limit" description:"Number of results"`
-}
-
-type ListMailboxesParams struct{}
-
-type CreateMailboxParams struct {
-	Name string `json:"name" description:"Mailbox name"`
-}
-
-type DeleteMailboxParams struct {
-	Name string `json:"name" description:"Mailbox name"`
-}
-
-type DeleteEmailParams struct {
-	Mailbox string `json:"mailbox" description:"Mailbox name"`
-	UID     uint32 `json:"uid" description:"Email UID"`
-}
-
-type MarkAsReadParams struct {
-	Mailbox string `json:"mailbox" description:"Mailbox name"`
-	UID     uint32 `json:"uid" description:"Email UID"`
-}
-
-type MarkAsUnreadParams struct {
-	Mailbox string `json:"mailbox" description:"Mailbox name"`
-	UID     uint32 `json:"uid" description:"Email UID"`
-}
-
-type MoveEmailParams struct {
-	SourceMailbox string `json:"source_mailbox" description:"Source mailbox name"`
-	TargetMailbox string `json:"target_mailbox" description:"Target mailbox name"`
-	UID           uint32 `json:"uid" description:"Email UID"`
-}
-
-// sendEmail sends a plain text email
-func (t *EmailTool) sendEmail(ctx context.Context, args map[string]interface{}) (string, error) {
-	to, ok := args["to"].([]interface{})
-	if !ok || len(to) == 0 {
-		return "", fmt.Errorf("to is required and must be an array")
+func (t *EmailTool) SendEmail(params SendEmailParams) (interface{}, error) {
+	if len(params.To) == 0 {
+		return nil, fmt.Errorf("to is required")
 	}
 
-	subject, ok := args["subject"].(string)
-	if !ok {
-		return "", fmt.Errorf("subject is required")
-	}
+	msg := t.buildEmailMessage(params.To, params.Cc, params.Subject, params.Body, false)
 
-	body, ok := args["body"].(string)
-	if !ok {
-		return "", fmt.Errorf("body is required")
-	}
+	allRecipients := make([]string, 0, len(params.To)+len(params.Cc)+len(params.Bcc))
+	allRecipients = append(allRecipients, params.To...)
+	allRecipients = append(allRecipients, params.Cc...)
+	allRecipients = append(allRecipients, params.Bcc...)
 
-	// Convert to string slice
-	toAddrs := make([]string, 0, len(to))
-	for _, addr := range to {
-		if addrStr, ok := addr.(string); ok {
-			toAddrs = append(toAddrs, addrStr)
-		}
-	}
-
-	var ccAddrs, bccAddrs []string
-	if cc, ok := args["cc"].([]interface{}); ok {
-		for _, addr := range cc {
-			if addrStr, ok := addr.(string); ok {
-				ccAddrs = append(ccAddrs, addrStr)
-			}
-		}
-	}
-	if bcc, ok := args["bcc"].([]interface{}); ok {
-		for _, addr := range bcc {
-			if addrStr, ok := addr.(string); ok {
-				bccAddrs = append(bccAddrs, addrStr)
-			}
-		}
-	}
-
-	// Build email message
-	msg := t.buildEmailMessage(toAddrs, ccAddrs, subject, body, false)
-
-	// Send email
-	allRecipients := append(toAddrs, ccAddrs...)
-	allRecipients = append(allRecipients, bccAddrs...)
-
-	err := t.sendSMTP(allRecipients, msg)
-	if err != nil {
-		return "", fmt.Errorf("failed to send email: %w", err)
+	if err := t.sendSMTP(allRecipients, msg); err != nil {
+		return nil, fmt.Errorf("failed to send email: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Email sent to %d recipients", len(allRecipients)),
-		"to":      toAddrs,
+		"to":      params.To,
 	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
+	output, _ := json.Marshal(result)
+	return string(output), nil
 }
 
-// sendHTMLEmail sends an HTML email
-func (t *EmailTool) sendHTMLEmail(ctx context.Context, args map[string]interface{}) (string, error) {
-	to, ok := args["to"].([]interface{})
-	if !ok || len(to) == 0 {
-		return "", fmt.Errorf("to is required and must be an array")
+func (t *EmailTool) SendHTMLEmail(params SendHTMLEmailParams) (interface{}, error) {
+	if len(params.To) == 0 {
+		return nil, fmt.Errorf("to is required")
 	}
 
-	subject, ok := args["subject"].(string)
-	if !ok {
-		return "", fmt.Errorf("subject is required")
-	}
+	msg := t.buildEmailMessage(params.To, params.Cc, params.Subject, params.HTML, true)
 
-	html, ok := args["html"].(string)
-	if !ok {
-		return "", fmt.Errorf("html is required")
-	}
+	allRecipients := make([]string, 0, len(params.To)+len(params.Cc)+len(params.Bcc))
+	allRecipients = append(allRecipients, params.To...)
+	allRecipients = append(allRecipients, params.Cc...)
+	allRecipients = append(allRecipients, params.Bcc...)
 
-	// Convert to string slice
-	toAddrs := make([]string, 0, len(to))
-	for _, addr := range to {
-		if addrStr, ok := addr.(string); ok {
-			toAddrs = append(toAddrs, addrStr)
-		}
-	}
-
-	var ccAddrs, bccAddrs []string
-	if cc, ok := args["cc"].([]interface{}); ok {
-		for _, addr := range cc {
-			if addrStr, ok := addr.(string); ok {
-				ccAddrs = append(ccAddrs, addrStr)
-			}
-		}
-	}
-	if bcc, ok := args["bcc"].([]interface{}); ok {
-		for _, addr := range bcc {
-			if addrStr, ok := addr.(string); ok {
-				bccAddrs = append(bccAddrs, addrStr)
-			}
-		}
-	}
-
-	// Build HTML email message
-	msg := t.buildEmailMessage(toAddrs, ccAddrs, subject, html, true)
-
-	// Send email
-	allRecipients := append(toAddrs, ccAddrs...)
-	allRecipients = append(allRecipients, bccAddrs...)
-
-	err := t.sendSMTP(allRecipients, msg)
-	if err != nil {
-		return "", fmt.Errorf("failed to send email: %w", err)
+	if err := t.sendSMTP(allRecipients, msg); err != nil {
+		return nil, fmt.Errorf("failed to send email: %w", err)
 	}
 
 	result := map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("HTML email sent to %d recipients", len(allRecipients)),
-		"to":      toAddrs,
+		"to":      params.To,
 	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
+	output, _ := json.Marshal(result)
+	return string(output), nil
 }
 
-// listEmails lists emails from a mailbox
-func (t *EmailTool) listEmails(ctx context.Context, args map[string]interface{}) (string, error) {
-	mailbox := "INBOX"
-	if mb, ok := args["mailbox"].(string); ok && mb != "" {
-		mailbox = mb
-	}
+// --- Read Operations ---
 
-	limit := 20
-	if l, ok := args["limit"].(float64); ok {
-		limit = int(l)
+func (t *EmailTool) ListEmails(params ListEmailsParams) (interface{}, error) {
+	mailbox := params.Mailbox
+	if mailbox == "" {
+		mailbox = "INBOX"
 	}
-
-	unreadOnly := false
-	if u, ok := args["unread"].(bool); ok {
-		unreadOnly = u
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
 	}
 
 	c, err := t.connectIMAP()
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
 	}
 	defer c.Logout()
 
-	// Select mailbox
 	mbox, err := c.Select(mailbox, false)
 	if err != nil {
-		return "", fmt.Errorf("failed to select mailbox: %w", err)
+		return nil, fmt.Errorf("failed to select mailbox: %w", err)
 	}
 
 	if mbox.Messages == 0 {
-		result := map[string]interface{}{
-			"success": true,
-			"emails":  []interface{}{},
-			"count":   0,
-		}
-		resultJSON, _ := json.Marshal(result)
-		return string(resultJSON), nil
+		return t.emptyEmailResult(), nil
 	}
 
-	// Build search criteria
 	criteria := imap.NewSearchCriteria()
-	if unreadOnly {
+	if params.Unread {
 		criteria.WithoutFlags = []string{imap.SeenFlag}
 	}
 
-	// Search for messages
 	uids, err := c.Search(criteria)
 	if err != nil {
-		return "", fmt.Errorf("failed to search emails: %w", err)
+		return nil, fmt.Errorf("failed to search emails: %w", err)
 	}
 
 	if len(uids) == 0 {
-		result := map[string]interface{}{
-			"success": true,
-			"emails":  []interface{}{},
-			"count":   0,
-		}
-		resultJSON, _ := json.Marshal(result)
-		return string(resultJSON), nil
+		return t.emptyEmailResult(), nil
 	}
 
-	// Get the most recent emails
-	start := len(uids) - limit
-	if start < 0 {
-		start = 0
-	}
-	uids = uids[start:]
-
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(uids...)
-
-	messages := make(chan *imap.Message, limit)
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchUid}, messages)
-	}()
-
-	var emails []map[string]interface{}
-	for msg := range messages {
-		email := map[string]interface{}{
-			"uid":     msg.Uid,
-			"subject": msg.Envelope.Subject,
-			"from":    t.formatAddresses(msg.Envelope.From),
-			"to":      t.formatAddresses(msg.Envelope.To),
-			"date":    msg.Envelope.Date.Format(time.RFC3339),
-			"unread":  !t.hasFlag(msg.Flags, imap.SeenFlag),
-		}
-		emails = append(emails, email)
+	if start := len(uids) - limit; start > 0 {
+		uids = uids[start:]
 	}
 
-	if err := <-done; err != nil {
-		return "", fmt.Errorf("failed to fetch emails: %w", err)
+	emails, err := t.fetchEmailSummaries(c, uids)
+	if err != nil {
+		return nil, err
 	}
 
 	result := map[string]interface{}{
@@ -394,37 +277,28 @@ func (t *EmailTool) listEmails(ctx context.Context, args map[string]interface{})
 		"emails":  emails,
 		"count":   len(emails),
 	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
+	output, _ := json.Marshal(result)
+	return string(output), nil
 }
 
-// readEmail reads a specific email
-func (t *EmailTool) readEmail(ctx context.Context, args map[string]interface{}) (string, error) {
-	mailbox, ok := args["mailbox"].(string)
-	if !ok || mailbox == "" {
+func (t *EmailTool) ReadEmail(params ReadEmailParams) (interface{}, error) {
+	mailbox := params.Mailbox
+	if mailbox == "" {
 		mailbox = "INBOX"
-	}
-
-	uid, ok := args["uid"].(float64)
-	if !ok {
-		return "", fmt.Errorf("uid is required")
 	}
 
 	c, err := t.connectIMAP()
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
 	}
 	defer c.Logout()
 
-	// Select mailbox
-	_, err = c.Select(mailbox, false)
-	if err != nil {
-		return "", fmt.Errorf("failed to select mailbox: %w", err)
+	if _, err = c.Select(mailbox, false); err != nil {
+		return nil, fmt.Errorf("failed to select mailbox: %w", err)
 	}
 
 	seqset := new(imap.SeqSet)
-	seqset.AddNum(uint32(uid))
+	seqset.AddNum(params.UID)
 
 	messages := make(chan *imap.Message, 1)
 	done := make(chan error, 1)
@@ -434,23 +308,22 @@ func (t *EmailTool) readEmail(ctx context.Context, args map[string]interface{}) 
 
 	msg := <-messages
 	if msg == nil {
-		return "", fmt.Errorf("email not found")
+		return nil, fmt.Errorf("email not found")
 	}
 
 	if err := <-done; err != nil {
-		return "", fmt.Errorf("failed to fetch email: %w", err)
+		return nil, fmt.Errorf("failed to fetch email: %w", err)
 	}
 
-	// Parse email body
 	section := &imap.BodySectionName{}
 	r := msg.GetBody(section)
 	if r == nil {
-		return "", fmt.Errorf("failed to get email body")
+		return nil, fmt.Errorf("failed to get email body")
 	}
 
 	mr, err := message.Read(r)
 	if err != nil {
-		return "", fmt.Errorf("failed to read email: %w", err)
+		return nil, fmt.Errorf("failed to read email: %w", err)
 	}
 
 	body, err := t.extractBody(mr)
@@ -471,69 +344,360 @@ func (t *EmailTool) readEmail(ctx context.Context, args map[string]interface{}) 
 			"unread":  !t.hasFlag(msg.Flags, imap.SeenFlag),
 		},
 	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
+	output, _ := json.Marshal(result)
+	return string(output), nil
 }
 
-// searchEmails searches for emails
-func (t *EmailTool) searchEmails(ctx context.Context, args map[string]interface{}) (string, error) {
-	mailbox := "INBOX"
-	if mb, ok := args["mailbox"].(string); ok && mb != "" {
-		mailbox = mb
+func (t *EmailTool) SearchEmails(params SearchEmailsParams) (interface{}, error) {
+	mailbox := params.Mailbox
+	if mailbox == "" {
+		mailbox = "INBOX"
 	}
-
-	query, ok := args["query"].(string)
-	if !ok || query == "" {
-		return "", fmt.Errorf("query is required")
-	}
-
-	limit := 20
-	if l, ok := args["limit"].(float64); ok {
-		limit = int(l)
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
 	}
 
 	c, err := t.connectIMAP()
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
 	}
 	defer c.Logout()
 
-	// Select mailbox
-	_, err = c.Select(mailbox, false)
-	if err != nil {
-		return "", fmt.Errorf("failed to select mailbox: %w", err)
+	if _, err = c.Select(mailbox, false); err != nil {
+		return nil, fmt.Errorf("failed to select mailbox: %w", err)
 	}
 
-	// Build search criteria
 	criteria := imap.NewSearchCriteria()
-	criteria.Text = []string{query}
+	criteria.Text = []string{params.Query}
 
-	// Search for messages
 	uids, err := c.Search(criteria)
 	if err != nil {
-		return "", fmt.Errorf("failed to search emails: %w", err)
+		return nil, fmt.Errorf("failed to search emails: %w", err)
 	}
 
 	if len(uids) == 0 {
-		result := map[string]interface{}{
-			"success": true,
-			"emails":  []interface{}{},
-			"count":   0,
-		}
-		resultJSON, _ := json.Marshal(result)
-		return string(resultJSON), nil
+		return t.emptyEmailResult(), nil
 	}
 
-	// Limit results
 	if len(uids) > limit {
 		uids = uids[len(uids)-limit:]
 	}
 
+	emails, err := t.fetchEmailSummaries(c, uids)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string]interface{}{
+		"success": true,
+		"emails":  emails,
+		"count":   len(emails),
+		"query":   params.Query,
+	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
+}
+
+// --- Watch / Monitor ---
+
+// WatchEmails checks for new unread emails with optional filters.
+// The agent can call this periodically to monitor incoming emails
+// and trigger actions based on subject or sender.
+func (t *EmailTool) WatchEmails(params WatchEmailsParams) (interface{}, error) {
+	mailbox := params.Mailbox
+	if mailbox == "" {
+		mailbox = "INBOX"
+	}
+	sinceMinutes := params.SinceMinutes
+	if sinceMinutes <= 0 {
+		sinceMinutes = 60
+	}
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	c, err := t.connectIMAP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
+	}
+	defer c.Logout()
+
+	if _, err = c.Select(mailbox, false); err != nil {
+		return nil, fmt.Errorf("failed to select mailbox: %w", err)
+	}
+
+	// Build search criteria: unseen + since date + optional subject/sender
+	criteria := imap.NewSearchCriteria()
+	criteria.WithoutFlags = []string{imap.SeenFlag}
+	criteria.Since = time.Now().Add(-time.Duration(sinceMinutes) * time.Minute)
+
+	if params.SubjectFilter != "" {
+		criteria.Header.Set("Subject", params.SubjectFilter)
+	}
+	if params.SenderFilter != "" {
+		criteria.Header.Set("From", params.SenderFilter)
+	}
+
+	uids, err := c.Search(criteria)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search emails: %w", err)
+	}
+
+	checkedAt := time.Now().Format(time.RFC3339)
+	since := time.Now().Add(-time.Duration(sinceMinutes) * time.Minute).Format(time.RFC3339)
+
+	if len(uids) == 0 {
+		result := map[string]interface{}{
+			"success":     true,
+			"new_emails":  []interface{}{},
+			"count":       0,
+			"checked_at":  checkedAt,
+			"since":       since,
+			"has_matches": false,
+		}
+		output, _ := json.Marshal(result)
+		return string(output), nil
+	}
+
+	if len(uids) > limit {
+		uids = uids[len(uids)-limit:]
+	}
+
+	// Fetch with body for preview
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(uids...)
 
 	messages := make(chan *imap.Message, limit)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchUid, imap.FetchRFC822}, messages)
+	}()
+
+	var emails []map[string]interface{}
+	for msg := range messages {
+		emailInfo := map[string]interface{}{
+			"uid":     msg.Uid,
+			"subject": msg.Envelope.Subject,
+			"from":    t.formatAddresses(msg.Envelope.From),
+			"to":      t.formatAddresses(msg.Envelope.To),
+			"date":    msg.Envelope.Date.Format(time.RFC3339),
+		}
+
+		// Extract body preview
+		section := &imap.BodySectionName{}
+		r := msg.GetBody(section)
+		if r != nil {
+			if mr, err := message.Read(r); err == nil {
+				if body, err := t.extractBody(mr); err == nil {
+					preview := body
+					if len(preview) > 500 {
+						preview = preview[:500] + "..."
+					}
+					emailInfo["body_preview"] = preview
+				}
+			}
+		}
+
+		emails = append(emails, emailInfo)
+	}
+
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("failed to fetch emails: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"success":     true,
+		"new_emails":  emails,
+		"count":       len(emails),
+		"checked_at":  checkedAt,
+		"since":       since,
+		"has_matches": len(emails) > 0,
+	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
+}
+
+// --- Mailbox Operations ---
+
+func (t *EmailTool) ListMailboxes(params ListMailboxesParams) (interface{}, error) {
+	c, err := t.connectIMAP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
+	}
+	defer c.Logout()
+
+	mailboxes := make(chan *imap.MailboxInfo, 10)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.List("", "*", mailboxes)
+	}()
+
+	var mailboxList []map[string]interface{}
+	for m := range mailboxes {
+		mailboxList = append(mailboxList, map[string]interface{}{
+			"name":       m.Name,
+			"attributes": m.Attributes,
+		})
+	}
+
+	if err := <-done; err != nil {
+		return nil, fmt.Errorf("failed to list mailboxes: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"success":   true,
+		"mailboxes": mailboxList,
+		"count":     len(mailboxList),
+	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
+}
+
+func (t *EmailTool) CreateMailbox(params CreateMailboxParams) (interface{}, error) {
+	c, err := t.connectIMAP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
+	}
+	defer c.Logout()
+
+	if err = c.Create(params.Name); err != nil {
+		return nil, fmt.Errorf("failed to create mailbox: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Mailbox '%s' created successfully", params.Name),
+	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
+}
+
+func (t *EmailTool) DeleteMailbox(params DeleteMailboxParams) (interface{}, error) {
+	c, err := t.connectIMAP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
+	}
+	defer c.Logout()
+
+	if err = c.Delete(params.Name); err != nil {
+		return nil, fmt.Errorf("failed to delete mailbox: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Mailbox '%s' deleted successfully", params.Name),
+	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
+}
+
+// --- Message Operations ---
+
+func (t *EmailTool) DeleteEmail(params DeleteEmailParams) (interface{}, error) {
+	mailbox := params.Mailbox
+	if mailbox == "" {
+		mailbox = "INBOX"
+	}
+
+	c, err := t.connectIMAP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
+	}
+	defer c.Logout()
+
+	if _, err = c.Select(mailbox, false); err != nil {
+		return nil, fmt.Errorf("failed to select mailbox: %w", err)
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(params.UID)
+
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	flags := []interface{}{imap.DeletedFlag}
+	if err = c.Store(seqset, item, flags, nil); err != nil {
+		return nil, fmt.Errorf("failed to mark email as deleted: %w", err)
+	}
+
+	if err = c.Expunge(nil); err != nil {
+		return nil, fmt.Errorf("failed to expunge: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"success": true,
+		"message": "Email deleted successfully",
+	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
+}
+
+func (t *EmailTool) MarkAsRead(params MarkAsReadParams) (interface{}, error) {
+	return t.setFlag(params.Mailbox, params.UID, imap.SeenFlag, true)
+}
+
+func (t *EmailTool) MarkAsUnread(params MarkAsUnreadParams) (interface{}, error) {
+	return t.setFlag(params.Mailbox, params.UID, imap.SeenFlag, false)
+}
+
+func (t *EmailTool) MoveEmail(params MoveEmailParams) (interface{}, error) {
+	c, err := t.connectIMAP()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
+	}
+	defer c.Logout()
+
+	if _, err = c.Select(params.SourceMailbox, false); err != nil {
+		return nil, fmt.Errorf("failed to select source mailbox: %w", err)
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(params.UID)
+
+	if err = c.Copy(seqset, params.TargetMailbox); err != nil {
+		return nil, fmt.Errorf("failed to copy email: %w", err)
+	}
+
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	flags := []interface{}{imap.DeletedFlag}
+	if err = c.Store(seqset, item, flags, nil); err != nil {
+		return nil, fmt.Errorf("failed to mark original as deleted: %w", err)
+	}
+
+	if err = c.Expunge(nil); err != nil {
+		return nil, fmt.Errorf("failed to expunge: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Email moved from '%s' to '%s'", params.SourceMailbox, params.TargetMailbox),
+	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
+}
+
+// Execute implements the toolkit.Tool interface.
+func (t *EmailTool) Execute(methodName string, input json.RawMessage) (interface{}, error) {
+	return t.Toolkit.Execute(methodName, input)
+}
+
+// --- Internal helpers ---
+
+func (t *EmailTool) emptyEmailResult() string {
+	result := map[string]interface{}{
+		"success": true,
+		"emails":  []interface{}{},
+		"count":   0,
+	}
+	output, _ := json.Marshal(result)
+	return string(output)
+}
+
+func (t *EmailTool) fetchEmailSummaries(c *client.Client, uids []uint32) ([]map[string]interface{}, error) {
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uids...)
+
+	messages := make(chan *imap.Message, len(uids))
 	done := make(chan error, 1)
 	go func() {
 		done <- c.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchUid}, messages)
@@ -553,232 +717,11 @@ func (t *EmailTool) searchEmails(ctx context.Context, args map[string]interface{
 	}
 
 	if err := <-done; err != nil {
-		return "", fmt.Errorf("failed to fetch emails: %w", err)
+		return nil, fmt.Errorf("failed to fetch emails: %w", err)
 	}
 
-	result := map[string]interface{}{
-		"success": true,
-		"emails":  emails,
-		"count":   len(emails),
-		"query":   query,
-	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
+	return emails, nil
 }
-
-// listMailboxes lists all mailboxes
-func (t *EmailTool) listMailboxes(ctx context.Context, args map[string]interface{}) (string, error) {
-	c, err := t.connectIMAP()
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
-	}
-	defer c.Logout()
-
-	mailboxes := make(chan *imap.MailboxInfo, 10)
-	done := make(chan error, 1)
-	go func() {
-		done <- c.List("", "*", mailboxes)
-	}()
-
-	var mailboxList []map[string]interface{}
-	for m := range mailboxes {
-		mailboxList = append(mailboxList, map[string]interface{}{
-			"name":       m.Name,
-			"attributes": m.Attributes,
-		})
-	}
-
-	if err := <-done; err != nil {
-		return "", fmt.Errorf("failed to list mailboxes: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"success":   true,
-		"mailboxes": mailboxList,
-		"count":     len(mailboxList),
-	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
-}
-
-// createMailbox creates a new mailbox
-func (t *EmailTool) createMailbox(ctx context.Context, args map[string]interface{}) (string, error) {
-	name, ok := args["name"].(string)
-	if !ok || name == "" {
-		return "", fmt.Errorf("name is required")
-	}
-
-	c, err := t.connectIMAP()
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
-	}
-	defer c.Logout()
-
-	err = c.Create(name)
-	if err != nil {
-		return "", fmt.Errorf("failed to create mailbox: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("Mailbox '%s' created successfully", name),
-	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
-}
-
-// deleteMailbox deletes a mailbox
-func (t *EmailTool) deleteMailbox(ctx context.Context, args map[string]interface{}) (string, error) {
-	name, ok := args["name"].(string)
-	if !ok || name == "" {
-		return "", fmt.Errorf("name is required")
-	}
-
-	c, err := t.connectIMAP()
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
-	}
-	defer c.Logout()
-
-	err = c.Delete(name)
-	if err != nil {
-		return "", fmt.Errorf("failed to delete mailbox: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("Mailbox '%s' deleted successfully", name),
-	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
-}
-
-// deleteEmail deletes an email
-func (t *EmailTool) deleteEmail(ctx context.Context, args map[string]interface{}) (string, error) {
-	mailbox, ok := args["mailbox"].(string)
-	if !ok || mailbox == "" {
-		mailbox = "INBOX"
-	}
-
-	uid, ok := args["uid"].(float64)
-	if !ok {
-		return "", fmt.Errorf("uid is required")
-	}
-
-	c, err := t.connectIMAP()
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
-	}
-	defer c.Logout()
-
-	// Select mailbox
-	_, err = c.Select(mailbox, false)
-	if err != nil {
-		return "", fmt.Errorf("failed to select mailbox: %w", err)
-	}
-
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(uint32(uid))
-
-	// Mark as deleted
-	item := imap.FormatFlagsOp(imap.AddFlags, true)
-	flags := []interface{}{imap.DeletedFlag}
-	err = c.Store(seqset, item, flags, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to mark email as deleted: %w", err)
-	}
-
-	// Expunge
-	err = c.Expunge(nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to expunge: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"success": true,
-		"message": "Email deleted successfully",
-	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
-}
-
-// markAsRead marks an email as read
-func (t *EmailTool) markAsRead(ctx context.Context, args map[string]interface{}) (string, error) {
-	return t.setFlag(args, imap.SeenFlag, true)
-}
-
-// markAsUnread marks an email as unread
-func (t *EmailTool) markAsUnread(ctx context.Context, args map[string]interface{}) (string, error) {
-	return t.setFlag(args, imap.SeenFlag, false)
-}
-
-// moveEmail moves an email to another mailbox
-func (t *EmailTool) moveEmail(ctx context.Context, args map[string]interface{}) (string, error) {
-	sourceMailbox, ok := args["source_mailbox"].(string)
-	if !ok || sourceMailbox == "" {
-		return "", fmt.Errorf("source_mailbox is required")
-	}
-
-	targetMailbox, ok := args["target_mailbox"].(string)
-	if !ok || targetMailbox == "" {
-		return "", fmt.Errorf("target_mailbox is required")
-	}
-
-	uid, ok := args["uid"].(float64)
-	if !ok {
-		return "", fmt.Errorf("uid is required")
-	}
-
-	c, err := t.connectIMAP()
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
-	}
-	defer c.Logout()
-
-	// Select source mailbox
-	_, err = c.Select(sourceMailbox, false)
-	if err != nil {
-		return "", fmt.Errorf("failed to select source mailbox: %w", err)
-	}
-
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(uint32(uid))
-
-	// Copy to target mailbox
-	err = c.Copy(seqset, targetMailbox)
-	if err != nil {
-		return "", fmt.Errorf("failed to copy email: %w", err)
-	}
-
-	// Mark original as deleted
-	item := imap.FormatFlagsOp(imap.AddFlags, true)
-	flags := []interface{}{imap.DeletedFlag}
-	err = c.Store(seqset, item, flags, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to mark email as deleted: %w", err)
-	}
-
-	// Expunge
-	err = c.Expunge(nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to expunge: %w", err)
-	}
-
-	result := map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("Email moved from '%s' to '%s'", sourceMailbox, targetMailbox),
-	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
-}
-
-// Helper methods
 
 func (t *EmailTool) buildEmailMessage(to, cc []string, subject, body string, isHTML bool) []byte {
 	from := mail.Address{Address: t.fromAddress}
@@ -812,17 +755,14 @@ func (t *EmailTool) buildEmailMessage(to, cc []string, subject, body string, isH
 func (t *EmailTool) sendSMTP(to []string, msg []byte) error {
 	auth := smtp.PlainAuth("", t.smtpUsername, t.smtpPassword, t.smtpHost)
 
-	// Connect to SMTP server with TLS
 	addr := fmt.Sprintf("%s:%d", t.smtpHost, t.smtpPort)
 
-	// Try STARTTLS first
 	conn, err := smtp.Dial(addr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
 	defer conn.Close()
 
-	// Start TLS
 	tlsConfig := &tls.Config{
 		ServerName: t.smtpHost,
 	}
@@ -830,32 +770,27 @@ func (t *EmailTool) sendSMTP(to []string, msg []byte) error {
 		return fmt.Errorf("failed to start TLS: %w", err)
 	}
 
-	// Authenticate
 	if err = conn.Auth(auth); err != nil {
 		return fmt.Errorf("failed to authenticate: %w", err)
 	}
 
-	// Set sender
 	if err = conn.Mail(t.fromAddress); err != nil {
 		return fmt.Errorf("failed to set sender: %w", err)
 	}
 
-	// Set recipients
-	for _, addr := range to {
-		if err = conn.Rcpt(addr); err != nil {
-			return fmt.Errorf("failed to set recipient %s: %w", addr, err)
+	for _, rcpt := range to {
+		if err = conn.Rcpt(rcpt); err != nil {
+			return fmt.Errorf("failed to set recipient %s: %w", rcpt, err)
 		}
 	}
 
-	// Send message
 	w, err := conn.Data()
 	if err != nil {
 		return fmt.Errorf("failed to get data writer: %w", err)
 	}
 	defer w.Close()
 
-	_, err = w.Write(msg)
-	if err != nil {
+	if _, err = w.Write(msg); err != nil {
 		return fmt.Errorf("failed to write message: %w", err)
 	}
 
@@ -865,7 +800,6 @@ func (t *EmailTool) sendSMTP(to []string, msg []byte) error {
 func (t *EmailTool) connectIMAP() (*client.Client, error) {
 	addr := fmt.Sprintf("%s:%d", t.imapHost, t.imapPort)
 
-	// Connect with TLS
 	tlsConfig := &tls.Config{
 		ServerName: t.imapHost,
 	}
@@ -875,7 +809,6 @@ func (t *EmailTool) connectIMAP() (*client.Client, error) {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
 
-	// Login
 	if err := c.Login(t.imapUsername, t.imapPassword); err != nil {
 		c.Logout()
 		return nil, fmt.Errorf("failed to login: %w", err)
@@ -910,7 +843,6 @@ func (t *EmailTool) hasFlag(flags []string, flag string) bool {
 
 func (t *EmailTool) extractBody(mr *message.Entity) (string, error) {
 	if mr.Header.Get("Content-Type") == "" {
-		// Simple text email
 		body, err := io.ReadAll(mr.Body)
 		if err != nil {
 			return "", err
@@ -918,7 +850,6 @@ func (t *EmailTool) extractBody(mr *message.Entity) (string, error) {
 		return string(body), nil
 	}
 
-	// Multipart email
 	mediaType, params, err := mr.Header.ContentType()
 	if err != nil {
 		return "", err
@@ -971,31 +902,23 @@ func (t *EmailTool) extractBody(mr *message.Entity) (string, error) {
 	return "", fmt.Errorf("no text body found")
 }
 
-func (t *EmailTool) setFlag(args map[string]interface{}, flag string, add bool) (string, error) {
-	mailbox, ok := args["mailbox"].(string)
-	if !ok || mailbox == "" {
+func (t *EmailTool) setFlag(mailbox string, uid uint32, flag string, add bool) (interface{}, error) {
+	if mailbox == "" {
 		mailbox = "INBOX"
-	}
-
-	uid, ok := args["uid"].(float64)
-	if !ok {
-		return "", fmt.Errorf("uid is required")
 	}
 
 	c, err := t.connectIMAP()
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to IMAP: %w", err)
+		return nil, fmt.Errorf("failed to connect to IMAP: %w", err)
 	}
 	defer c.Logout()
 
-	// Select mailbox
-	_, err = c.Select(mailbox, false)
-	if err != nil {
-		return "", fmt.Errorf("failed to select mailbox: %w", err)
+	if _, err = c.Select(mailbox, false); err != nil {
+		return nil, fmt.Errorf("failed to select mailbox: %w", err)
 	}
 
 	seqset := new(imap.SeqSet)
-	seqset.AddNum(uint32(uid))
+	seqset.AddNum(uid)
 
 	var item imap.StoreItem
 	if add {
@@ -1005,9 +928,8 @@ func (t *EmailTool) setFlag(args map[string]interface{}, flag string, add bool) 
 	}
 
 	flags := []interface{}{flag}
-	err = c.Store(seqset, item, flags, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to set flag: %w", err)
+	if err = c.Store(seqset, item, flags, nil); err != nil {
+		return nil, fmt.Errorf("failed to set flag: %w", err)
 	}
 
 	action := "added"
@@ -1019,94 +941,6 @@ func (t *EmailTool) setFlag(args map[string]interface{}, flag string, add bool) 
 		"success": true,
 		"message": fmt.Sprintf("Flag %s %s", flag, action),
 	}
-
-	resultJSON, _ := json.Marshal(result)
-	return string(resultJSON), nil
-}
-
-// GetJSONSchema returns the JSON schema for the Email tool
-func (t *EmailTool) GetJSONSchema() interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"action": map[string]interface{}{
-				"type": "string",
-				"enum": []string{
-					"send_email",
-					"send_html_email",
-					"list_emails",
-					"read_email",
-					"search_emails",
-					"list_mailboxes",
-					"create_mailbox",
-					"delete_mailbox",
-					"delete_email",
-					"mark_as_read",
-					"mark_as_unread",
-					"move_email",
-				},
-				"description": "The action to perform",
-			},
-			"to": map[string]interface{}{
-				"type":        "array",
-				"items":       map[string]interface{}{"type": "string"},
-				"description": "Recipient email addresses",
-			},
-			"subject": map[string]interface{}{
-				"type":        "string",
-				"description": "Email subject",
-			},
-			"body": map[string]interface{}{
-				"type":        "string",
-				"description": "Email body (plain text)",
-			},
-			"html": map[string]interface{}{
-				"type":        "string",
-				"description": "Email body (HTML)",
-			},
-			"cc": map[string]interface{}{
-				"type":        "array",
-				"items":       map[string]interface{}{"type": "string"},
-				"description": "CC recipients",
-			},
-			"bcc": map[string]interface{}{
-				"type":        "array",
-				"items":       map[string]interface{}{"type": "string"},
-				"description": "BCC recipients",
-			},
-			"mailbox": map[string]interface{}{
-				"type":        "string",
-				"description": "Mailbox name",
-			},
-			"limit": map[string]interface{}{
-				"type":        "number",
-				"description": "Number of items to return",
-			},
-			"unread": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Only return unread emails",
-			},
-			"uid": map[string]interface{}{
-				"type":        "number",
-				"description": "Email UID",
-			},
-			"query": map[string]interface{}{
-				"type":        "string",
-				"description": "Search query",
-			},
-			"name": map[string]interface{}{
-				"type":        "string",
-				"description": "Mailbox name",
-			},
-			"source_mailbox": map[string]interface{}{
-				"type":        "string",
-				"description": "Source mailbox name",
-			},
-			"target_mailbox": map[string]interface{}{
-				"type":        "string",
-				"description": "Target mailbox name",
-			},
-		},
-		"required": []string{"action"},
-	}
+	output, _ := json.Marshal(result)
+	return string(output), nil
 }

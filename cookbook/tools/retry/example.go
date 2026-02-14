@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"agno/tools/retry"
+	"github.com/devalexandre/agno-golang/agno/tools/retry"
 )
 
 func main() {
