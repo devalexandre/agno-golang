@@ -61,8 +61,12 @@ func (o *OpenAIChat) Invoke(ctx context.Context, messages []models.Message, opti
 		return nil, errors.New("no choices in response")
 	}
 	return &models.MessageResponse{
-		Role:    resp.Choices[0].Message.Role,
-		Content: resp.Choices[0].Message.Content,
+		Role:             resp.Choices[0].Message.Role,
+		Content:          resp.Choices[0].Message.Content,
+		Thinking:         resp.Choices[0].Message.Thinking,
+		ToolCalls:        resp.Choices[0].Message.ToolCalls,
+		ToolResults:      resp.Choices[0].Message.ToolResults,
+		ReasoningContent: resp.Choices[0].Message.ReasoningContent,
 	}, nil
 }
 

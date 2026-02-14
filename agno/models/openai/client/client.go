@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/tools"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/shared"
 )
 
@@ -33,6 +35,11 @@ func NewClient(options ...models.OptionClient) (*Client, error) {
 	apiKey := opts.APIKey
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
+		// For OpenAI-compatible endpoints (vLLM, LM Studio, etc), an API key is often not required.
+		// If a custom BaseURL is set and no key is provided, use a dummy key to avoid failing early.
+		if apiKey == "" && opts.BaseURL != "" {
+			apiKey = "EMPTY"
+		}
 		if apiKey == "" {
 			return nil, fmt.Errorf("API key not set. Please provide an API key or set the OPENAI_API_KEY environment variable")
 		}
@@ -115,6 +122,127 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	if callOptions.MaxTokens != nil {
 		params.MaxTokens = openai.Int(int64(*callOptions.MaxTokens))
 	}
+	if callOptions.TopP != nil {
+		params.TopP = openai.Float(float64(*callOptions.TopP))
+	}
+	if callOptions.FrequencyPenalty != nil {
+		params.FrequencyPenalty = openai.Float(float64(*callOptions.FrequencyPenalty))
+	}
+	if callOptions.PresencePenalty != nil {
+		params.PresencePenalty = openai.Float(float64(*callOptions.PresencePenalty))
+	}
+	if callOptions.Seed != nil {
+		params.Seed = openai.Int(int64(*callOptions.Seed))
+	}
+	if callOptions.Stop != nil {
+		switch stop := callOptions.Stop.(type) {
+		case string:
+			params.Stop = openai.ChatCompletionNewParamsStopUnion{OfString: openai.String(stop)}
+		case []string:
+			params.Stop = openai.ChatCompletionNewParamsStopUnion{OfStringArray: stop}
+		default:
+			if debugmod := ctx.Value(models.DebugKey); debugmod != nil && debugmod.(bool) {
+				fmt.Printf("DEBUG: Unsupported stop type: %T\n", callOptions.Stop)
+			}
+		}
+	}
+
+	extraFields := map[string]any{}
+	for k, v := range callOptions.RequestParams {
+		extraFields[k] = v
+	}
+
+	if v, ok := extraFields["parallel_tool_calls"].(bool); ok {
+		params.ParallelToolCalls = openai.Bool(v)
+		delete(extraFields, "parallel_tool_calls")
+	}
+
+	if callOptions.ResponseFormat != nil {
+		switch rf := callOptions.ResponseFormat.(type) {
+		case string:
+			switch rf {
+			case "json_object":
+				obj := shared.NewResponseFormatJSONObjectParam()
+				params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{OfJSONObject: &obj}
+			case "text":
+				txt := shared.NewResponseFormatTextParam()
+				params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{OfText: &txt}
+			default:
+				extraFields["response_format"] = map[string]any{"type": rf}
+			}
+		case map[string]string:
+			if t, ok := rf["type"]; ok {
+				switch t {
+				case "json_object":
+					obj := shared.NewResponseFormatJSONObjectParam()
+					params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{OfJSONObject: &obj}
+				case "text":
+					txt := shared.NewResponseFormatTextParam()
+					params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{OfText: &txt}
+				case "json_schema":
+					// Fall back to raw to preserve user payload.
+					raw := map[string]any{}
+					for k, v := range rf {
+						raw[k] = v
+					}
+					extraFields["response_format"] = raw
+				default:
+					extraFields["response_format"] = rf
+				}
+			} else {
+				extraFields["response_format"] = rf
+			}
+		case map[string]any:
+			if t, ok := rf["type"].(string); ok {
+				switch t {
+				case "json_object":
+					obj := shared.NewResponseFormatJSONObjectParam()
+					params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{OfJSONObject: &obj}
+				case "text":
+					txt := shared.NewResponseFormatTextParam()
+					params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{OfText: &txt}
+				case "json_schema":
+					// Best-effort support for Structured Outputs.
+					name := "response"
+					var schema any
+					var strict *bool
+					if js, ok := rf["json_schema"].(map[string]any); ok {
+						if n, ok := js["name"].(string); ok && n != "" {
+							name = n
+						}
+						if s, ok := js["schema"]; ok {
+							schema = s
+						}
+						if st, ok := js["strict"].(bool); ok {
+							strict = &st
+						}
+					}
+
+					jsParam := shared.ResponseFormatJSONSchemaParam{
+						JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
+							Name:   name,
+							Schema: schema,
+						},
+						Type: "json_schema",
+					}
+					if strict != nil {
+						jsParam.JSONSchema.Strict = param.NewOpt(*strict)
+					}
+					params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{OfJSONSchema: &jsParam}
+				default:
+					extraFields["response_format"] = rf
+				}
+			} else {
+				extraFields["response_format"] = rf
+			}
+		default:
+			extraFields["response_format"] = rf
+		}
+	}
+
+	if len(extraFields) > 0 {
+		params.SetExtraFields(extraFields)
+	}
 
 	debugmod := ctx.Value(models.DebugKey)
 	if debugmod != nil && debugmod.(bool) {
@@ -165,6 +293,14 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 			message := models.MessageResponse{
 				Role:    string(choice.Message.Role),
 				Content: choice.Message.Content,
+			}
+
+			thinking, reasoning := extractReasoningFields(choice.Message.RawJSON())
+			if message.Thinking == "" {
+				message.Thinking = thinking
+			}
+			if message.ReasoningContent == "" {
+				message.ReasoningContent = reasoning
 			}
 
 			// For reasoning models, extract reasoning content if available
@@ -264,6 +400,32 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	return result, nil
 }
 
+func extractReasoningFields(raw string) (thinking string, reasoningContent string) {
+	if raw == "" {
+		return "", ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return "", ""
+	}
+
+	if v, ok := m["thinking"].(string); ok {
+		thinking = v
+	}
+	if v, ok := m["reasoning_content"].(string); ok {
+		reasoningContent = v
+	}
+	if reasoningContent == "" {
+		if v, ok := m["reasoning"].(string); ok {
+			reasoningContent = v
+		}
+	}
+	if thinking == "" && reasoningContent != "" {
+		thinking = reasoningContent
+	}
+	return thinking, reasoningContent
+}
+
 // StreamChatCompletion performs a streaming chat completion request.
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {
 	// Process options
@@ -304,16 +466,6 @@ func (c *Client) createStreamingCompletion(ctx context.Context, params openai.Ch
 	for stream.Next() {
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
-
-		// Handle content streaming
-		if content, ok := acc.JustFinishedContent(); ok {
-			fullContent.WriteString(content)
-			if callOptions.StreamingFunc != nil {
-				if err := callOptions.StreamingFunc(ctx, []byte(content)); err != nil {
-					return nil, err
-				}
-			}
-		}
 
 		// Handle content deltas for real-time streaming
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
@@ -417,14 +569,20 @@ func (c *Client) processToolCalls(ctx context.Context, originalMessages []models
 		ToolCalls: resp.Choices[0].Message.ToolCalls,
 	})
 
-	// Execute tools and add responses
-	for i, tc := range resp.Choices[0].Message.ToolCalls {
+	toolCalls := resp.Choices[0].Message.ToolCalls
+	execParallel := false
+	if v, ok := callOptions.RequestParams["parallel_tool_calls"].(bool); ok && v && len(toolCalls) > 1 {
+		execParallel = true
+	}
+
+	toolResponses := make([]string, len(toolCalls))
+
+	execOne := func(i int, tc tools.ToolCall) {
 		if debugmod != nil && debugmod.(bool) {
 			fmt.Printf("DEBUG: Executing tool %d - %s with args: %s\n", i, tc.Function.Name, tc.Function.Arguments)
 		}
 
 		var toolResponse string
-
 		if tool, ok := maptools[tc.Function.Name]; ok {
 			resTool, err := tool.Execute(tc.Function.Name, []byte(tc.Function.Arguments))
 			if err != nil {
@@ -436,17 +594,9 @@ func (c *Client) processToolCalls(ctx context.Context, originalMessages []models
 				switch v := resTool.(type) {
 				case string:
 					toolResponse = v
-				case map[string]interface{}:
-					jsonBytes, _ := json.Marshal(v)
-					toolResponse = string(jsonBytes)
 				default:
 					jsonBytes, _ := json.Marshal(v)
 					toolResponse = string(jsonBytes)
-				}
-
-				if debugmod != nil && debugmod.(bool) {
-					fmt.Printf("DEBUG: Tool %d response length: %d\n", i, len(toolResponse))
-					fmt.Printf("DEBUG: Tool %d response preview: %.200s...\n", i, toolResponse)
 				}
 			}
 		} else {
@@ -456,7 +606,32 @@ func (c *Client) processToolCalls(ctx context.Context, originalMessages []models
 			}
 		}
 
-		// Add tool response message
+		toolResponses[i] = toolResponse
+	}
+
+	if execParallel {
+		var wg sync.WaitGroup
+		wg.Add(len(toolCalls))
+		for i, tc := range toolCalls {
+			go func(i int, tc tools.ToolCall) {
+				defer wg.Done()
+				execOne(i, tc)
+			}(i, tc)
+		}
+		wg.Wait()
+	} else {
+		for i, tc := range toolCalls {
+			execOne(i, tc)
+		}
+	}
+
+	// Add tool responses (preserve order)
+	for i, tc := range toolCalls {
+		toolResponse := toolResponses[i]
+		if debugmod != nil && debugmod.(bool) {
+			fmt.Printf("DEBUG: Tool %d response length: %d\n", i, len(toolResponse))
+			fmt.Printf("DEBUG: Tool %d response preview: %.200s...\n", i, toolResponse)
+		}
 		newMessages = append(newMessages, models.Message{
 			ToolCallID: &tc.ID,
 			Role:       models.TypeToolRole,
@@ -475,6 +650,9 @@ func (c *Client) processToolCalls(ctx context.Context, originalMessages []models
 	}
 	if callOptions.MaxTokens != nil {
 		newOptions = append(newOptions, models.WithMaxTokens(*callOptions.MaxTokens))
+	}
+	if len(callOptions.RequestParams) > 0 {
+		newOptions = append(newOptions, models.WithRequestParams(callOptions.RequestParams))
 	}
 	if len(callOptions.ToolCall) > 0 {
 		newOptions = append(newOptions, models.WithTools(callOptions.ToolCall))
