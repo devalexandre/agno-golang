@@ -2371,8 +2371,7 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 		}
 	}
 
-	// ResponsePanel already extracts <think>...</think> and shows it via ThinkPanel.
-	utils.ResponsePanel(resp.Content, nil, start, markdown)
+	utils.ResponsePanel(resp.Content, spinnerResponse, start, markdown)
 
 	if a.debug {
 		fmt.Println("DEBUG: ResponsePanel called")
