@@ -12,7 +12,7 @@ import (
 
 func main() {
 	ollamaModel, err := ollama.NewOllamaChat(
-		models.WithID("deepseek-v3.1:671b-cloud"),
+		models.WithID("kimi-k2:1t-cloud"),
 		models.WithBaseURL("https://ollama.com"),
 		models.WithAPIKey(os.Getenv("OLLAMA_API_KEY")),
 	)

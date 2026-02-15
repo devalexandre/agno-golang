@@ -127,6 +127,7 @@ func SkillCallPanel(title, content string) {
 	fmt.Println(panel)
 }
 
+
 // ErrorPanel displays an error panel
 func ErrorPanel(err error) {
 	panel := globalRenderer.RenderError(err)
