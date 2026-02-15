@@ -115,7 +115,7 @@ func newSQLitePersistence(config *DatabaseConfig) (ReasoningPersistence, error) 
 	}
 
 	// Importar database/sql e sqlite3 driver
-	// import _ "github.com/mattn/go-sqlite3"
+	// import _ "modernc.org/sqlite"
 	// import "database/sql"
 
 	// db, err := sql.Open("sqlite3", config.Database)
@@ -130,7 +130,7 @@ func newSQLitePersistence(config *DatabaseConfig) (ReasoningPersistence, error) 
 
 	// return persistence, nil
 
-	return nil, fmt.Errorf("SQLite persistence requires github.com/mattn/go-sqlite3 driver")
+	return nil, fmt.Errorf("SQLite persistence requires modernc.org/sqlite driver")
 }
 
 // newPostgreSQLPersistence cria uma nova instância de PostgreSQL persistence usando agno/db

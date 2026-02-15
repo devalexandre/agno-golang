@@ -39,9 +39,6 @@ func main() {
 		log.Fatalf("Failed to create assistant agent: %v", err)
 	}
 
-	response, err := assistant.Run(prompt)
-	if err != nil {
-		log.Fatalf("Failed to run assistant agent: %v", err)
-	}
-	log.Printf("Compressed Output:\n%s", response)
+	assistant.PrintResponse(prompt, true, true)
+
 }
