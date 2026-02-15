@@ -18,6 +18,7 @@ import (
 type LocalSkills struct {
 	path     string
 	validate bool
+	filter   []string // Optional: only load skills with these names
 }
 
 // LocalSkillsOption is a functional option for LocalSkills.
@@ -27,6 +28,15 @@ type LocalSkillsOption func(*LocalSkills)
 func WithValidation(validate bool) LocalSkillsOption {
 	return func(ls *LocalSkills) {
 		ls.validate = validate
+	}
+}
+
+// WithFilter specifies which skills to load by name.
+// If provided, only skills with names in this list will be loaded.
+// Example: WithFilter([]string{"code-review", "github"})
+func WithFilter(skillNames []string) LocalSkillsOption {
+	return func(ls *LocalSkills) {
+		ls.filter = skillNames
 	}
 }
 
@@ -77,6 +87,11 @@ func (ls *LocalSkills) Load() ([]Skill, error) {
 				continue
 			}
 
+			// Apply filter if specified
+			if len(ls.filter) > 0 && !ls.shouldLoadSkill(entry.Name()) {
+				continue
+			}
+
 			itemPath := filepath.Join(ls.path, entry.Name())
 			skillMD := filepath.Join(itemPath, "SKILL.md")
 			if _, err := os.Stat(skillMD); os.IsNotExist(err) {
@@ -94,7 +109,6 @@ func (ls *LocalSkills) Load() ([]Skill, error) {
 		}
 	}
 
-	log.Printf("Loaded %d skills from %s", len(skills), ls.path)
 	return skills, nil
 }
 
@@ -261,4 +275,17 @@ func discoverReferences(folder string) []string {
 	}
 	sort.Strings(references)
 	return references
+}
+
+// shouldLoadSkill checks if a skill should be loaded based on the filter.
+func (ls *LocalSkills) shouldLoadSkill(skillName string) bool {
+	if len(ls.filter) == 0 {
+		return true // No filter, load all
+	}
+	for _, name := range ls.filter {
+		if name == skillName {
+			return true
+		}
+	}
+	return false
 }

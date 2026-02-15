@@ -126,7 +126,24 @@ type AgentConfig struct {
 	Learning interface{}
 
 	// Skills provide structured instructions, reference docs, and scripts for agents
+	// DEPRECATED: Use SkillsToUse and CustomSkillsLoader instead for simpler configuration
 	Skills *skill.Skills
+
+	// SkillsToUse specifies which built-in skills to activate for this agent.
+	// Built-in skills are automatically loaded from ./skills directory.
+	// Example: []string{"code-review", "git-workflow"}
+	// If empty, all built-in skills are available.
+	// This field is ignored if SkillsUseAll is true.
+	SkillsToUse []string
+
+	// SkillsUseAll when set to true, activates ALL loaded skills (both built-in and custom).
+	// This overrides SkillsToUse configuration.
+	// Default: false (use SkillsToUse to control which skills are active)
+	SkillsUseAll bool
+
+	// CustomSkillsLoader provides custom skills in addition to built-in skills.
+	// Use skill.NewLocalSkills("./my-skills") to load from a directory.
+	CustomSkillsLoader skill.SkillLoader
 
 	// ParseResponse controls whether to parse the response into the OutputSchema
 	ParseResponse bool
@@ -511,8 +528,48 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		agent.tools = append(agent.tools, defaultTools...)
 	}
 
-	// Add skills tool if skills are configured
+	// Handle skills configuration
+	// Two-stage process:
+	//   1. LOADING: Always load ALL built-in skills from ./skills + custom skills (if provided)
+	//   2. ACTIVATION: Only activate skills specified in SkillsToUse (or all if not specified)
+	//
+	// Priority: config.Skills (deprecated) > auto-load built-in + custom
+	if agent.skills == nil {
+		var loaders []skill.SkillLoader
+
+		// STAGE 1: LOADING - Load ALL built-in skills from ./skills directory
+		// This always happens regardless of SkillsToUse configuration
+		builtinLoader := skill.NewLocalSkills(
+			"./skills",
+			skill.WithValidation(false), // Don't fail if directory doesn't exist
+		)
+		loaders = append(loaders, builtinLoader)
+
+		// Also load custom skills if provided
+		if config.CustomSkillsLoader != nil {
+			loaders = append(loaders, config.CustomSkillsLoader)
+		}
+
+		// Load all skills from all loaders
+		skills, err := skill.NewSkills(loaders...)
+		if err != nil {
+			log.Printf("Warning: Failed to load skills: %v", err)
+		} else if len(skills.GetAllSkills()) > 0 {
+			agent.skills = skills
+		}
+	}
+
+	// STAGE 2: ACTIVATION - Configure which loaded skills the agent can actually use
 	if agent.skills != nil {
+		if config.SkillsUseAll && agent.debug {
+			// SkillsUseAll = true: ALL loaded skills are active
+			// Don't call SetActiveSkills, leave all skills active (default behavior)
+			log.Printf("SkillsUseAll is enabled: all %d loaded skills are active", len(agent.skills.GetAllSkills()))
+		} else if len(config.SkillsToUse) > 0 {
+			// SkillsUseAll = false and SkillsToUse specified: Only these skills are active
+			agent.skills.SetActiveSkills(config.SkillsToUse)
+		}
+		// If SkillsUseAll = false and SkillsToUse is empty: all loaded skills are active by default
 		agent.tools = append(agent.tools, agent.skills.GetTool())
 	}
 
@@ -1991,11 +2048,11 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 				continue
 			}
 
-			// Get method name
+			// Get method name (full name with ToolName_MethodName format)
 			methods := tool.GetMethods()
-			var methodName string
+			var fullMethodName string
 			for name := range methods {
-				methodName = name
+				fullMethodName = name
 				break
 			}
 
@@ -2003,8 +2060,8 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 				utils.ToolCallPanelWithArgs(fmt.Sprintf("ChainTool: Executing tool[%d] %s", i, tool.GetName()), args)
 			}
 
-			// Execute the tool
-			toolResult, err := tool.Execute(methodName, json.RawMessage(argsJSON))
+			// Execute the tool with full method name
+			toolResult, err := tool.Execute(fullMethodName, json.RawMessage(argsJSON))
 			if err != nil {
 				utils.ErrorPanel(fmt.Errorf("ChainTool: Tool execution failed for %s: %v", tool.GetName(), err))
 				continue
@@ -2283,15 +2340,35 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 			utils.InfoPanel(fmt.Sprintf("Processing %d tool calls", len(resp.ToolCalls)))
 		}
 
-		// Execute tool calls and get final result
-		finalResult, _, _, _, err := a.processToolCallsFromResponse(resp)
+		// Execute tool calls and get tool messages
+		_, toolMessages, _, _, err := a.processToolCallsFromResponse(resp)
 		if err != nil {
 			fmt.Printf("ERROR: Tool call processing failed: %v\n", err)
 			return
 		}
 
-		// Update response content with tool results
-		resp.Content = finalResult
+		// Add assistant message with tool_calls first, then tool response messages
+		messages = append(messages, models.Message{
+			Role:      models.TypeAssistantRole,
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+		messages = append(messages, toolMessages...)
+
+		if a.debug {
+			fmt.Printf("DEBUG: Making follow-up request with %d messages\n", len(messages))
+		}
+
+		// Make follow-up request to get final response
+		resp, err = a.model.Invoke(a.ctx, messages, callOptions...)
+		if err != nil {
+			fmt.Printf("ERROR: Follow-up model invoke failed: %v\n", err)
+			return
+		}
+
+		if a.debug {
+			fmt.Printf("DEBUG: Follow-up response content length: %d\n", len(resp.Content))
+		}
 	}
 
 	// ResponsePanel already extracts <think>...</think> and shows it via ThinkPanel.
@@ -2308,7 +2385,6 @@ func (a *Agent) print_stream_response(prompt string, markdown bool) {
 
 	messages := a.prepareMessages(prompt, nil)
 	contentChan := utils.StartSimplePanel(nil, start, markdown)
-
 
 	// Response
 	fullResponse := ""
@@ -2736,7 +2812,19 @@ func (a *Agent) prepareMessages(prompt string, knowledgeFilters map[string]inter
 	// Add skills system prompt snippet
 	if a.skills != nil {
 		if a.showSkillCall {
-			utils.SkillCallPanel("Adding skills to system prompt", fmt.Sprintf("Skills: %v", a.skills.GetSkillNames()))
+			// Show only ACTIVE skills (from SkillsToUse or all if SkillsUseAll), not all loaded skills
+			activeSkills := a.skills.GetActiveSkills()
+			totalLoaded := len(a.skills.GetSkillNames())
+
+			var message string
+			if len(activeSkills) == totalLoaded {
+				// All skills are active (either SkillsUseAll=true or SkillsToUse not specified)
+				message = fmt.Sprintf("Active: ALL %d skills 🎯", totalLoaded)
+			} else {
+				// Only specific skills are active
+				message = fmt.Sprintf("Active: %v (%d/%d skills)", activeSkills, len(activeSkills), totalLoaded)
+			}
+			utils.SkillCallPanel("Adding skills to system prompt", message)
 		}
 		skillsSnippet := a.skills.GetSystemPromptSnippet()
 		if skillsSnippet != "" {
@@ -3212,6 +3300,27 @@ func (a *Agent) prepareToolArgumentsForChain(tool toolkit.Tool, input interface{
 	return args
 }
 
+// formatToolResult formats tool execution result for display.
+// If the result is a JSON string, it will be pretty-printed with indentation.
+// Otherwise, returns the original value as string.
+func formatToolResult(result interface{}) string {
+	// Convert result to string first
+	resultStr := fmt.Sprintf("%v", result)
+
+	// Try to parse and pretty-print JSON
+	var jsonData interface{}
+	if err := json.Unmarshal([]byte(resultStr), &jsonData); err == nil {
+		// Successfully parsed as JSON, pretty-print it
+		prettyJSON, err := json.MarshalIndent(jsonData, "", "  ")
+		if err == nil {
+			return string(prettyJSON)
+		}
+	}
+
+	// Not JSON or failed to pretty-print, return original
+	return resultStr
+}
+
 // processToolCallsFromResponse processes tool calls from model response and returns final result
 // Returns: (finalResult, toolMessages, chainToolExecuted, firstToolInput, error)
 func (a *Agent) processToolCallsFromResponse(resp *models.MessageResponse) (string, []models.Message, bool, string, error) {
@@ -3227,15 +3336,21 @@ func (a *Agent) processToolCallsFromResponse(resp *models.MessageResponse) (stri
 		utils.InfoPanel(fmt.Sprintf("Executing tool call: %s", toolCall.Function.Name))
 
 		// Find the tool - check both wrapped and non-wrapped tools
+		// Extract tool name from method name (format: ToolName_MethodName)
+		toolName := toolCall.Function.Name
+		if idx := strings.Index(toolCall.Function.Name, "_"); idx > 0 {
+			toolName = toolCall.Function.Name[:idx]
+		}
+
 		var tool toolkit.Tool
 		for _, t := range a.tools {
 			// Check if it's a ToolWrapper
 			if wrapper, ok := t.(*ToolWrapper); ok {
-				if wrapper.GetName() == toolCall.Function.Name {
+				if wrapper.GetName() == toolName {
 					tool = wrapper
 					break
 				}
-			} else if t.GetName() == toolCall.Function.Name {
+			} else if t.GetName() == toolName {
 				// Direct tool without wrapper
 				tool = t
 				break
@@ -3246,12 +3361,19 @@ func (a *Agent) processToolCallsFromResponse(resp *models.MessageResponse) (stri
 			return "", nil, false, "", fmt.Errorf("tool %s not found", toolCall.Function.Name)
 		}
 
-		// Get method name from tool
+		// Get all methods from the tool
 		methods := tool.GetMethods()
-		var methodName string
-		for name := range methods {
-			methodName = name
-			break
+
+		// The full method name in the map is "ToolName_MethodName"
+		// toolCall.Function.Name is already in that format
+		fullMethodName := toolCall.Function.Name
+		if _, exists := methods[fullMethodName]; !exists {
+			// Build list of available method names for error message
+			var availableNames []string
+			for name := range methods {
+				availableNames = append(availableNames, name)
+			}
+			return "", nil, false, "", fmt.Errorf("method %s not found in tool. Available: %v", fullMethodName, availableNames)
 		}
 
 		// Capture the first tool's input for later substitution in ChainTool mode
@@ -3270,14 +3392,16 @@ func (a *Agent) processToolCallsFromResponse(resp *models.MessageResponse) (stri
 			}
 		}
 
-		// Execute the tool with proper method name
+		// Execute the tool with full method name (toolkit stores methods with "ToolName_MethodName" format)
 		argsJSON := json.RawMessage(toolCall.Function.Arguments)
-		result, err := tool.Execute(methodName, argsJSON)
+		result, err := tool.Execute(fullMethodName, argsJSON)
 		if err != nil {
 			return "", nil, false, "", fmt.Errorf("tool execution failed for %s: %w", toolCall.Function.Name, err)
 		}
 
-		utils.InfoPanel(fmt.Sprintf("Tool %s completed, result: %v", toolCall.Function.Name, result))
+		// Pretty-print JSON result if possible
+		resultStr := formatToolResult(result)
+		utils.InfoPanel(fmt.Sprintf("Tool %s completed, result:\n%s", toolCall.Function.Name, resultStr))
 
 		// Add tool message to history
 		toolMessages = append(toolMessages, models.Message{
@@ -3387,11 +3511,11 @@ func (a *Agent) executeChainFromTool(executedTool toolkit.Tool, result interface
 			continue
 		}
 
-		// Get method name
+		// Get method name (full name with ToolName_MethodName format)
 		methods := tool.GetMethods()
-		var methodName string
+		var fullMethodName string
 		for name := range methods {
-			methodName = name
+			fullMethodName = name
 			break
 		}
 
@@ -3399,7 +3523,7 @@ func (a *Agent) executeChainFromTool(executedTool toolkit.Tool, result interface
 			utils.ToolCallPanelWithArgs(fmt.Sprintf("Executing Tool Chain: %v", tool.GetName()), args)
 		}
 
-		toolResult, err := tool.Execute(methodName, json.RawMessage(argsJSON))
+		toolResult, err := tool.Execute(fullMethodName, json.RawMessage(argsJSON))
 		if err != nil {
 			utils.ErrorPanel(fmt.Errorf("ChainTool: Tool execution failed for %s: %v", tool.GetName(), err))
 			continue // Continue with chain even if tool fails

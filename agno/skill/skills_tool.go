@@ -68,9 +68,18 @@ func newSkillsTool(skills *Skills) *SkillsTool {
 
 // GetInstructions loads the full instructions for a skill.
 func (st *SkillsTool) GetInstructions(params GetInstructionsParams) (interface{}, error) {
+	// Check if skill is active
+	if !st.skills.isSkillActive(params.SkillName) {
+		available := strings.Join(st.skills.GetActiveSkills(), ", ")
+		return marshalJSON(map[string]interface{}{
+			"error":            fmt.Sprintf("Skill '%s' is not active or not found", params.SkillName),
+			"available_skills": available,
+		}), nil
+	}
+
 	s, ok := st.skills.GetSkill(params.SkillName)
 	if !ok {
-		available := strings.Join(st.skills.GetSkillNames(), ", ")
+		available := strings.Join(st.skills.GetActiveSkills(), ", ")
 		return marshalJSON(map[string]interface{}{
 			"error":            fmt.Sprintf("Skill '%s' not found", params.SkillName),
 			"available_skills": available,
@@ -88,9 +97,18 @@ func (st *SkillsTool) GetInstructions(params GetInstructionsParams) (interface{}
 
 // GetReference loads a reference document from a skill.
 func (st *SkillsTool) GetReference(params GetReferenceParams) (interface{}, error) {
+	// Check if skill is active
+	if !st.skills.isSkillActive(params.SkillName) {
+		available := strings.Join(st.skills.GetActiveSkills(), ", ")
+		return marshalJSON(map[string]interface{}{
+			"error":            fmt.Sprintf("Skill '%s' is not active or not found", params.SkillName),
+			"available_skills": available,
+		}), nil
+	}
+
 	s, ok := st.skills.GetSkill(params.SkillName)
 	if !ok {
-		available := strings.Join(st.skills.GetSkillNames(), ", ")
+		available := strings.Join(st.skills.GetActiveSkills(), ", ")
 		return marshalJSON(map[string]interface{}{
 			"error":            fmt.Sprintf("Skill '%s' not found", params.SkillName),
 			"available_skills": available,
@@ -132,9 +150,18 @@ func (st *SkillsTool) GetReference(params GetReferenceParams) (interface{}, erro
 
 // GetScript reads or executes a script from a skill.
 func (st *SkillsTool) GetScript(params GetScriptParams) (interface{}, error) {
+	// Check if skill is active
+	if !st.skills.isSkillActive(params.SkillName) {
+		available := strings.Join(st.skills.GetActiveSkills(), ", ")
+		return marshalJSON(map[string]interface{}{
+			"error":            fmt.Sprintf("Skill '%s' is not active or not found", params.SkillName),
+			"available_skills": available,
+		}), nil
+	}
+
 	s, ok := st.skills.GetSkill(params.SkillName)
 	if !ok {
-		available := strings.Join(st.skills.GetSkillNames(), ", ")
+		available := strings.Join(st.skills.GetActiveSkills(), ", ")
 		return marshalJSON(map[string]interface{}{
 			"error":            fmt.Sprintf("Skill '%s' not found", params.SkillName),
 			"available_skills": available,

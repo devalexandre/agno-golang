@@ -16,8 +16,9 @@ import (
 //  3. Generating tools for agents to use skills
 //  4. Creating system prompt snippets with available skills metadata
 type Skills struct {
-	loaders []SkillLoader
-	skills  map[string]Skill
+	loaders      []SkillLoader
+	skills       map[string]Skill
+	activeSkills []string // If set, only these skills are exposed to the agent
 }
 
 // NewSkills creates a new Skills orchestrator with the given loaders.
@@ -56,7 +57,6 @@ func (s *Skills) loadSkills() error {
 		}
 	}
 
-	log.Printf("Loaded %d total skills", len(s.skills))
 	return nil
 }
 
@@ -93,9 +93,41 @@ func (s *Skills) GetSkillNames() []string {
 	return result
 }
 
+// SetActiveSkills configures which skills are exposed to the agent.
+// If activeSkills is empty or nil, all loaded skills are active.
+func (s *Skills) SetActiveSkills(activeSkills []string) {
+	s.activeSkills = activeSkills
+}
+
+// GetActiveSkills returns the list of active skill names.
+// If no active skills are set, returns all loaded skill names.
+func (s *Skills) GetActiveSkills() []string {
+	if len(s.activeSkills) == 0 {
+		return s.GetSkillNames()
+	}
+	return s.activeSkills
+}
+
+// isSkillActive checks if a skill is active (exposed to agent).
+func (s *Skills) isSkillActive(name string) bool {
+	// If no active skills are set, all skills are active
+	if len(s.activeSkills) == 0 {
+		return true
+	}
+
+	// Check if skill is in active list
+	for _, active := range s.activeSkills {
+		if active == name {
+			return true
+		}
+	}
+	return false
+}
+
 // GetSystemPromptSnippet generates a system prompt snippet with available skills metadata.
 // This creates an XML-formatted snippet that provides the agent with
 // information about available skills without including the full instructions.
+// Only includes skills that are active (as set by SetActiveSkills).
 func (s *Skills) GetSystemPromptSnippet() string {
 	if len(s.skills) == 0 {
 		return ""
@@ -132,7 +164,12 @@ func (s *Skills) GetSystemPromptSnippet() string {
 		"## Available Skills",
 	)
 
+	// Only include active skills
 	for _, sk := range s.skills {
+		if !s.isSkillActive(sk.Name) {
+			continue
+		}
+
 		lines = append(lines, "<skill>")
 		lines = append(lines, fmt.Sprintf("  <name>%s</name>", sk.Name))
 		lines = append(lines, fmt.Sprintf("  <description>%s</description>", sk.Description))

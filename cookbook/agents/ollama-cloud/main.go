@@ -12,7 +12,7 @@ import (
 
 func main() {
 	ollamaModel, err := ollama.NewOllamaChat(
-		models.WithID("kimi-k2:1t-cloud"),
+		models.WithID("deepseek-v3.1:671b-cloud"),
 		models.WithBaseURL("https://ollama.com"),
 		models.WithAPIKey(os.Getenv("OLLAMA_API_KEY")),
 	)
@@ -39,9 +39,6 @@ func main() {
 		log.Fatalf("Failed to create assistant agent: %v", err)
 	}
 
-	response, err := assistant.Run(prompt)
-	if err != nil {
-		log.Fatalf("Failed to run assistant agent: %v", err)
-	}
-	log.Printf("Compressed Output:\n%s", response)
+	assistant.PrintResponse(prompt, true, true)
+
 }

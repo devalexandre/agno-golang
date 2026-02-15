@@ -60,87 +60,176 @@ Instructions for the agent go here...
 
 ## Usage
 
+### How It Works: Two-Stage Process
+
+The skills system uses a **two-stage process**:
+
+1. **LOADING** (automatic): ALL built-in skills from `./skills` are always loaded
+2. **ACTIVATION** (configurable): Only skills in `SkillsToUse` are available to the agent
+
+This means:
+- ✅ All skills are loaded in memory (fast, happens once)
+- ✅ Agent only sees/uses the skills you specify
+- ✅ Zero configuration needed for built-in skills
+
+### Quick Start (Recommended)
+
+**Option 1: Use ALL built-in skills (explicit)**
+
+```go
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context:      ctx,
+    Model:        model,
+    Name:         "My Agent",
+    Instructions: "You are a helpful assistant.",
+
+    // Explicitly enable all skills
+    SkillsUseAll: true, // Activates ALL loaded skills
+})
+```
+
+**Option 2: Use ALL built-in skills (default)**
+
+```go
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context:      ctx,
+    Model:        model,
+    Name:         "My Agent",
+    Instructions: "You are a helpful assistant.",
+
+    // Don't set SkillsUseAll or SkillsToUse - all skills are active by default
+})
+```
+
+**Option 3: Use specific built-in skills only**
+
+```go
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context:      ctx,
+    Model:        model,
+    Name:         "My Agent",
+    Instructions: "You are a helpful assistant.",
+
+    // Only these skills will be available
+    SkillsToUse: []string{"github", "weather", "summarize"},
+})
+```
+
+**Summary**:
+- 📦 **Stage 1 - LOADING**: ALL built-in skills are automatically loaded from `./skills`
+- 🎯 **Stage 2 - ACTIVATION**: Control which skills are accessible:
+  - `SkillsUseAll: true` → ALL loaded skills are active (overrides SkillsToUse)
+  - `SkillsToUse: []string{...}` → Only specified skills are active
+  - Neither set → All loaded skills are active (default)
+- 🚀 **Zero config**: No loaders to manage for built-in skills
+
+### Using Custom Skills
+
+To add your own custom skills alongside built-in ones:
+
+```go
+import "github.com/devalexandre/agno-golang/agno/skill"
+
+customLoader := skill.NewLocalSkills("./my-custom-skills")
+
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context:      ctx,
+    Model:        model,
+
+    // Use specific built-in skills
+    SkillsToUse: []string{"github", "slack"},
+
+    // Add your custom skills
+    CustomSkillsLoader: customLoader,
+})
+```
+
+### Advanced: Manual Skill Loading (Deprecated)
+
+For backward compatibility, you can still manually manage skill loading:
+
+```go
+import "github.com/devalexandre/agno-golang/agno/skill"
+
+// Create a loader pointing to a directory of skills
+loader := skill.NewLocalSkills("./my-skills")
+
+// Create the Skills orchestrator
+skills, err := skill.NewSkills(loader)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create agent with manually loaded skills
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context:      ctx,
+    Model:        model,
+    Skills:       skills, // Deprecated: use SkillsToUse instead
+})
+```
+
+You can also use `WithFilter` to load only specific skills from a directory:
+
+```go
+// Load only code-review and github from built-in skills
+builtinLoader := skill.NewLocalSkills(
+    "./skills",
+    skill.WithFilter([]string{"code-review", "github"}),
+)
+
+skills, err := skill.NewSkills(builtinLoader)
+```
+
+**Note**: This approach is deprecated. Use `SkillsToUse` in AgentConfig for simpler configuration
+
+## Creating Your Own Skills
+
 ### 1. Create a skill directory
 
 ```bash
-mkdir -p my-skills/code-review/{scripts,references}
+mkdir -p my-custom-skills/my-skill/{scripts,references}
 ```
 
-Write the `SKILL.md` with frontmatter and instructions. Add scripts and references as needed.
+### 2. Write the SKILL.md file
 
-### 2. Load skills into the agent
+Create `my-custom-skills/my-skill/SKILL.md` with YAML frontmatter and instructions:
 
-```go
-package main
+```markdown
+---
+name: my-skill
+description: Brief description of what this skill does
+license: Apache-2.0
+metadata:
+  version: "1.0.0"
+  author: your-name
+---
 
-import (
-    "context"
-    "log"
+# My Skill
 
-    "github.com/devalexandre/agno-golang/agno/agent"
-    "github.com/devalexandre/agno-golang/agno/models/ollama"
-    "github.com/devalexandre/agno-golang/agno/models"
-    "github.com/devalexandre/agno-golang/agno/skill"
-)
+## When to Use
+Use this skill when...
 
-func main() {
-    ctx := context.Background()
-
-    // Create a loader pointing to a directory of skills
-    loader := skill.NewLocalSkills("./my-skills")
-
-    // Create the Skills orchestrator
-    skills, err := skill.NewSkills(loader)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Create model
-    model, _ := ollama.NewOllamaChat(
-        models.WithID("llama3.2:latest"),
-    )
-
-    // Create agent with skills
-    a, _ := agent.NewAgent(agent.AgentConfig{
-        Context:      ctx,
-        Model:        model,
-        Name:         "My Agent",
-        Instructions: "You are a helpful assistant with specialized skills.",
-        Skills:       skills,
-    })
-
-    resp, _ := a.Run("Review this Go code for issues: func foo() { fmt.Println(\"hello\") }")
-    fmt.Println(resp.TextContent)
-}
+## Instructions
+Step-by-step instructions for the agent...
 ```
 
-### 3. Multiple loaders
+### 3. (Optional) Add scripts and references
 
-You can combine skills from different sources:
+Add executable scripts to `scripts/` and reference documentation to `references/`.
 
-```go
-projectSkills := skill.NewLocalSkills("./project-skills")
-sharedSkills := skill.NewLocalSkills("/opt/shared-skills")
-
-skills, err := skill.NewSkills(projectSkills, sharedSkills)
-```
-
-### 4. Single skill loading
-
-Point directly to a single skill folder (one that contains `SKILL.md`):
+### 4. Use your custom skill
 
 ```go
-loader := skill.NewLocalSkills("./my-skills/code-review")
-```
+import "github.com/devalexandre/agno-golang/agno/skill"
 
-The loader auto-detects whether the path is a single skill or a directory of skills.
+customLoader := skill.NewLocalSkills("./my-custom-skills")
 
-### 5. Disable validation
-
-Validation is on by default. To skip it:
-
-```go
-loader := skill.NewLocalSkills("./my-skills", skill.WithValidation(false))
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context:      ctx,
+    Model:        model,
+    SkillsToUse: []string{"github"}, // Built-in skills
+    CustomSkillsLoader: customLoader, // Your custom skills
+})
 ```
 
 ## What Happens at Runtime
@@ -247,12 +336,70 @@ The project includes ready-to-use skills in the `skills/` directory:
 | `coding-agent` | Orchestrate external coding agents (Codex, Claude Code) |
 | `skill-creator` | Guide for creating new skills |
 
-To use them:
+To use them, just specify which ones you want in `SkillsToUse`:
 
 ```go
-loader := skill.NewLocalSkills("./skills")
-skills, _ := skill.NewSkills(loader)
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context: ctx,
+    Model:   model,
+
+    // Use specific built-in skills
+    SkillsToUse: []string{"github", "slack", "weather"},
+
+    // Or leave empty to use ALL built-in skills
+    // SkillsToUse: []string{},
+})
 ```
+
+## Advanced Usage
+
+### Multiple loaders
+
+Combine skills from different sources using manual loading:
+
+```go
+projectSkills := skill.NewLocalSkills("./project-skills")
+sharedSkills := skill.NewLocalSkills("/opt/shared-skills")
+
+skills, err := skill.NewSkills(projectSkills, sharedSkills)
+
+a, _ := agent.NewAgent(agent.AgentConfig{
+    Context: ctx,
+    Model:   model,
+    Skills:  skills, // Manual loading (deprecated)
+})
+```
+
+### Single skill loading
+
+Point directly to a single skill folder (one that contains `SKILL.md`):
+
+```go
+loader := skill.NewLocalSkills("./my-skills/code-review")
+```
+
+The loader auto-detects whether the path is a single skill or a directory of skills.
+
+### Disable validation
+
+Validation is on by default. To skip it:
+
+```go
+loader := skill.NewLocalSkills("./my-skills", skill.WithValidation(false))
+```
+
+### Filter skills at load time
+
+Load only specific skills from a directory using `WithFilter`:
+
+```go
+loader := skill.NewLocalSkills(
+    "./skills",
+    skill.WithFilter([]string{"code-review", "github"}),
+)
+```
+
+**Note**: Using `SkillsToUse` in AgentConfig is simpler and recommended over `WithFilter`.
 
 ## Security
 
