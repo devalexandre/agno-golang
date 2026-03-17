@@ -27,17 +27,17 @@ func StructToMap(input interface{}) (map[string]interface{}, error) {
 			continue
 		}
 
-		// Ignora o campo ToolCall explicitamente
+		// Explicitly ignore the ToolCall field
 		if structField.Name == "ToolCall" {
 			continue
 		}
 
-		// Ignora campos do tipo func
+		// Ignore func type fields
 		if field.Kind() == reflect.Func {
 			continue
 		}
 
-		// Ignora valores nulos, zero ou vazios
+		// Ignore null, zero, or empty values
 		if isEmptyValue(field) {
 			continue
 		}

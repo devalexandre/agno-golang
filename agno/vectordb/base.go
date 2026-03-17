@@ -17,6 +17,7 @@ const (
 	DistanceMaxInnerProduct Distance = "max_inner_product"
 	DistanceEuclidean       Distance = "euclidean"
 	DistanceDot             Distance = "dot"
+	DistanceIP              Distance = "ip"
 )
 
 // SearchType represents the type of search to perform

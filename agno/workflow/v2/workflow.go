@@ -82,6 +82,18 @@ type Storage interface {
 	SaveSession(ctx context.Context, session *WorkflowSession) error
 	LoadSession(ctx context.Context, sessionID string) (*WorkflowSession, error)
 	DeleteSession(ctx context.Context, sessionID string) error
+	// Checkpoint methods
+	SaveCheckpoint(ctx context.Context, sessionID string, checkpoint *WorkflowCheckpoint) error
+	LoadCheckpoint(ctx context.Context, sessionID string) (*WorkflowCheckpoint, error)
+}
+
+// WorkflowCheckpoint represents the execution state of a workflow to be resumed
+type WorkflowCheckpoint struct {
+	SessionID   string                 `json:"session_id"`
+	RunID       string                 `json:"run_id"`
+	NextStepIdx int                    `json:"next_step_idx"`
+	StepOutputs map[string]*StepOutput `json:"step_outputs"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 // WorkflowSteps represents the steps configuration for a workflow
@@ -129,6 +141,9 @@ type Workflow struct {
 
 	// WebSocket streaming
 	WebSocketHandler WebSocketHandler `json:"web_socket_handler"`
+
+	// Durability
+	Durable bool `json:"durable"`
 
 	// Internal state
 	mu            sync.RWMutex
@@ -254,6 +269,13 @@ func WithWebSocketHandler(handler WebSocketHandler) WorkflowOption {
 	}
 }
 
+// WithDurable enables durability for the workflow
+func WithDurable(durable bool) WorkflowOption {
+	return func(w *Workflow) {
+		w.Durable = durable
+	}
+}
+
 // StreamingAgent interface for agents that support streaming
 type StreamingAgent interface {
 	Agent
@@ -281,6 +303,34 @@ func (w *Workflow) RunWithStream(ctx context.Context, input interface{}, stream 
 	// Create workflow execution input
 	execInput := w.createExecutionInput(input)
 
+	// Resume from checkpoint if durable
+	startStepIdx := 0
+	if w.Durable && w.Storage != nil && w.SessionID != "" {
+		checkpoint, err := w.Storage.LoadCheckpoint(ctx, w.SessionID)
+		if err == nil && checkpoint != nil {
+			fmt.Printf("Resuming workflow %s from step index %d\n", w.WorkflowID, checkpoint.NextStepIdx)
+			w.RunID = checkpoint.RunID
+			w.metrics.RunID = w.RunID
+			startStepIdx = checkpoint.NextStepIdx
+			w.mu.Lock()
+			for k, v := range checkpoint.StepOutputs {
+				w.stepOutputs[k] = v
+			}
+			w.mu.Unlock()
+
+			// Emit workflow resumed event
+			w.emitEvent(&WorkflowRunResponseEvent{
+				Event:     "WorkflowResumed",
+				Timestamp: time.Now(),
+				Metadata: map[string]interface{}{
+					"workflow_id":   w.WorkflowID,
+					"run_id":        w.RunID,
+					"next_step_idx": startStepIdx,
+				},
+			})
+		}
+	}
+
 	// Emit workflow started event
 	w.emitEvent(&WorkflowRunResponseEvent{
 		Event:     WorkflowStartedEvent,
@@ -298,16 +348,16 @@ func (w *Workflow) RunWithStream(ctx context.Context, input interface{}, stream 
 
 	switch steps := w.Steps.(type) {
 	case []*Step:
-		finalOutput, err = w.executeStepSequenceWithStream(ctx, steps, execInput)
+		finalOutput, err = w.executeStepSequenceWithStream(ctx, steps, execInput, startStepIdx)
 	case []interface{}:
-		finalOutput, err = w.executeInterfaceSequenceWithStream(ctx, steps, execInput)
+		finalOutput, err = w.executeInterfaceSequenceWithStream(ctx, steps, execInput, startStepIdx)
 	case []ExecutorFunc:
 		// Convert to interface slice
 		interfaceSteps := make([]interface{}, len(steps))
 		for i, s := range steps {
 			interfaceSteps[i] = s
 		}
-		finalOutput, err = w.executeInterfaceSequenceWithStream(ctx, interfaceSteps, execInput)
+		finalOutput, err = w.executeInterfaceSequenceWithStream(ctx, interfaceSteps, execInput, startStepIdx)
 	case ExecutorFunc:
 		finalOutput, err = w.executeFunctionWorkflowWithStream(ctx, steps, execInput)
 	case func(*StepInput) (*StepOutput, error):
@@ -389,6 +439,34 @@ func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResp
 	// Create workflow execution input
 	execInput := w.createExecutionInput(input)
 
+	// Resume from checkpoint if durable
+	startStepIdx := 0
+	if w.Durable && w.Storage != nil && w.SessionID != "" {
+		checkpoint, err := w.Storage.LoadCheckpoint(ctx, w.SessionID)
+		if err == nil && checkpoint != nil {
+			fmt.Printf("Resuming workflow %s from step index %d\n", w.WorkflowID, checkpoint.NextStepIdx)
+			w.RunID = checkpoint.RunID
+			w.metrics.RunID = w.RunID
+			startStepIdx = checkpoint.NextStepIdx
+			w.mu.Lock()
+			for k, v := range checkpoint.StepOutputs {
+				w.stepOutputs[k] = v
+			}
+			w.mu.Unlock()
+
+			// Emit workflow resumed event
+			w.emitEvent(&WorkflowRunResponseEvent{
+				Event:     "WorkflowResumed",
+				Timestamp: time.Now(),
+				Metadata: map[string]interface{}{
+					"workflow_id":   w.WorkflowID,
+					"run_id":        w.RunID,
+					"next_step_idx": startStepIdx,
+				},
+			})
+		}
+	}
+
 	// Emit workflow started event
 	w.emitEvent(&WorkflowRunResponseEvent{
 		Event:     WorkflowStartedEvent,
@@ -406,16 +484,16 @@ func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResp
 
 	switch steps := w.Steps.(type) {
 	case []*Step:
-		finalOutput, err = w.executeStepSequence(ctx, steps, execInput)
+		finalOutput, err = w.executeStepSequence(ctx, steps, execInput, startStepIdx)
 	case []interface{}:
-		finalOutput, err = w.executeInterfaceSequence(ctx, steps, execInput)
+		finalOutput, err = w.executeInterfaceSequence(ctx, steps, execInput, startStepIdx)
 	case []ExecutorFunc:
 		// Convert to interface slice
 		interfaceSteps := make([]interface{}, len(steps))
 		for i, s := range steps {
 			interfaceSteps[i] = s
 		}
-		finalOutput, err = w.executeInterfaceSequence(ctx, interfaceSteps, execInput)
+		finalOutput, err = w.executeInterfaceSequence(ctx, interfaceSteps, execInput, startStepIdx)
 	case ExecutorFunc:
 		finalOutput, err = w.executeFunctionWorkflow(ctx, steps, execInput)
 	case func(*StepInput) (*StepOutput, error):
@@ -483,7 +561,7 @@ func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResp
 }
 
 // executeStepSequenceWithStream executes a sequence of steps with streaming support
-func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*Step, execInput *WorkflowExecutionInput) (*StepOutput, error) {
+func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*Step, execInput *WorkflowExecutionInput, startIdx int) (*StepOutput, error) {
 	var lastOutput *StepOutput
 	stepInput := &StepInput{
 		Message:             execInput.Message,
@@ -494,7 +572,8 @@ func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*S
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
 
-	for i, step := range steps {
+	for i := startIdx; i < len(steps); i++ {
+		step := steps[i]
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -670,7 +749,7 @@ func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*S
 }
 
 // executeInterfaceSequenceWithStream executes a sequence of mixed step types with streaming
-func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps []interface{}, execInput *WorkflowExecutionInput) (*StepOutput, error) {
+func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps []interface{}, execInput *WorkflowExecutionInput, startIdx int) (*StepOutput, error) {
 	var lastOutput *StepOutput
 	stepInput := &StepInput{
 		Message:             execInput.Message,
@@ -690,7 +769,8 @@ func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps
 		},
 	})
 
-	for i, item := range steps {
+	for i := startIdx; i < len(steps); i++ {
+		item := steps[i]
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -871,6 +951,23 @@ func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps
 			}
 			w.mu.Unlock()
 
+			// Save checkpoint if durable
+			if w.Durable && w.Storage != nil && w.SessionID != "" {
+				w.mu.RLock()
+				checkpoint := &WorkflowCheckpoint{
+					SessionID:   w.SessionID,
+					RunID:       w.RunID,
+					NextStepIdx: i + 1,
+					StepOutputs: make(map[string]*StepOutput),
+					UpdatedAt:   time.Now(),
+				}
+				for k, v := range w.stepOutputs {
+					checkpoint.StepOutputs[k] = v
+				}
+				w.mu.RUnlock()
+				w.Storage.SaveCheckpoint(ctx, w.SessionID, checkpoint)
+			}
+
 			// Atualiza o PreviousStepOutputs para os próximos passos
 			stepInput.PreviousStepOutputs[stepName] = output
 			lastOutput = output
@@ -921,7 +1018,7 @@ func (w *Workflow) executeFunctionWorkflowWithStream(ctx context.Context, fn Exe
 }
 
 // executeStepSequence executes a sequence of steps
-func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execInput *WorkflowExecutionInput) (*StepOutput, error) {
+func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execInput *WorkflowExecutionInput, startIdx int) (*StepOutput, error) {
 	var lastOutput *StepOutput
 	stepInput := &StepInput{
 		Message:             execInput.Message,
@@ -932,7 +1029,8 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
 
-	for i, step := range steps {
+	for i := startIdx; i < len(steps); i++ {
+		step := steps[i]
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -995,6 +1093,23 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 		w.metrics.StepsExecuted++
 		w.mu.Unlock()
 
+		// Save checkpoint if durable
+		if w.Durable && w.Storage != nil && w.SessionID != "" {
+			w.mu.RLock()
+			checkpoint := &WorkflowCheckpoint{
+				SessionID:   w.SessionID,
+				RunID:       w.RunID,
+				NextStepIdx: i + 1,
+				StepOutputs: make(map[string]*StepOutput),
+				UpdatedAt:   time.Now(),
+			}
+			for k, v := range w.stepOutputs {
+				checkpoint.StepOutputs[k] = v
+			}
+			w.mu.RUnlock()
+			w.Storage.SaveCheckpoint(ctx, w.SessionID, checkpoint)
+		}
+
 		// Update step input for next iteration
 		stepInput.PreviousStepOutputs[stepName] = output
 
@@ -1017,7 +1132,7 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 }
 
 // executeInterfaceSequence executes a sequence of mixed step types
-func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interface{}, execInput *WorkflowExecutionInput) (*StepOutput, error) {
+func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interface{}, execInput *WorkflowExecutionInput, startIdx int) (*StepOutput, error) {
 	var lastOutput *StepOutput
 	stepInput := &StepInput{
 		Message:             execInput.Message,
@@ -1037,7 +1152,8 @@ func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interfa
 		},
 	})
 
-	for i, item := range steps {
+	for i := startIdx; i < len(steps); i++ {
+		item := steps[i]
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -1146,6 +1262,23 @@ func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interfa
 				Success: true,
 			}
 			w.mu.Unlock()
+
+			// Save checkpoint if durable
+			if w.Durable && w.Storage != nil && w.SessionID != "" {
+				w.mu.RLock()
+				checkpoint := &WorkflowCheckpoint{
+					SessionID:   w.SessionID,
+					RunID:       w.RunID,
+					NextStepIdx: i + 1,
+					StepOutputs: make(map[string]*StepOutput),
+					UpdatedAt:   time.Now(),
+				}
+				for k, v := range w.stepOutputs {
+					checkpoint.StepOutputs[k] = v
+				}
+				w.mu.RUnlock()
+				w.Storage.SaveCheckpoint(ctx, w.SessionID, checkpoint)
+			}
 
 			// Atualiza o PreviousStepOutputs para os próximos passos
 			stepInput.PreviousStepOutputs[stepName] = output

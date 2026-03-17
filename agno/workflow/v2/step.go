@@ -269,7 +269,7 @@ func (s *Step) Execute(ctx context.Context, input *StepInput) (*StepOutput, erro
 	}
 
 	// Handle failure based on configuration
-	if s.SkipOnFailure {
+	if s.SkipOnFailure && lastErr != nil {
 		return &StepOutput{
 			StepName:     s.Name,
 			ExecutorName: s.GetExecutorName(),

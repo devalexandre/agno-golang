@@ -8,11 +8,17 @@ import (
 	"github.com/devalexandre/agno-golang/agno/document"
 )
 
+// Reranker is the interface for document reranking models.
+type Reranker interface {
+	Rerank(ctx context.Context, query string, results []*SearchResult) ([]*SearchResult, error)
+}
+
 // RAGPipeline implements a Retrieval-Augmented Generation pipeline
 type RAGPipeline struct {
 	KnowledgeBase    Knowledge
 	NumDocuments     int
 	MaxContextLength int
+	Reranker         Reranker
 }
 
 // RAGResult represents the result of a RAG operation
@@ -36,9 +42,30 @@ func NewRAGPipeline(knowledgeBase Knowledge, numDocuments int) *RAGPipeline {
 // Query executes a RAG query
 func (r *RAGPipeline) Query(ctx context.Context, query string) (*RAGResult, error) {
 	// 1. Retrieve relevant documents
-	docs, err := r.KnowledgeBase.Search(ctx, query, r.NumDocuments)
+	// If we have a reranker, we might want to retrieve more documents initially
+	searchNum := r.NumDocuments
+	if r.Reranker != nil {
+		searchNum = r.NumDocuments * 2 // Retrieve twice as many for reranking
+	}
+
+	docs, err := r.KnowledgeBase.Search(ctx, query, searchNum)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search knowledge base: %w", err)
+	}
+
+	// 2. Rerank documents if a reranker is provided
+	if r.Reranker != nil && len(docs) > 0 {
+		rerankedDocs, err := r.Reranker.Rerank(ctx, query, docs)
+		if err != nil {
+			// Log error but continue with original docs? Or return error?
+			// For now, return error as it's a pipeline failure
+			return nil, fmt.Errorf("failed to rerank documents: %w", err)
+		}
+		docs = rerankedDocs
+		// Limit to requested NumDocuments after reranking
+		if len(docs) > r.NumDocuments {
+			docs = docs[:r.NumDocuments]
+		}
 	}
 
 	// 2. Build context from documents
@@ -129,4 +156,9 @@ func (r *RAGPipeline) SetMaxContextLength(length int) {
 // SetNumDocuments sets the number of documents to retrieve
 func (r *RAGPipeline) SetNumDocuments(num int) {
 	r.NumDocuments = num
+}
+
+// SetReranker sets the reranker for the pipeline
+func (r *RAGPipeline) SetReranker(reranker Reranker) {
+	r.Reranker = reranker
 }

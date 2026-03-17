@@ -16,6 +16,10 @@
 - **Tool Ecosystem** – GitHub, Slack, Email, Database Query tools plus core tools (Echo, Shell, File, Web, Math, DuckDuckGo, Weather, HackerNews, Exa) (P3.2)
 - **MCP (Model Context Protocol)** – discovery and execution of MCP‑provided tools (P3.3)
 - **Embedders** – OpenAI & Ollama embedding generation (partial, P3.4)
+- **Model Providers** – Anthropic, DeepSeek, Groq, AWS Bedrock, Azure OpenAI
+- **Cloud Toolkits** – AWS, GCP, Azure SDK integrations
+- **Durable Workflows** – Persistence and resumption of long-running tasks
+- **Observability** – Native OpenTelemetry integration for distributed tracing
 
 A concise summary of all functionalities already implemented and ready for the pre‑release. See the detailed description in **[Pre‑release Description](docs/PRE_RELEASE_DESCRIPTION.md)**.
 
@@ -56,7 +60,13 @@ A concise summary of all functionalities already implemented and ready for the p
 
 ### 🔟 Tests & Examples
 - >100 unit tests and benchmarks covering the above areas
-- Cookbooks with practical examples for each feature (tool calling, memory, knowledge, team, workflow, vector DB, etc.)
+- Cookbooks with practical examples for each functionality (tool calling, memory, knowledge, team, workflow, vector DB, etc.)
+- **New Examples:** See the directories in `cookbook/` for examples of:
+  - **Model Providers:** `cookbook/models/new_features/` (Anthropic, DeepSeek, Groq, AWS, Azure)
+  - **Cloud Toolkits:** `cookbook/tools/new_features/` (AWS, GCP, Azure)
+  - **RAG Reranking:** `cookbook/rag_reranking/`
+  - **Durable Workflows:** `cookbook/durable_workflow/`
+  - **Observability:** `cookbook/observability/`
 
 All **critical (P1)** and **high‑priority (P2)** features are **100 % complete**. Vector DB and tool ecosystem (P3) already have functional implementations for Qdrant, PgVector, GitHub, Slack, and Email, ready for use.
 
