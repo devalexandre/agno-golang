@@ -127,7 +127,6 @@ func SkillCallPanel(title, content string) {
 	fmt.Println(panel)
 }
 
-
 // ErrorPanel displays an error panel
 func ErrorPanel(err error) {
 	panel := globalRenderer.RenderError(err)
@@ -356,13 +355,13 @@ func ExtractThink(content string) (thinking string, final string) {
 	start := strings.Index(content, startTag)
 	end := strings.Index(content, endTag)
 
-	// Caso exista bloco <think>...</think>
+	// If <think>...</think> block exists
 	if start != -1 && end != -1 && end > start {
 		thinking := strings.TrimSpace(
 			content[start+len(startTag) : end],
 		)
 
-		// Remove o bloco <think>...</think> do conteúdo final
+		// Remove the <think>...</think> block from final content
 		final = strings.TrimSpace(
 			content[:start] + content[end+len(endTag):],
 		)
@@ -370,7 +369,7 @@ func ExtractThink(content string) (thinking string, final string) {
 		return thinking, final
 	}
 
-	// Se não houver <think>, retorna tudo normalmente
+	// If no <think> tag, return everything as final content
 	return "", strings.TrimSpace(content)
 }
 

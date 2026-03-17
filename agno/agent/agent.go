@@ -2371,7 +2371,7 @@ func (a *Agent) print_response(prompt string, markdown bool) {
 		}
 	}
 
-	utils.ResponsePanel(resp.Content, spinnerResponse, start, markdown)
+	utils.ResponsePanel(resp.Content, nil, start, markdown)
 
 	if a.debug {
 		fmt.Println("DEBUG: ResponsePanel called")

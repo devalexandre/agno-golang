@@ -14,10 +14,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
 	"github.com/devalexandre/agno-golang/agno/knowledge"
 	"github.com/devalexandre/agno-golang/agno/team"
+	"github.com/devalexandre/agno-golang/agno/utils/telemetry"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
 
@@ -423,6 +425,14 @@ func (os *AgentOS) areDBInstancesCompatible(db1, db2 interface{}) bool {
 
 // GetApp creates and returns the HTTP router/app
 func (os *AgentOS) GetApp() *gin.Engine {
+	// Initialize telemetry if enabled
+	if os.telemetry {
+		_, err := telemetry.InitTracer(os.name)
+		if err != nil {
+			log.Printf("Warning: failed to initialize telemetry: %v", err)
+		}
+	}
+
 	// Set Gin mode based on Debug setting
 	if os.settings.Debug {
 		gin.SetMode(gin.DebugMode)
@@ -433,6 +443,26 @@ func (os *AgentOS) GetApp() *gin.Engine {
 	}
 
 	router := gin.New()
+
+	// Add telemetry middleware if enabled
+	if os.telemetry {
+		router.Use(func(c *gin.Context) {
+			tracer := telemetry.GetTracer("agno.os")
+			ctx, span := tracer.Start(c.Request.Context(), c.Request.Method+" "+c.FullPath())
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("http.method", c.Request.Method),
+				attribute.String("http.url", c.Request.URL.String()),
+				attribute.String("http.route", c.FullPath()),
+			)
+
+			c.Request = c.Request.WithContext(ctx)
+			c.Next()
+
+			span.SetAttributes(attribute.Int("http.status_code", c.Writer.Status()))
+		})
+	}
 
 	// Add middleware - only enable logging in debug mode
 	if os.settings.Debug {
