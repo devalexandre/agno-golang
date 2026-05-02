@@ -1,76 +1,78 @@
 # Agno Golang
 
-Implementacao em Go do Agno para criar agentes de IA com modelos, ferramentas, memoria, conhecimento, workflows, times multiagente e uma camada HTTP opcional com AgentOS.
+Go implementation of Agno for building AI agents with models, tools, memory, knowledge, workflows, multi-agent teams, and an optional HTTP layer through AgentOS.
 
-O foco do projeto e oferecer uma base idiomatica em Go para construir agentes que possam:
+The project focuses on providing an idiomatic Go foundation for agents that can:
 
-- conversar com diferentes provedores de LLM;
-- executar ferramentas com schemas Go;
-- consultar bases de conhecimento e bancos vetoriais;
-- manter memoria de usuario, historico de sessoes e estado;
-- coordenar agentes especializados;
-- executar workflows duraveis e reprocessaveis;
-- expor agentes, times e workflows por API REST/WebSocket.
+- talk to different LLM providers;
+- execute tools with Go schemas;
+- query knowledge bases and vector databases;
+- keep user memory, session history, and runtime state;
+- coordinate specialized agents;
+- execute durable and resumable workflows;
+- expose agents, teams, and workflows through REST/WebSocket APIs.
 
 ## Status
 
-O projeto esta em evolucao ativa. A documentacao abaixo descreve os recursos presentes no repositorio e aponta para cookbooks executaveis em `cookbook/` e guias mais detalhados em `docs/`.
+This project is under active development. The documentation below describes the resources currently available in the repository and points to runnable cookbooks in `cookbook/` and deeper guides in `docs/`.
 
-## Requisitos
+## Requirements
 
 - Go `1.25+`
-- Um provedor de modelo configurado, como Ollama local ou uma API externa
-- Docker, opcional, para exemplos com Qdrant, PgVector e Testcontainers
-- `poppler-utils`/`pdftotext`, opcional, para ingestao de PDFs
+- A configured model provider, such as local Ollama or an external API
+- Docker, optional, for Qdrant, PgVector, and Testcontainers examples
+- `poppler-utils`/`pdftotext`, optional, for PDF ingestion
 
-Para comecar com Ollama local:
+To start with local Ollama:
 
 ```bash
 ollama serve
 ollama pull llama3.2:latest
 ```
 
-Instale o modulo em outro projeto:
+Install the module in another project:
 
 ```bash
 go get github.com/devalexandre/agno-golang
 ```
 
-Ou rode os exemplos direto neste repositorio:
+Or run examples directly from this repository:
 
 ```bash
 go mod download
 go run ./cookbook/getting_started/01_basic_agent
 ```
 
-## Conceitos Principais
+## Core Concepts
 
-**Agent** e a unidade central. Ele combina modelo, instrucoes, ferramentas, conhecimento, memoria, storage, schemas, guardrails, hooks e opcoes de execucao.
+**Agent** is the central unit. It combines a model, instructions, tools, knowledge, memory, storage, schemas, guardrails, hooks, and run options.
 
-**Model Provider** implementa `models.AgnoModelInterface`. Isso permite alternar entre OpenAI, Ollama, Anthropic, Groq e outros provedores mantendo a mesma API de agente.
+**Model Provider** implements `models.AgnoModelInterface`. This lets you switch between OpenAI, Ollama, Anthropic, Groq, and other providers while keeping the same agent API.
 
-**Tool** e uma acao que o agente pode chamar. Ferramentas usam structs Go como schema de parametros e sao registradas via `toolkit.Toolkit`.
+**Tool** is an action the agent can call. Tools use Go structs as parameter schemas and are registered through `toolkit.Toolkit`.
 
-**Knowledge** e a camada de RAG. Ela guarda documentos, faz busca textual/vetorial e pode usar Qdrant, PgVector, Chroma, Pinecone, Milvus ou Weaviate.
+**Knowledge** is the RAG layer. It stores documents, performs text/vector search, and can use Qdrant, PgVector, Chroma, Pinecone, Milvus, or Weaviate.
 
-**Memory** guarda fatos reutilizaveis sobre usuarios e sessoes. Storage guarda historico de runs, sessoes e estado operacional.
+**Memory** stores reusable facts about users and sessions. Storage stores run history, sessions, and operational state.
 
-**Workflow V2** organiza steps, paralelismo, roteamento, condicoes, loops, streaming e checkpoints duraveis.
+**Workflow V2** organizes steps, parallel execution, routing, conditions, loops, streaming, and durable checkpoints.
 
-**Team** coordena varios agentes especializados em modos de roteamento, coordenacao ou colaboracao.
+**Flow** is a fluent API on top of Workflow V2. It lets you build workflows with chainable calls like `Step`, `If/Else`, `Loop`, `Parallel`, and `Router`.
 
-**Skills** adicionam conhecimento procedural ao agente. Diferente de tools, uma skill ensina quando e como agir usando instrucoes, scripts e referencias sob demanda.
+**Team** coordinates multiple specialized agents in routing, coordination, or collaboration modes.
 
-**AgentOS** expoe agentes, times, workflows, conhecimento, memoria e metricas por API HTTP e WebSocket.
+**Skills** add procedural knowledge to an agent. Unlike tools, a skill teaches the agent when and how to act using instructions, scripts, and references loaded on demand.
 
-## Recursos Disponiveis
+**AgentOS** exposes agents, teams, workflows, knowledge, memory, and metrics through HTTP and WebSocket APIs.
 
-### Modelos
+## Available Features
 
-Provedores implementados:
+### Models
 
-- OpenAI e endpoints OpenAI-like
-- Ollama local e Ollama Cloud
+Implemented providers:
+
+- OpenAI and OpenAI-like endpoints
+- Local Ollama and Ollama Cloud
 - Google Gemini
 - Anthropic
 - DeepSeek
@@ -82,7 +84,7 @@ Provedores implementados:
 - DashScope
 - vLLM
 
-Exemplo rapido com Ollama:
+Quick Ollama example:
 
 ```go
 package main
@@ -109,15 +111,15 @@ func main() {
 	ag, err := agent.NewAgent(agent.AgentConfig{
 		Context:      context.Background(),
 		Model:        model,
-		Name:         "Assistente",
-		Instructions: "Responda de forma objetiva e pratica.",
+		Name:         "Assistant",
+		Instructions: "Answer in a practical and concise way.",
 		Markdown:     true,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	resp, err := ag.Run("Explique em uma frase por que Go combina com agentes de IA.")
+	resp, err := ag.Run("Explain in one sentence why Go works well for AI agents.")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -126,63 +128,63 @@ func main() {
 }
 ```
 
-Exemplo com OpenAI:
+OpenAI example:
 
 ```go
 model, err := chat.NewOpenAIChat(models.WithID("gpt-4o"))
 ag, err := agent.NewAgent(agent.AgentConfig{
 	Model:       model,
-	Description: "Voce e um assistente tecnico.",
+	Description: "You are a technical assistant.",
 })
-resp, err := ag.Run("Resuma RAG em 3 bullets.")
+resp, err := ag.Run("Summarize RAG in 3 bullets.")
 ```
 
 ## Agents
 
-O `agent.AgentConfig` concentra os principais recursos:
+`agent.AgentConfig` concentrates the main capabilities:
 
-- `Instructions`, `Role`, `Goal`, `ExpectedOutput` e `ContextData`
-- streaming, markdown, debug e exibicao de tool calls
-- tools, skills, guardrails e hooks
-- input/output schemas e parser/output model
-- knowledge e filtros por run
-- memoria de usuario, resumo de sessao e historico
-- estado de sessao, dependencias e contexto adicional
-- retries, backoff, limite de tool calls e escolha de tool
+- `Instructions`, `Role`, `Goal`, `ExpectedOutput`, and `ContextData`
+- streaming, markdown, debug, and tool-call display
+- tools, skills, guardrails, and hooks
+- input/output schemas and parser/output model
+- knowledge and per-run filters
+- user memory, session summaries, and history
+- session state, dependencies, and extra context
+- retries, backoff, tool-call limits, and tool choice
 
-### Agent com ferramentas
+### Agent With Tools
 
 ```go
 searchTool := tools.NewDuckDuckGoTool()
 mathTool := tools.NewMathTool()
 
 ag, err := agent.NewAgent(agent.AgentConfig{
-	Context:      context.Background(),
-	Model:        model,
-	Name:         "Researcher",
-	Instructions: "Use ferramentas quando elas ajudarem a responder melhor.",
-	Tools:        []toolkit.Tool{searchTool, mathTool},
+	Context:       context.Background(),
+	Model:         model,
+	Name:          "Researcher",
+	Instructions:  "Use tools whenever they help you answer better.",
+	Tools:         []toolkit.Tool{searchTool, mathTool},
 	ShowToolsCall: true,
 })
 if err != nil {
 	log.Fatal(err)
 }
 
-resp, err := ag.Run("Pesquise sobre Go 1.25 e calcule 25 * 4.")
+resp, err := ag.Run("Research Go 1.25 and calculate 25 * 4.")
 ```
 
-Ferramentas prontas incluem:
+Built-in tools include:
 
-- busca e web: DuckDuckGo, Google Search, Exa, Tavily, Serper, SerpAPI, Firecrawl, Crawl4AI, Wikipedia, Hacker News, PubMed, arXiv, Reddit, YouTube, Newspaper
-- arquivos e sistema: FileTool, ShellTool, SystemTools, OSCommandExecutor, Go build/test, Docker, Kubernetes, Git
-- dados: SQL, PostgreSQL, DuckDB, CSV/Excel, YFinance, database helpers
-- comunicacao: Slack, Gmail, Email, Telegram, Discord, WhatsApp, Google Calendar
-- produtividade: GitHub, Jira, Notion, Confluence, Google Drive, Google Sheets
-- cloud: AWS, GCP e Azure
-- utilitarios: Math, Calculator, Weather, Cache, Monitoring, API client, Webhook, temporal planner, dependency inspector, performance profiler, self-validation gate
-- MCP: descoberta e execucao de ferramentas fornecidas por servidores Model Context Protocol
+- search and web: DuckDuckGo, Google Search, Exa, Tavily, Serper, SerpAPI, Firecrawl, Crawl4AI, Wikipedia, Hacker News, PubMed, arXiv, Reddit, YouTube, Newspaper
+- files and system: FileTool, ShellTool, SystemTools, OSCommandExecutor, Go build/test, Docker, Kubernetes, Git
+- data: SQL, PostgreSQL, DuckDB, CSV/Excel, YFinance, database helpers
+- communication: Slack, Gmail, Email, Telegram, Discord, WhatsApp, Google Calendar
+- productivity: GitHub, Jira, Notion, Confluence, Google Drive, Google Sheets
+- cloud: AWS, GCP, and Azure
+- utilities: Math, Calculator, Weather, Cache, Monitoring, API client, Webhook, temporal planner, dependency inspector, performance profiler, self-validation gate
+- MCP: discovery and execution of tools provided by Model Context Protocol servers
 
-### Criando uma ferramenta customizada
+### Creating a Custom Tool
 
 ```go
 type StatusTool struct {
@@ -190,17 +192,17 @@ type StatusTool struct {
 }
 
 type StatusParams struct {
-	Service string `json:"service" description:"Nome do servico"`
+	Service string `json:"service" description:"Service name"`
 }
 
 func (t *StatusTool) Check(params StatusParams) (string, error) {
-	return "servico " + params.Service + " esta operacional", nil
+	return "service " + params.Service + " is operational", nil
 }
 
 status := &StatusTool{Toolkit: toolkit.NewToolkit()}
 status.Name = "status"
-status.Description = "Consulta status de servicos internos"
-status.Register("Check", "Verifica status de um servico", status, status.Check, StatusParams{})
+status.Description = "Checks internal service status"
+status.Register("Check", "Checks a service status", status, status.Check, StatusParams{})
 
 ag, _ := agent.NewAgent(agent.AgentConfig{
 	Model: model,
@@ -208,52 +210,52 @@ ag, _ := agent.NewAgent(agent.AgentConfig{
 })
 ```
 
-## Saida Estruturada
+## Structured Output
 
-Use `OutputSchema` e `ParseResponse` quando o resultado precisar voltar como struct Go em vez de texto livre.
+Use `OutputSchema` and `ParseResponse` when the result must come back as a Go struct instead of free-form text.
 
 ```go
-type Plano struct {
-	Titulo string   `json:"titulo" description:"Titulo curto do plano"`
-	Passos []string `json:"passos" description:"Passos objetivos"`
+type Plan struct {
+	Title string   `json:"title" description:"Short plan title"`
+	Steps []string `json:"steps" description:"Objective steps"`
 }
 
-plano := &Plano{}
+plan := &Plan{}
 
 ag, err := agent.NewAgent(agent.AgentConfig{
 	Context:       context.Background(),
 	Model:         model,
-	Instructions:  "Gere respostas em JSON compativel com o schema.",
-	OutputSchema:  plano,
+	Instructions:  "Generate JSON responses compatible with the schema.",
+	OutputSchema:  plan,
 	ParseResponse: true,
 })
 if err != nil {
 	log.Fatal(err)
 }
 
-run, err := ag.Run("Crie um plano de 3 passos para revisar um PR.")
+run, err := ag.Run("Create a 3-step plan to review a PR.")
 if err != nil {
 	log.Fatal(err)
 }
 
-fmt.Println(plano.Titulo)
-fmt.Println(run.Output.(*Plano).Passos)
+fmt.Println(plan.Title)
+fmt.Println(run.Output.(*Plan).Steps)
 ```
 
-Tambem ha suporte para `InputSchema`, ponteiro para slice em `OutputSchema`, `OutputModel` e `ParserModel`. Veja `docs/agent/INPUT_OUTPUT_SCHEMA.md` e `docs/agent/OUTPUT_MODEL.md`.
+`InputSchema`, pointer-to-slice `OutputSchema`, `OutputModel`, and `ParserModel` are also supported. See `docs/agent/INPUT_OUTPUT_SCHEMA.md` and `docs/agent/OUTPUT_MODEL.md`.
 
-## Knowledge, RAG e Vector DBs
+## Knowledge, RAG, and Vector DBs
 
-Tipos de conhecimento disponiveis:
+Available knowledge types:
 
 - `BaseKnowledge`
 - `DocumentKnowledgeBase`
 - `TextKnowledgeBase`
 - `JSONKnowledgeBase`
 - `PDFKnowledgeBase`
-- `RAGPipeline` com interface de reranker
+- `RAGPipeline` with a reranker interface
 
-Bancos vetoriais:
+Vector databases:
 
 - Qdrant
 - PgVector
@@ -266,14 +268,14 @@ Embedders:
 
 - OpenAI
 - Ollama
-- Mock embedder para testes
+- Mock embedder for tests
 
-Exemplo com documentos em memoria:
+In-memory document example:
 
 ```go
 kb := knowledge.NewDocumentKnowledgeBase("docs", nil)
 
-doc := document.NewDocument("Agno permite criar agentes com tools, knowledge e memory em Go.")
+doc := document.NewDocument("Agno lets you build agents with tools, knowledge, and memory in Go.")
 doc.Name = "intro"
 doc.AddMetadata("source", "manual")
 
@@ -284,11 +286,11 @@ ag, err := agent.NewAgent(agent.AgentConfig{
 	Model:                 model,
 	Knowledge:             kb,
 	KnowledgeMaxDocuments: 3,
-	Instructions:          "Use a base de conhecimento quando ela for relevante.",
+	Instructions:          "Use the knowledge base when it is relevant.",
 })
 ```
 
-Exemplo com Qdrant e Ollama embeddings:
+Qdrant with Ollama embeddings:
 
 ```go
 emb := embedder.NewOllamaEmbedder(
@@ -314,11 +316,11 @@ kb.URLs = []string{"https://arxiv.org/pdf/2305.13245.pdf"}
 err = kb.LoadParallel(context.Background(), true, 3)
 ```
 
-## Memory e Storage
+## Memory and Storage
 
-Use `memory.Memory` quando quiser guardar preferencias, fatos ou resumos sobre usuarios. Use `storage.DB` quando quiser persistir sessoes, runs e historico operacional.
+Use `memory.Memory` when you want to store user preferences, facts, or summaries. Use `storage.DB` when you want to persist sessions, runs, and operational history.
 
-Exemplo de memoria de usuario com SQLite:
+SQLite user memory example:
 
 ```go
 memoryDB, err := memorysqlite.NewSqliteMemoryDb("user_memories", "agent_memory.db")
@@ -340,67 +342,85 @@ if err != nil {
 	log.Fatal(err)
 }
 
-resp, err := ag.Run("Sou vegetariano e quero ganhar forca sem forcar o joelho.")
+resp, err := ag.Run("I am vegetarian and want to build strength without stressing my knee.")
 if err == nil {
-	_, _ = memoryManager.CreateMemory(context.Background(), "user_123", "perfil inicial", resp.TextContent)
+	_, _ = memoryManager.CreateMemory(context.Background(), "user_123", "initial profile", resp.TextContent)
 }
 ```
 
-Storage de sessoes esta disponivel em SQLite e PostgreSQL. Veja `cookbook/getting_started/06_agent_with_storage` e `agno/storage/`.
+Session storage is available in SQLite and PostgreSQL. See `cookbook/getting_started/06_agent_with_storage` and `agno/storage/`.
 
-## Workflows
+## Workflows and Flow
 
-Workflow V2 suporta steps sequenciais, steps paralelos, condicoes, loops, roteadores, streaming, WebSocket e checkpoints duraveis.
+Workflow V2 supports sequential steps, parallel steps, conditions, loops, routers, streaming, WebSocket, and durable checkpoints.
 
 ```go
 step1, _ := v2.NewStep(
-	v2.WithName("coletar-dados"),
+	v2.WithName("collect-data"),
 	v2.WithExecutor(func(input *v2.StepInput) (*v2.StepOutput, error) {
-		return &v2.StepOutput{Content: "dados coletados"}, nil
+		return &v2.StepOutput{Content: "data collected"}, nil
 	}),
 )
 
 step2, _ := v2.NewStep(
-	v2.WithName("gerar-relatorio"),
+	v2.WithName("generate-report"),
 	v2.WithAgent(writerAgent),
 )
 
 workflow := v2.NewWorkflow(
-	v2.WithWorkflowName("Relatorio"),
+	v2.WithWorkflowName("Report"),
 	v2.WithWorkflowSteps([]*v2.Step{step1, step2}),
 	v2.WithStreaming(true, true),
 )
 
-workflow.PrintResponse("Crie um relatorio executivo", true)
+workflow.PrintResponse("Create an executive report", true)
 ```
 
-Workflows duraveis usam `WithStorage`, `WithSessionID` e `WithDurable(true)` para salvar checkpoints e retomar do ultimo step concluido. Veja `cookbook/durable_workflow/main.go`.
+The new `agno/flow` package provides a fluent API on top of Workflow V2 for simpler workflow construction:
 
-## Teams Multiagente
+```go
+workflow := flow.New("Report Flow").
+	Description("Collects data and generates a report").
+	Step("collect-data", func(input *v2.StepInput) (*v2.StepOutput, error) {
+		return &v2.StepOutput{Content: "data collected"}, nil
+	}).
+	If(flow.IfSuccess(),
+		func(input *v2.StepInput) (*v2.StepOutput, error) {
+			return &v2.StepOutput{Content: "report generated"}, nil
+		},
+	).
+	Build()
 
-Times permitem combinar agentes especializados. Modos disponiveis:
+workflow.PrintResponse("Start report", true)
+```
 
-- `team.RouteMode`: roteia para o membro mais adequado
-- `team.CoordinateMode`: delega tarefas e sintetiza respostas
-- `team.CollaborateMode`: todos trabalham no mesmo problema e o lider sintetiza
+Durable workflows use `WithStorage`, `WithSessionID`, and `WithDurable(true)` to save checkpoints and resume from the last completed step. See `cookbook/durable_workflow/main.go`.
+
+## Multi-Agent Teams
+
+Teams let you combine specialized agents. Available modes:
+
+- `team.RouteMode`: routes to the most appropriate member
+- `team.CoordinateMode`: delegates tasks and synthesizes responses
+- `team.CollaborateMode`: all members work on the same problem and the leader synthesizes
 
 ```go
 contentTeam := team.NewTeam(team.TeamConfig{
 	Context:     context.Background(),
 	Name:        "Content Team",
-	Description: "Time para pesquisa, escrita e revisao",
+	Description: "Team for research, writing, and review",
 	Model:       model,
 	Members:     []*agent.Agent{researchAgent, writerAgent, editorAgent},
 	Mode:        team.CoordinateMode,
 	Async:       true,
 })
 
-resp, err := contentTeam.Run("Crie um artigo curto sobre Go para agentes de IA.")
+resp, err := contentTeam.Run("Create a short article about Go for AI agents.")
 ```
 
 ## Skills
 
-Skills ficam em diretorios com `SKILL.md`, scripts e referencias opcionais:
+Skills live in directories with `SKILL.md`, optional scripts, and optional references:
 
 ```text
 my-skill/
@@ -409,7 +429,7 @@ my-skill/
   references/
 ```
 
-Skills embutidas no repositorio:
+Built-in skills in this repository:
 
 - `github`
 - `slack`
@@ -422,7 +442,7 @@ Skills embutidas no repositorio:
 - `coding-agent`
 - `skill-creator`
 
-Ativando skills especificas:
+Activating specific skills:
 
 ```go
 ag, err := agent.NewAgent(agent.AgentConfig{
@@ -433,7 +453,7 @@ ag, err := agent.NewAgent(agent.AgentConfig{
 })
 ```
 
-Adicionando skills locais:
+Adding local skills:
 
 ```go
 loader := skill.NewLocalSkills("./my-custom-skills")
@@ -447,7 +467,7 @@ ag, err := agent.NewAgent(agent.AgentConfig{
 
 ## MCP
 
-O pacote `agno/tools/mcp` conecta agentes a servidores MCP e registra as ferramentas descobertas dinamicamente como `toolkit.Tool`.
+The `agno/tools/mcp` package connects agents to MCP servers and registers dynamically discovered tools as `toolkit.Tool`.
 
 ```go
 workspace, err := os.Getwd()
@@ -474,16 +494,16 @@ ag, err := agent.NewAgent(agent.AgentConfig{
 })
 ```
 
-Exemplo completo: `cookbook/mcp/main.go`.
+Full example: `cookbook/mcp/main.go`.
 
-## Learning Loop e Culture Manager
+## Learning Loop and Culture Manager
 
-O Learning Loop adiciona aprendizado continuo sobre uma base `knowledge.Knowledge`:
+The Learning Loop adds continuous learning on top of a `knowledge.Knowledge` store:
 
-- antes do run, recupera memorias relevantes via RAG;
-- depois do run, decide se deve salvar um artefato reutilizavel;
-- deduplica com busca vetorial e SimHash;
-- promove candidatos para verificados com feedback positivo.
+- before the run, it retrieves relevant memories via RAG;
+- after the run, it decides whether to save a reusable artifact;
+- it deduplicates with vector search and SimHash;
+- it promotes candidates to verified memories with positive feedback.
 
 ```go
 kb := knowledge.NewBaseKnowledge("learning", vectorDB)
@@ -497,18 +517,18 @@ ag, err := agent.NewAgent(agent.AgentConfig{
 })
 ```
 
-O Culture Manager guarda perfil leve de usuario, como idioma preferido, timezone, estilo de comunicacao e interesses, para personalizar respostas sem misturar isso com conhecimento factual.
+The Culture Manager stores a lightweight user profile, such as preferred language, timezone, communication style, and interests, to personalize responses without mixing that data with factual knowledge.
 
 ## AgentOS
 
-AgentOS expoe agentes, times e workflows como API HTTP, dashboard e WebSocket.
+AgentOS exposes agents, teams, and workflows as an HTTP API, dashboard, and WebSocket server.
 
 ```go
 assistant, _ := agent.NewAgent(agent.AgentConfig{
 	Context:      context.Background(),
 	Name:         "Assistant",
 	Model:        model,
-	Instructions: "Voce e um assistente util.",
+	Instructions: "You are a helpful assistant.",
 })
 
 osInstance, err := agentOS.NewAgentOS(agentOS.AgentOSOptions{
@@ -527,7 +547,7 @@ if err != nil {
 log.Fatal(osInstance.Serve())
 ```
 
-Endpoints principais:
+Main endpoints:
 
 - `GET /health`
 - `GET /config`
@@ -541,57 +561,60 @@ Endpoints principais:
 - `GET /api/v1/memory`
 - `GET /api/v1/metrics`
 
-Veja `agno/os/README.md` e `cookbook/os-example/main.go`.
+See `agno/os/README.md` and `cookbook/os-example/main.go`.
 
-## Guardrails, Hooks e Execucao Segura
+## Guardrails, Hooks, and Safe Execution
 
-O agente suporta:
+The agent supports:
 
-- input, output e tool guardrails;
-- protecao contra prompt injection, limite de tamanho, rate limit, loop detection e similaridade semantica;
-- `PreHooks`, `PostHooks`, `ToolBeforeHooks` e `ToolAfterHooks`;
-- `ToolCallLimit`, `ToolChoice`, retries e exponential backoff;
-- `FileTool` com escrita desabilitada por padrao;
-- ferramentas separadas para shell/OS, que devem ser usadas com politica clara em ambientes produtivos.
+- input, output, and tool guardrails;
+- prompt-injection protection, input length limits, rate limiting, loop detection, and semantic similarity checks;
+- `PreHooks`, `PostHooks`, `ToolBeforeHooks`, and `ToolAfterHooks`;
+- `ToolCallLimit`, `ToolChoice`, retries, and exponential backoff;
+- `FileTool` with writes disabled by default;
+- separate shell/OS tools, which should be used with a clear policy in production environments.
 
-## Cookbooks Recomendados
+## Recommended Cookbooks
 
-Comece por estes exemplos:
+Start with these examples:
 
 ```bash
 go run ./cookbook/getting_started/01_basic_agent
 go run ./cookbook/getting_started/02_agent_with_tools
 go run ./cookbook/getting_started/03_agent_with_knowledge
 go run ./cookbook/agents/input_and_output/output
+go run ./cookbook/flow
 go run ./cookbook/workflow_prompt/basic
 go run ./cookbook/mcp
 ```
 
-Outros diretorios uteis:
+Useful directories:
 
-- `cookbook/agents/`: agentes, tools, guardrails, memory, state, skills e teams
-- `cookbook/getting_started/`: exemplos progressivos de uso basico
-- `cookbook/vectordb/`: Qdrant, PgVector, Chroma e Pinecone
-- `cookbook/tools/`: ferramentas prontas e integracoes
-- `cookbook/models/`: provedores de modelo
-- `cookbook/durable_workflow/`: checkpoints e resume
+- `cookbook/agents/`: agents, tools, guardrails, memory, state, skills, and teams
+- `cookbook/getting_started/`: progressive getting-started examples
+- `cookbook/flow/`: Flow fluent API example
+- `cookbook/vectordb/`: Qdrant, PgVector, Chroma, and Pinecone
+- `cookbook/tools/`: ready-to-use tools and integrations
+- `cookbook/models/`: model providers
+- `cookbook/durable_workflow/`: checkpoints and resume
 - `cookbook/observability/`: OpenTelemetry
-- `cookbook/agentos-ollama-cloud/`: AgentOS com Ollama Cloud
+- `cookbook/agentos-ollama-cloud/`: AgentOS with Ollama Cloud
 
-## Documentacao
+## Documentation
 
-- `docs/agent/`: agentes, schemas e output model
-- `docs/RUN_OPTIONS.md`: opcoes de execucao por run
-- `docs/tools/`: ferramentas, seguranca e MCP
-- `docs/knowledge/`: knowledge bases e PDFs
-- `docs/vectordb/`: bancos vetoriais
+- `docs/agent/`: agents, schemas, and output model
+- `docs/RUN_OPTIONS.md`: per-run execution options
+- `docs/tools/`: tools, security, and MCP
+- `docs/knowledge/`: knowledge bases and PDFs
+- `docs/vectordb/`: vector databases
 - `docs/embedder/`: embeddings
-- `docs/learning/`: learning loop e diferenca para culture
-- `docs/skills/`: sistema de skills
-- `docs/flow/` e `docs/chain/`: fluxos e chain tools
+- `docs/learning/`: learning loop and the difference from culture
+- `docs/skills/`: skills system
+- `docs/flow/`: Flow fluent API
+- `docs/chain/`: chain tools
 - `agno/os/README.md`: AgentOS
 
-## Variaveis de Ambiente Frequentes
+## Common Environment Variables
 
 ```bash
 export OPENAI_API_KEY="..."
@@ -607,25 +630,26 @@ export EXA_API_KEY="..."
 export OLLAMA_API_KEY="..."
 ```
 
-## Estrutura do Repositorio
+## Repository Structure
 
 ```text
 agno/
-  agent/        agentes, schemas, guardrails, reasoning, tools default
-  models/       provedores de LLM
-  tools/        ferramentas e toolkits
-  knowledge/    RAG, documentos, PDFs e pipeline
+  agent/        agents, schemas, guardrails, reasoning, default tools
+  models/       LLM providers
+  tools/        tools and toolkits
+  knowledge/    RAG, documents, PDFs, and pipeline
   vectordb/     Qdrant, PgVector, Chroma, Pinecone, Milvus, Weaviate
-  embedder/     OpenAI, Ollama e mock embeddings
-  memory/       memoria de usuario e sumarios
-  storage/      SQLite e PostgreSQL para sessoes/runs
-  workflow/v2/  workflows, steps, paralelo, durable e websocket
-  team/         times multiagente
-  skill/        carregamento e execucao de skills
-  learning/     aprendizado continuo sobre knowledge
-  culture/      perfil leve de usuario
+  embedder/     OpenAI, Ollama, and mock embeddings
+  memory/       user memory and summaries
+  storage/      SQLite and PostgreSQL for sessions/runs
+  workflow/v2/  workflows, steps, parallel execution, durable mode, websocket
+  flow/         fluent API for Workflow V2
+  team/         multi-agent teams
+  skill/        skill loading and execution
+  learning/     continuous learning over knowledge
+  culture/      lightweight user profile
   os/           AgentOS HTTP/WebSocket
-cookbook/       exemplos executaveis
-docs/           guias de uso
-skills/         skills embutidas
+cookbook/       runnable examples
+docs/           usage guides
+skills/         built-in skills
 ```
