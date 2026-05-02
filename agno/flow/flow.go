@@ -92,6 +92,17 @@ func (b *FlowBuilder) Parallel(steps ...any) *FlowBuilder {
 	return b
 }
 
+// Router adds a router step to the workflow.
+func (b *FlowBuilder) Router(name string, routeFunc v2.RouterFunc, options ...v2.RouterOption) *RouterBuilder {
+	opts := append([]v2.RouterOption{v2.WithRouterName(name), v2.WithRouteFunc(routeFunc)}, options...)
+	router := v2.NewRouter(opts...)
+	b.steps = append(b.steps, router)
+	return &RouterBuilder{
+		builder: b,
+		router:  router,
+	}
+}
+
 // Build constructs and returns the final Workflow.
 func (b *FlowBuilder) Build() *v2.Workflow {
 	opts := []v2.WorkflowOption{
@@ -131,4 +142,32 @@ func (cb *ConditionBuilder) End() *FlowBuilder {
 // Step continues adding steps to the FlowBuilder.
 func (cb *ConditionBuilder) Step(name string, executor any, options ...v2.StepOption) *FlowBuilder {
 	return cb.builder.Step(name, executor, options...)
+}
+
+// RouterBuilder is a helper for building router steps with Routes.
+type RouterBuilder struct {
+	builder *FlowBuilder
+	router  *v2.Router
+}
+
+// Route adds a route to the current router.
+func (rb *RouterBuilder) Route(name string, steps ...any) *RouterBuilder {
+	rb.router.AddRoute(name, rb.builder.convertToInterfaces(steps)...)
+	return rb
+}
+
+// DefaultRoute sets the default route for the current router.
+func (rb *RouterBuilder) DefaultRoute(steps ...any) *RouterBuilder {
+	v2.WithDefaultRoute(rb.builder.convertToInterfaces(steps)...)(rb.router)
+	return rb
+}
+
+// End returns the FlowBuilder from the RouterBuilder.
+func (rb *RouterBuilder) End() *FlowBuilder {
+	return rb.builder
+}
+
+// Step continues adding steps to the FlowBuilder.
+func (rb *RouterBuilder) Step(name string, executor any, options ...v2.StepOption) *FlowBuilder {
+	return rb.builder.Step(name, executor, options...)
 }
