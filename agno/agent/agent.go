@@ -384,6 +384,10 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		config.LearningManager = config.Learning
 	}
 
+	if config.Model == nil {
+		return nil, fmt.Errorf("model is required")
+	}
+
 	agent := &Agent{
 		ctx:                   config.Context,
 		model:                 config.Model,
@@ -1963,6 +1967,10 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 	// Retry logic
 	var resp *models.MessageResponse
 	var lastErr error
+
+	if a.model == nil {
+		return models.RunResponse{}, fmt.Errorf("agent model is not initialized")
+	}
 
 	// Prepare model options - if ChainTool is enabled, only send the first tool
 	var toolsToSend []toolkit.Tool

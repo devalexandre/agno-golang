@@ -18,14 +18,17 @@ type OpenAIChat struct {
 // NewOpenAIChat creates a new instance of the integration with the OpenAIChat API.
 // This function accepts options as functions that modify *ClientOptions.
 func NewOpenAIChat(options ...models.OptionClient) (models.AgnoModelInterface, error) {
-	cli, err := client.NewClient(options...)
-	if err != nil {
-		return nil, err
-	}
-
 	opts := models.DefaultOptions()
 	for _, option := range options {
 		option(opts)
+	}
+
+	// Use updated options when creating client
+	cli, err := client.NewClient(func(o *models.ClientOptions) {
+		*o = *opts
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &OpenAIChat{

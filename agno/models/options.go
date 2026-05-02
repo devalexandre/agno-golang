@@ -100,7 +100,7 @@ func DefaultCallOptions() *CallOptions {
 // DefaultOptions returns the default options for the OpenAI API client.
 func DefaultOptions() *ClientOptions {
 	return &ClientOptions{
-		ID:               "gpt-3.5-turbo",
+		ID:               "gpt-4o",
 		Temperature:      floatPtr(0.7),
 		TopP:             floatPtr(1.0),
 		FrequencyPenalty: floatPtr(0.0),
