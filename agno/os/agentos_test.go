@@ -278,4 +278,13 @@ func TestAgentOSSettings_DefaultValues(t *testing.T) {
 	assert.Equal(t, true, settings.EnableCORS)
 }
 
+func TestBrowserDisplayHost(t *testing.T) {
+	assert.Equal(t, "localhost", browserDisplayHost(""))
+	assert.Equal(t, "localhost", browserDisplayHost("0.0.0.0"))
+	assert.Equal(t, "localhost", browserDisplayHost("::"))
+	assert.Equal(t, "localhost", browserDisplayHost("[::]"))
+	assert.Equal(t, "127.0.0.1", browserDisplayHost("127.0.0.1"))
+	assert.Equal(t, "example.test", browserDisplayHost("example.test"))
+}
+
 // Helper function is now in conversions.go

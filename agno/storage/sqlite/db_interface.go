@@ -51,7 +51,12 @@ func (s *SqliteStorage) CreateSession(ctx context.Context, session *storage.Agen
 
 // ReadSession reads an agent session by ID
 func (s *SqliteStorage) ReadSession(ctx context.Context, sessionID string) (*storage.AgentSession, error) {
-	query := `SELECT * FROM ` + s.tableName + ` WHERE session_id = ?`
+	// Select explicit columns in the exact order expected by row.Scan below.
+	// Do NOT use SELECT *: getTableSchemaV1 emits the common columns
+	// (extra_data, created_at, updated_at) before the mode-specific ones
+	// (agent_id, agent_data, team_session_id), so positional scanning of
+	// SELECT * misaligns and fails (e.g. agent_data JSON scanned into created_at).
+	query := `SELECT session_id, user_id, memory, session_data, agent_id, agent_data, team_session_id, extra_data, created_at, updated_at FROM ` + s.tableName + ` WHERE session_id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, sessionID)
 
@@ -170,7 +175,7 @@ agent_message, messages, metrics, created_at, updated_at
 
 // ReadRun reads an agent run by ID
 func (s *SqliteStorage) ReadRun(ctx context.Context, runID string) (*storage.AgentRun, error) {
-	query := `SELECT * FROM agent_runs WHERE id = ?`
+	query := `SELECT id, session_id, user_id, run_name, run_data, user_message, agent_message, messages, metrics, created_at, updated_at FROM agent_runs WHERE id = ?`
 
 	row := s.db.QueryRowContext(ctx, query, runID)
 
@@ -312,7 +317,7 @@ FOREIGN KEY (session_id) REFERENCES ` + s.tableName + `(session_id)
 
 // GetRunsForSession gets all runs for a session
 func (s *SqliteStorage) GetRunsForSession(ctx context.Context, sessionID string) ([]*storage.AgentRun, error) {
-	query := `SELECT * FROM agent_runs WHERE session_id = ? ORDER BY created_at ASC`
+	query := `SELECT id, session_id, user_id, run_name, run_data, user_message, agent_message, messages, metrics, created_at, updated_at FROM agent_runs WHERE session_id = ? ORDER BY created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, sessionID)
 	if err != nil {

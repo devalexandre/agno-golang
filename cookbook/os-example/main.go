@@ -79,8 +79,8 @@ func main() {
 		Description: agentOS.StringPtr("My first AgentOS"),
 		Agents:      []*agent.Agent{assistant},
 		Settings: &agentOS.AgentOSSettings{
-			Port:       8080,      // User can change if needed
-			Host:       "0.0.0.0", // Accept all connections
+			Port:       7777,
+			Host:       "localhost",
 			Debug:      false,
 			EnableCORS: true,
 		},
