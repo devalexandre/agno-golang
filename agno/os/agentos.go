@@ -597,6 +597,7 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 // Serve starts the AgentOS server
 func (os *AgentOS) Serve() error {
 	app := os.GetApp()
+	displayHost := browserDisplayHost(os.settings.Host)
 
 	os.server = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", os.settings.Host, os.settings.Port),
@@ -618,8 +619,8 @@ func (os *AgentOS) Serve() error {
 	}
 
 	log.Printf("🚀 AgentOS '%s' starting on %s:%d", os.name, os.settings.Host, os.settings.Port)
-	log.Printf("📊 Dashboard: %s://%s:%d", protocol, os.settings.Host, os.settings.Port)
-	log.Printf("⚙️  Configuration: %s://%s:%d/config", protocol, os.settings.Host, os.settings.Port)
+	log.Printf("📊 Dashboard: %s://%s:%d", protocol, displayHost, os.settings.Port)
+	log.Printf("⚙️  Configuration: %s://%s:%d/config", protocol, displayHost, os.settings.Port)
 	log.Printf("☁️  Cloud Platform: %s", cloudEndpoint)
 	log.Printf("🔑 Security Key: %s", func() string {
 		if os.settings.SecurityKey != "" {
@@ -641,6 +642,15 @@ func (os *AgentOS) Serve() error {
 	}
 
 	return os.server.ListenAndServe()
+}
+
+func browserDisplayHost(host string) string {
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		return "localhost"
+	default:
+		return host
+	}
 }
 
 // Shutdown gracefully shuts down the AgentOS

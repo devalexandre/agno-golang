@@ -59,6 +59,9 @@ func NewLocalSkills(path string, opts ...LocalSkillsOption) *LocalSkills {
 // Load implements SkillLoader.
 func (ls *LocalSkills) Load() ([]Skill, error) {
 	if _, err := os.Stat(ls.path); os.IsNotExist(err) {
+		if !ls.validate {
+			return nil, nil
+		}
 		return nil, &SkillError{Message: "Skills path does not exist: " + ls.path}
 	}
 

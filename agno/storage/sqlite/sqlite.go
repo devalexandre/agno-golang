@@ -21,6 +21,7 @@ type SqliteStorage struct {
 	tableName         string
 	dbURL             *string
 	dbFile            *string
+	driver            string
 	db                *sql.DB
 	schemaVersion     int
 	autoUpgradeSchema bool
@@ -28,13 +29,22 @@ type SqliteStorage struct {
 	schemaUpToDate    bool
 }
 
+// defaultSQLiteDriver is the database/sql driver name used when none is
+// configured. It defaults to "sqlite" because this package imports the pure-Go
+// modernc.org/sqlite driver (which registers under that name and needs no CGO).
+const defaultSQLiteDriver = "sqlite"
+
 // SqliteStorageConfig holds configuration options
 type SqliteStorageConfig struct {
-	ID                string
-	TableName         string
-	DBURL             *string
-	DBFile            *string
-	DB                *sql.DB
+	ID        string
+	TableName string
+	DBURL     *string
+	DBFile    *string
+	DB        *sql.DB
+	// Driver overrides the database/sql driver name used to open DBURL/DBFile
+	// connections. Defaults to "sqlite" (modernc.org/sqlite, no CGO). Set this
+	// to "sqlite3" if you import a CGO driver such as github.com/mattn/go-sqlite3.
+	Driver            string
 	SchemaVersion     int
 	AutoUpgradeSchema bool
 	Mode              storage.StorageMode
@@ -49,6 +59,9 @@ func NewSqliteStorage(config SqliteStorageConfig) (*SqliteStorage, error) {
 	if config.Mode == "" {
 		config.Mode = storage.AgentMode
 	}
+	if config.Driver == "" {
+		config.Driver = defaultSQLiteDriver
+	}
 
 	// Generate ID if not provided (like Python's BaseDb)
 	id := config.ID
@@ -61,6 +74,7 @@ func NewSqliteStorage(config SqliteStorageConfig) (*SqliteStorage, error) {
 		tableName:         config.TableName,
 		dbURL:             config.DBURL,
 		dbFile:            config.DBFile,
+		driver:            config.Driver,
 		schemaVersion:     config.SchemaVersion,
 		autoUpgradeSchema: config.AutoUpgradeSchema,
 		mode:              config.Mode,
@@ -90,8 +104,13 @@ func (s *SqliteStorage) initDB(providedDB *sql.DB) error {
 		return nil
 	}
 
+	driver := s.driver
+	if driver == "" {
+		driver = defaultSQLiteDriver
+	}
+
 	if s.dbURL != nil {
-		s.db, err = sql.Open("sqlite3", *s.dbURL)
+		s.db, err = sql.Open(driver, *s.dbURL)
 		if err != nil {
 			return fmt.Errorf("failed to open database with URL: %w", err)
 		}
@@ -102,13 +121,13 @@ func (s *SqliteStorage) initDB(providedDB *sql.DB) error {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 
-		s.db, err = sql.Open("sqlite3", *s.dbFile)
+		s.db, err = sql.Open(driver, *s.dbFile)
 		if err != nil {
 			return fmt.Errorf("failed to open database file: %w", err)
 		}
 	} else {
 		// Create in-memory database
-		s.db, err = sql.Open("sqlite3", ":memory:")
+		s.db, err = sql.Open(driver, ":memory:")
 		if err != nil {
 			return fmt.Errorf("failed to create in-memory database: %w", err)
 		}
