@@ -332,9 +332,18 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 func toContents(messages []models.Message) []*genai.Content {
 	var contents []*genai.Content
 	for _, msg := range messages {
+		parts := make([]*genai.Part, 0, 1)
+		if msg.Content != "" {
+			parts = append(parts, &genai.Part{Text: msg.Content})
+		}
+		parts = append(parts, mediaParts(msg)...)
+		if len(parts) == 0 {
+			// Keep the turn even when empty, so role alternation is preserved.
+			parts = append(parts, &genai.Part{Text: msg.Content})
+		}
 		contents = append(contents, &genai.Content{
 			Role:  string(msg.Role),
-			Parts: []*genai.Part{{Text: msg.Content}},
+			Parts: parts,
 		})
 	}
 	return contents

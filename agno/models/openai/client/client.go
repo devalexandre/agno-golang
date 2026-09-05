@@ -61,7 +61,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	for i, msg := range messages {
 		switch msg.Role {
 		case models.TypeUserRole:
-			openaiMessages[i] = openai.UserMessage(msg.Content)
+			openaiMessages[i] = buildUserMessage(msg)
 		case models.TypeAssistantRole:
 			// Create assistant message
 			assistantMsg := openai.ChatCompletionAssistantMessageParam{
