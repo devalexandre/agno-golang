@@ -28,6 +28,34 @@ func NewClient(options ...models.OptionClient) (*Client, error) {
 		option(&opts)
 	}
 
+	if opts.ID == "" {
+		opts.ID = "gemini-2.0-flash"
+	}
+
+	ctx := context.Background()
+
+	// Vertex AI backend: configured via ClientParams (set by the vertexai package).
+	// Uses Application Default Credentials (ADC) — project/location, no API key.
+	if useVertex, _ := opts.ClientParams["vertex"].(bool); useVertex {
+		project, _ := opts.ClientParams["project"].(string)
+		location, _ := opts.ClientParams["location"].(string)
+		if project == "" {
+			return nil, fmt.Errorf("vertexai: project is required")
+		}
+		if location == "" {
+			location = "us-central1"
+		}
+		client, err := genai.NewClient(ctx, &genai.ClientConfig{
+			Backend:  genai.BackendVertexAI,
+			Project:  project,
+			Location: location,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Vertex AI client: %w", err)
+		}
+		return &Client{model: opts.ID, genaiClient: client, options: opts}, nil
+	}
+
 	apiKey := opts.APIKey
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
@@ -36,11 +64,6 @@ func NewClient(options ...models.OptionClient) (*Client, error) {
 		}
 	}
 
-	if opts.ID == "" {
-		opts.ID = "gemini-2.0-flash"
-	}
-
-	ctx := context.Background()
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,

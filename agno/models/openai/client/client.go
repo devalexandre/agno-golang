@@ -515,6 +515,18 @@ func toRequestOptions(opts models.ClientOptions) []option.RequestOption {
 		reqOpts = append(reqOpts, option.WithBaseURL(opts.BaseURL))
 	}
 
+	// Default headers (e.g. Azure "api-key") applied to every request.
+	for key, values := range opts.DefaultHeaders {
+		for _, v := range values {
+			reqOpts = append(reqOpts, option.WithHeader(key, v))
+		}
+	}
+
+	// Default query params (e.g. Azure "api-version").
+	for key, v := range opts.DefaultQuery {
+		reqOpts = append(reqOpts, option.WithQuery(key, v))
+	}
+
 	return reqOpts
 }
 
