@@ -86,8 +86,28 @@ func (m *Model) AInvoke(context.Context, []models.Message, ...models.Option) (<-
 	return nil, nil
 }
 
-// InvokeStream is not supported by the stub.
-func (m *Model) InvokeStream(context.Context, []models.Message, ...models.Option) error { return nil }
+// InvokeStream implements models.AgnoModelInterface.
+// It runs Invoke (executing tools the same way) and streams the answer word
+// by word through models.WithStreamingFunc.
+func (m *Model) InvokeStream(ctx context.Context, msgs []models.Message, opts ...models.Option) error {
+	resp, err := m.Invoke(ctx, msgs, opts...)
+	if err != nil {
+		return err
+	}
+	co := &models.CallOptions{}
+	for _, o := range opts {
+		o(co)
+	}
+	if co.StreamingFunc == nil {
+		return nil
+	}
+	for _, word := range strings.SplitAfter(resp.Content, " ") {
+		if err := co.StreamingFunc(ctx, []byte(word)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // AInvokeStream is not supported by the stub.
 func (m *Model) AInvokeStream(context.Context, []models.Message, ...models.Option) (<-chan *models.MessageResponse, <-chan error) {

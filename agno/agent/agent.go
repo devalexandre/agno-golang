@@ -3230,65 +3230,6 @@ func (a *Agent) processMemories(userMessage, agentResponse string) error {
 	return nil
 }
 
-func (a *Agent) RunStream(prompt string, fn func([]byte) error) error {
-	messages := a.prepareMessages(prompt, nil)
-
-	// Collect streaming content for memory processing
-	var fullResponse strings.Builder
-
-	opts := []models.Option{
-		models.WithTools(a.tools),
-		models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-			// Collect content for memory processing
-			fullResponse.Write(chunk)
-
-			return fn(chunk)
-		}),
-	}
-	if len(a.modelOptions) > 0 {
-		opts = append(opts, a.modelOptions...)
-	}
-
-	err := a.model.InvokeStream(a.ctx, messages, opts...)
-
-	// After streaming is complete, process memory and storage
-	if err == nil {
-		responseContent := fullResponse.String()
-
-		// Save run to storage if enabled
-		if a.db != nil {
-			if saveErr := a.saveRun(prompt, responseContent, messages); saveErr != nil && a.debug {
-				fmt.Printf("Warning: Failed to save run: %v\n", saveErr)
-			}
-		}
-
-		// Process memories if enabled
-		if a.memory != nil {
-			if memErr := a.processMemories(prompt, responseContent); memErr != nil && a.debug {
-				fmt.Printf("Warning: Failed to process memories: %v\n", memErr)
-			}
-		}
-
-		// Update message history for next interaction
-		if a.addHistoryToMessages {
-			a.messages = append(a.messages, models.Message{
-				Role:    "user",
-				Content: prompt,
-			})
-			a.messages = append(a.messages, models.Message{
-				Role:    "assistant",
-				Content: responseContent,
-			})
-
-			// Keep only recent messages based on history limit
-			a.trimHistory()
-		}
-	}
-
-	return err
-
-}
-
 // Reason executa o reasoning chain usando o modelo configurado.
 func (a *Agent) Reason(prompt string) ([]models.ReasoningStep, error) {
 	// The model needs to implement the Invoke method.
