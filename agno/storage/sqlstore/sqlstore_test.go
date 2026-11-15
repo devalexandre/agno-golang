@@ -6,6 +6,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/devalexandre/agno-golang/agno/approval"
+	"github.com/devalexandre/agno-golang/agno/approval/approvaltest"
 	"github.com/devalexandre/agno-golang/agno/storage/storagetest"
 )
 
@@ -56,5 +58,22 @@ func TestRebindPositional(t *testing.T) {
 	q := "SELECT ? , ?"
 	if d2.rebind(q) != q {
 		t.Fatalf("non-positional rebind should be a no-op")
+	}
+}
+
+func TestSQLStoreApprovalConformanceSQLite(t *testing.T) {
+	s := newSQLite(t)
+	if err := s.CreateTables(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	approvaltest.RunStoreConformance(t, s)
+	if err := s.DropTables(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTables(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := s.ListApprovals(t.Context(), approval.Filter{}); err != nil || len(list) != 0 {
+		t.Fatalf("approvals should be empty after drop/create, got %d %v", len(list), err)
 	}
 }

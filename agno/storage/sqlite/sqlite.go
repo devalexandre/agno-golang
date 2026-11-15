@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/approval/sqlapproval"
 	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite" // SQLite driver
@@ -27,6 +28,7 @@ type SqliteStorage struct {
 	autoUpgradeSchema bool
 	mode              storage.StorageMode
 	schemaUpToDate    bool
+	approvals         *sqlapproval.Store
 }
 
 // defaultSQLiteDriver is the database/sql driver name used when none is
@@ -85,6 +87,7 @@ func NewSqliteStorage(config SqliteStorageConfig) (*SqliteStorage, error) {
 	if err := s.initDB(config.DB); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
+	s.approvals = sqlapproval.New(s.db, "agno_approvals", false)
 
 	return s, nil
 }

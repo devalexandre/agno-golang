@@ -272,6 +272,10 @@ func (s *SqliteStorage) DropTables(ctx context.Context) error {
 		return err
 	}
 
+	if err := s.approvals.Drop(ctx); err != nil {
+		return err
+	}
+
 	// Drop sessions table
 	return s.Drop()
 }

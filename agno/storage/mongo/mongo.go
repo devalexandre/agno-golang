@@ -92,6 +92,7 @@ func (b *Backend) Init(ctx context.Context) error {
 		kvstore.CollSessions:         {"idx_user_id", "idx_agent_id"},
 		kvstore.CollRuns:             {"idx_session_id", "idx_user_id"},
 		kvstore.CollComponentMetrics: {"idx_date"},
+		kvstore.CollApprovals:        {"idx_run_id", "idx_session_id", "idx_status"},
 	}
 	for coll, fields := range indexes {
 		models := make([]mongodrv.IndexModel, 0, len(fields))

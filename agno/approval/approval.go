@@ -10,9 +10,11 @@
 //   - audit: a non-blocking trail. A record with status "approved" or
 //     "rejected" is written after the HITL interaction resolves.
 //
-// Records are kept in a Store. InMemoryStore is provided; any storage backend
-// implementing Store can be plugged into AgentConfig.ApprovalStore (an agent DB
-// implementing Store is used automatically).
+// Records are kept in a Store, set with AgentConfig.ApprovalStore. When it is
+// not set, the agent DB is used: every storage backend implements Store (SQL
+// backends through sqlapproval, document backends through kvstore, and the
+// in-memory DB). InMemoryStore is a standalone in-process Store. The
+// approvaltest package holds the conformance suite for new implementations.
 package approval
 
 import (

@@ -31,12 +31,13 @@ const (
 	CollKnowledge          = "knowledge"
 	CollComponentMetrics   = "component_metrics"
 	CollMetricsState       = "metrics_state"
+	CollApprovals          = "approvals"
 )
 
 // AllCollections lists every collection the store writes.
 var AllCollections = []string{
 	CollSessions, CollRuns, CollTeamSessions, CollWorkflowSessions, CollWorkflowV2Sessions,
-	CollKnowledge, CollComponentMetrics, CollMetricsState,
+	CollKnowledge, CollComponentMetrics, CollMetricsState, CollApprovals,
 }
 
 // Backend is a keyed JSON document store.
@@ -70,6 +71,9 @@ type Store struct {
 	id      string
 	mu      sync.RWMutex
 	mode    storage.StorageMode
+
+	// approvalMu serializes approval status transitions in this process.
+	approvalMu sync.Mutex
 }
 
 // Option configures a Store.

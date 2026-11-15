@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/approval/sqlapproval"
 	"github.com/devalexandre/agno-golang/agno/storage"
 )
 
@@ -62,6 +63,7 @@ type SQLStore struct {
 	prefix    string
 	sessTable string
 	runTable  string
+	approvals *sqlapproval.Store
 }
 
 // New creates a SQLStore from an existing *sql.DB.
@@ -75,6 +77,7 @@ func New(db *sql.DB, dialect Dialect, tablePrefix string) *SQLStore {
 		prefix:    tablePrefix,
 		sessTable: tablePrefix + "_sessions",
 		runTable:  tablePrefix + "_runs",
+		approvals: sqlapproval.New(db, tablePrefix+"_approvals", dialect.Positional),
 	}
 	s.MetricsEngine = storage.NewMetricsEngine(s)
 	return s
@@ -147,7 +150,10 @@ func (s *SQLStore) CreateTables(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, runDDL); err != nil {
 		return fmt.Errorf("sqlstore: create runs table: %w", err)
 	}
-	return s.createExtendedTables(ctx)
+	if err := s.createExtendedTables(ctx); err != nil {
+		return err
+	}
+	return s.approvals.Init(ctx)
 }
 
 // UpgradeSchema is a no-op (single schema version).
@@ -160,7 +166,7 @@ func (s *SQLStore) DropTables(ctx context.Context) error {
 			return fmt.Errorf("sqlstore: drop %s: %w", t, err)
 		}
 	}
-	return nil
+	return s.approvals.Drop(ctx)
 }
 
 // CreateSession inserts a new session.

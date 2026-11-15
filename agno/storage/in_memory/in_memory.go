@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/devalexandre/agno-golang/agno/approval"
 	"github.com/devalexandre/agno-golang/agno/storage"
 )
 
@@ -21,6 +22,8 @@ type InMemoryDB struct {
 	mu       sync.RWMutex
 	sessions map[string]*storage.AgentSession
 	runs     map[string]*storage.AgentRun
+
+	approvals *approval.InMemoryStore
 }
 
 // New creates a new in-memory database.
@@ -29,6 +32,8 @@ func New() *InMemoryDB {
 		sessions: make(map[string]*storage.AgentSession),
 		runs:     make(map[string]*storage.AgentRun),
 		metrics:  &metricsData{rows: map[string]storage.ComponentMetricsRow{}},
+
+		approvals: approval.NewInMemoryStore(),
 	}
 	d.MetricsEngine = storage.NewMetricsEngine(metricsBackend{d})
 	return d
@@ -193,6 +198,7 @@ func (d *InMemoryDB) DropTables(_ context.Context) error {
 	defer d.mu.Unlock()
 	d.sessions = make(map[string]*storage.AgentSession)
 	d.runs = make(map[string]*storage.AgentRun)
+	d.approvals = approval.NewInMemoryStore()
 	d.metrics.mu.Lock()
 	d.metrics.rows = map[string]storage.ComponentMetricsRow{}
 	d.metrics.state = nil
