@@ -15,15 +15,57 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/team"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
+
+// stubModel is a no-network model so the endpoint tests do not need a provider.
+type stubModel struct{}
+
+func (stubModel) GetID() string { return "stub-model" }
+
+// lastUserContent echoes the latest user message so tests can assert on it.
+func lastUserContent(msgs []models.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == models.TypeUserRole {
+			return msgs[i].Content
+		}
+	}
+	return "ok"
+}
+
+func (stubModel) Invoke(ctx context.Context, msgs []models.Message, _ ...models.Option) (*models.MessageResponse, error) {
+	return &models.MessageResponse{Role: "assistant", Content: lastUserContent(msgs)}, nil
+}
+func (m stubModel) AInvoke(ctx context.Context, msgs []models.Message, opts ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+	ch, errCh := make(chan *models.MessageResponse, 1), make(chan error, 1)
+	r, _ := m.Invoke(ctx, msgs, opts...)
+	ch <- r
+	close(ch)
+	close(errCh)
+	return ch, errCh
+}
+func (stubModel) InvokeStream(ctx context.Context, msgs []models.Message, opts ...models.Option) error {
+	call := &models.CallOptions{}
+	for _, o := range opts {
+		o(call)
+	}
+	if call.StreamingFunc != nil {
+		return call.StreamingFunc(ctx, []byte(lastUserContent(msgs)))
+	}
+	return nil
+}
+func (m stubModel) AInvokeStream(ctx context.Context, msgs []models.Message, opts ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+	return m.AInvoke(ctx, msgs, opts...)
+}
 
 // setupTestAgentOS creates a test AgentOS instance
 func setupTestAgentOS() (*AgentOS, error) {
 	// Create test agents
 	testAgent, err := agent.NewAgent(agent.AgentConfig{
 		Context: context.Background(),
+		Model:   stubModel{},
 		Name:    "test-agent",
 		Role:    "Test Agent for validation",
 	})
@@ -823,7 +865,7 @@ func TestAgentRunsEndpoint(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
-	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
 
 	// Verify streaming response contains expected events
 	body := w.Body.String()

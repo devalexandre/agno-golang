@@ -3,6 +3,7 @@ package reasoning
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
@@ -163,19 +164,19 @@ func TestGetReasoningStats(t *testing.T) {
 	stats, err := persistence.GetReasoningStats(ctx, runID)
 	if err == nil {
 		// Verificar apenas os valores numéricos
-		if stats["total_steps"] != 3 {
+		if fmt.Sprint(stats["total_steps"]) != fmt.Sprint(3) {
 			t.Errorf("Expected 3 total steps, got %v", stats["total_steps"])
 		}
 
-		if stats["total_reasoning_tokens"] != 300 {
+		if fmt.Sprint(stats["total_reasoning_tokens"]) != fmt.Sprint(300) {
 			t.Errorf("Expected 300 total reasoning tokens, got %v", stats["total_reasoning_tokens"])
 		}
 
-		if stats["total_input_tokens"] != 90 {
+		if fmt.Sprint(stats["total_input_tokens"]) != fmt.Sprint(90) {
 			t.Errorf("Expected 90 total input tokens, got %v", stats["total_input_tokens"])
 		}
 
-		if stats["total_output_tokens"] != 210 {
+		if fmt.Sprint(stats["total_output_tokens"]) != fmt.Sprint(210) {
 			t.Errorf("Expected 210 total output tokens, got %v", stats["total_output_tokens"])
 		}
 	}

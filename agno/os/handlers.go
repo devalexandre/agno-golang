@@ -1093,6 +1093,8 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 
 	var message string
 	var sessionID string
+	// Streaming is the default, as in the Python AgentOS (stream: bool = Form(True)).
+	var streamOverride *bool
 
 	// Check content type and parse accordingly
 	contentType := c.GetHeader("Content-Type")
@@ -1101,7 +1103,7 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		// Handle JSON requests
 		var req struct {
 			Message   string `json:"message"`
-			Stream    bool   `json:"stream,omitempty"`
+			Stream    *bool  `json:"stream,omitempty"`
 			SessionID string `json:"session_id,omitempty"`
 		}
 
@@ -1114,6 +1116,7 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		}
 		message = req.Message
 		sessionID = req.SessionID
+		streamOverride = req.Stream
 
 	} else if strings.Contains(contentType, "multipart/form-data") || strings.Contains(contentType, "application/x-www-form-urlencoded") {
 		// Parse form data before accessing fields
@@ -1232,8 +1235,59 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 	// Get user_id for run options
 	userID := c.PostForm("user_id")
 
-	// Check if streaming is requested
-	stream := c.PostForm("stream") == "true"
+	// Streaming defaults to true; an explicit "stream" form field or JSON field overrides it.
+	stream := true
+	if streamOverride != nil {
+		stream = *streamOverride
+	} else if v, ok := c.GetPostForm("stream"); ok {
+		stream = v == "true"
+	}
+
+	// Prepare run options with media uploads and user context (shared by both paths)
+	runOpts := []agent.RunOption{agent.WithSessionID(sessionID)}
+	if userID != "" {
+		runOpts = append(runOpts, agent.WithUserID(userID))
+	}
+	if len(images) > 0 {
+		imageValues := make([]agent.Image, 0, len(images))
+		for _, img := range images {
+			if img != nil {
+				imageValues = append(imageValues, *img)
+			}
+		}
+		runOpts = append(runOpts, agent.WithImages(imageValues...))
+	}
+	if len(audio) > 0 {
+		audioValues := make([]agent.Audio, 0, len(audio))
+		for _, aud := range audio {
+			if aud != nil {
+				audioValues = append(audioValues, *aud)
+			}
+		}
+		runOpts = append(runOpts, agent.WithAudio(audioValues...))
+	}
+	if len(videos) > 0 {
+		videoValues := make([]agent.Video, 0, len(videos))
+		for _, vid := range videos {
+			if vid != nil {
+				videoValues = append(videoValues, *vid)
+			}
+		}
+		runOpts = append(runOpts, agent.WithVideos(videoValues...))
+	}
+	if len(files) > 0 {
+		fileValues := make([]agent.File, 0, len(files))
+		for _, file := range files {
+			if file != nil {
+				fileValues = append(fileValues, *file)
+			}
+		}
+		runOpts = append(runOpts, agent.WithFiles(fileValues...))
+	}
+	interfaceOpts := make([]interface{}, len(runOpts))
+	for i, opt := range runOpts {
+		interfaceOpts[i] = opt
+	}
 
 	if stream {
 		// Track timing for metrics (Python compatible)
@@ -1328,69 +1382,11 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		// Run the agent with streaming - following Python implementation
 		var finalmessage string
 
-		// Prepare run options with media uploads and user context
-		runOpts := []agent.RunOption{
-			agent.WithSessionID(sessionID),
-		}
+		var runResponse *models.RunResponse
+		var runErr error
 
-		// Add user ID if provided
-		if userID != "" {
-			runOpts = append(runOpts, agent.WithUserID(userID))
-		}
-
-		// Convert and add images if any were uploaded
-		if len(images) > 0 {
-			imageValues := make([]agent.Image, len(images))
-			for i, img := range images {
-				if img != nil {
-					imageValues[i] = *img
-				}
-			}
-			runOpts = append(runOpts, agent.WithImages(imageValues...))
-		}
-
-		// Convert and add audio if any were uploaded
-		if len(audio) > 0 {
-			audioValues := make([]agent.Audio, len(audio))
-			for i, aud := range audio {
-				if aud != nil {
-					audioValues[i] = *aud
-				}
-			}
-			runOpts = append(runOpts, agent.WithAudio(audioValues...))
-		}
-
-		// Convert and add videos if any were uploaded
-		if len(videos) > 0 {
-			videoValues := make([]agent.Video, len(videos))
-			for i, vid := range videos {
-				if vid != nil {
-					videoValues[i] = *vid
-				}
-			}
-			runOpts = append(runOpts, agent.WithVideos(videoValues...))
-		}
-
-		// Convert and add files if any were uploaded
-		if len(files) > 0 {
-			fileValues := make([]agent.File, len(files))
-			for i, file := range files {
-				if file != nil {
-					fileValues[i] = *file
-				}
-			}
-			runOpts = append(runOpts, agent.WithFiles(fileValues...))
-		}
-
-		// TODO: Update RunStream to accept RunOptions
-		// For now, we'll call Run instead when media is present
+		// RunStream does not accept RunOptions yet, so media uploads go through Run.
 		if len(images) > 0 || len(audio) > 0 || len(videos) > 0 || len(files) > 0 {
-			// Use Run with options and manually stream the response
-			// Convert runOpts to interface{} slice
-			interfaceOpts := make([]interface{}, len(runOpts))
-			for i, opt := range runOpts {
-				interfaceOpts[i] = opt
-			}
 			response, err := targetAgent.Run(message, interfaceOpts...)
 			if err != nil {
 				// Send error event
@@ -1408,6 +1404,8 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 				c.Writer.Flush()
 				return
 			}
+
+			runResponse = &response
 
 			// Manually stream the content
 			finalmessage = response.TextContent
@@ -1429,7 +1427,7 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 			c.Writer.Flush()
 		} else {
 			// No media - use normal streaming
-			_ = targetAgent.RunStream(message, func(chunk []byte) error {
+			runErr = targetAgent.RunStream(message, func(chunk []byte) error {
 				// Accumulate content in finalmessage (single source of truth)
 				finalmessage += string(chunk)
 
@@ -1453,6 +1451,23 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 
 				return nil
 			})
+		}
+
+		if runErr != nil {
+			errorJSON, _ := json.Marshal(map[string]interface{}{
+				"created_at": time.Now().Unix(),
+				"event":      "RunError",
+				"agent_id":   agentID,
+				"agent_name": targetAgent.GetName(),
+				"run_id":     runID,
+				"session_id": sessionID,
+				"error":      runErr.Error(),
+			})
+			c.Writer.Write([]byte(fmt.Sprintf("event: RunError\ndata: %s\n\n", errorJSON)))
+			c.Writer.Flush()
+			os.setRunResult(sessionID, runID, "error", finalmessage, nil)
+			c.Abort()
+			return
 		}
 
 		// Send RunContentCompleted event EXACTLY like Python
@@ -1479,13 +1494,7 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 			SessionID:   sessionID,
 			Content:     finalmessage,
 			ContentType: "str",
-			Metrics: RunCompletedMetrics{
-				InputTokens:      56,
-				OutputTokens:     262,
-				TotalTokens:      318,
-				TimeToFirstToken: 0.0013077390030957758,
-				Duration:         time.Since(startTime).Seconds(),
-			},
+			Metrics:     runCompletedMetrics(runResponse, startTime),
 		}
 
 		completedJSON, _ := json.Marshal(runCompletedEvent)
@@ -1500,13 +1509,7 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 				if session.Runs[i].ID == runID {
 					session.Runs[i].Status = "completed"
 					session.Runs[i].Content = finalmessage
-					session.Runs[i].Metrics = map[string]interface{}{
-						"input_tokens":        56,
-						"output_tokens":       262,
-						"total_tokens":        318,
-						"time_to_first_token": 0.0013077390030957758,
-						"duration":            time.Since(startTime).Seconds(),
-					}
+					session.Runs[i].Metrics = metricsMap(runCompletedMetrics(runResponse, startTime))
 					session.Runs[i].UpdatedAt = time.Now()
 					break
 				}
@@ -1520,12 +1523,95 @@ func (os *AgentOS) agentRunsHandler(c *gin.Context) {
 		return
 	}
 
-	// Non-streaming response (fallback)
+	// Non-streaming: run the agent and return the run output as JSON.
+	startTime := time.Now()
+	runID := generateID("run")
+	response, err := targetAgent.Run(message, interfaceOpts...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      err.Error(),
+			"agent_id":   agentID,
+			"run_id":     runID,
+			"session_id": sessionID,
+			"status":     "error",
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"message":    fmt.Sprintf("Message processed by %s: %s", targetAgent.GetName(), message),
-		"agent_id":   agentID,
-		"session_id": sessionID,
+		"run_id":       runID,
+		"agent_id":     agentID,
+		"agent_name":   targetAgent.GetName(),
+		"session_id":   sessionID,
+		"content":      response.TextContent,
+		"content_type": "str",
+		"status":       "completed",
+		"metrics":      runCompletedMetrics(&response, startTime),
 	})
+}
+
+// runCompletedMetrics builds run metrics from the agent response. Token counts
+// are reported only when the model/agent supplied them; they are never invented.
+func runCompletedMetrics(resp *models.RunResponse, start time.Time) RunCompletedMetrics {
+	m := RunCompletedMetrics{Duration: time.Since(start).Seconds()}
+	if resp == nil || resp.Metrics == nil {
+		return m
+	}
+	m.InputTokens = metricInt(resp.Metrics["input_tokens"])
+	m.OutputTokens = metricInt(resp.Metrics["output_tokens"])
+	m.TotalTokens = metricInt(resp.Metrics["total_tokens"])
+	if m.TotalTokens == 0 {
+		m.TotalTokens = m.InputTokens + m.OutputTokens
+	}
+	if v, ok := resp.Metrics["time_to_first_token"].(float64); ok {
+		m.TimeToFirstToken = v
+	}
+	return m
+}
+
+func metricInt(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return 0
+}
+
+func metricsMap(m RunCompletedMetrics) map[string]interface{} {
+	return map[string]interface{}{
+		"input_tokens":        m.InputTokens,
+		"output_tokens":       m.OutputTokens,
+		"total_tokens":        m.TotalTokens,
+		"time_to_first_token": m.TimeToFirstToken,
+		"duration":            m.Duration,
+	}
+}
+
+// setRunResult updates the status/content/metrics of a stored session run.
+func (os *AgentOS) setRunResult(sessionID, runID, status, content string, metrics map[string]interface{}) {
+	os.mu.Lock()
+	defer os.mu.Unlock()
+	session, ok := os.sessions[sessionID]
+	if !ok {
+		return
+	}
+	for i := len(session.Runs) - 1; i >= 0; i-- {
+		if session.Runs[i].ID == runID {
+			session.Runs[i].Status = status
+			session.Runs[i].Content = content
+			if metrics != nil {
+				session.Runs[i].Metrics = metrics
+			}
+			session.Runs[i].UpdatedAt = time.Now()
+			break
+		}
+	}
+	session.UpdatedAt = time.Now()
 }
 
 func (os *AgentOS) teamRunsHandler(c *gin.Context) {
