@@ -149,6 +149,8 @@ type AgentOSOptions struct {
 	// JWT enables JWT authentication (and RBAC when JWT.Authorization) in
 	// place of the static security key.
 	JWT *JWTConfig `json:"-" yaml:"-"`
+	// Protocols mounts the MCP server, A2A and AG-UI interfaces (see protocols.go).
+	Protocols ProtocolOptions `json:"-" yaml:"-"`
 }
 
 // Event represents an event in the AgentOS system

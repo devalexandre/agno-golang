@@ -53,6 +53,7 @@ type AgentOS struct {
 	cancel     context.CancelFunc
 	mu         sync.RWMutex // Features
 	enableMCP  bool
+	protocols  ProtocolOptions // MCP / A2A / AG-UI mounts (protocols.go)
 	telemetry  bool
 	middleware []interface{}
 
@@ -162,6 +163,7 @@ func NewAgentOS(options AgentOSOptions) (*AgentOS, error) {
 		ctx:                ctx,
 		cancel:             cancel,
 		enableMCP:          options.EnableMCP,
+		protocols:          options.Protocols,
 		telemetry:          options.Telemetry,
 		middleware:         options.Middleware,
 		dbs:                make(map[string]interface{}), // Initialize databases map
@@ -524,6 +526,9 @@ func (os *AgentOS) GetApp() *gin.Engine {
 			router.Use(mw)
 		}
 	}
+
+	// Protocol interfaces (MCP server, A2A, AG-UI) - see protocols.go
+	os.mountProtocols(router)
 
 	// Setup routes
 	os.setupRoutes(router)
