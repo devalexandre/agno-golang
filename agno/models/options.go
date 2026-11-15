@@ -258,6 +258,35 @@ func WithBaseURL(url string) func(*ClientOptions) {
 	}
 }
 
+// WithDefaultHeaders sets default headers sent on every request (e.g. Azure's
+// "api-key"). Applied by OpenAI-compatible clients via the underlying SDK.
+func WithDefaultHeaders(headers http.Header) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		o.DefaultHeaders = headers
+	}
+}
+
+// WithDefaultQuery sets default query params sent on every request (e.g. Azure's
+// "api-version").
+func WithDefaultQuery(query map[string]string) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		o.DefaultQuery = query
+	}
+}
+
+// WithClientParams sets provider-specific client parameters (e.g. Vertex AI's
+// project/location). Merges into any existing ClientParams.
+func WithClientParams(params map[string]interface{}) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		if o.ClientParams == nil {
+			o.ClientParams = make(map[string]interface{})
+		}
+		for k, v := range params {
+			o.ClientParams[k] = v
+		}
+	}
+}
+
 // WithRequestParams sets additional request parameters.
 func WithRequestParams(params map[string]interface{}) Option {
 	return func(o *CallOptions) {

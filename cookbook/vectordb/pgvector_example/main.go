@@ -218,7 +218,7 @@ func setupPgVectorContainer(ctx context.Context) (testcontainers.Container, stri
 	}
 
 	connStr := fmt.Sprintf("host=%s port=%d user=postgres password=postgres dbname=vectordb sslmode=disable",
-		host, mappedPort.Int())
+		host, int(mappedPort.Num()))
 
 	return container, connStr, nil
 }

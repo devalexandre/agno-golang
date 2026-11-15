@@ -1,3 +1,13 @@
+// Package anthropic integrates Anthropic's Claude models into agno-golang using
+// the official SDK (github.com/anthropics/anthropic-sdk-go). It implements
+// models.AgnoModelInterface, mirroring the other providers (OpenAI, Gemini).
+//
+// Usage:
+//
+//	model, _ := anthropic.NewAnthropic(
+//	    models.WithID("claude-sonnet-4-5"),
+//	    models.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
+//	)
 package anthropic
 
 import (
@@ -6,27 +16,27 @@ import (
 	"fmt"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/anthropic/client"
 )
 
+// Anthropic is the Claude model implementation of models.AgnoModelInterface.
 type Anthropic struct {
-	client client.ClientInterface
+	client *Client
 	opts   *models.ClientOptions
 }
 
-func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
-	cli, err := client.NewClient(options...)
+// NewAnthropic creates a new instance of the Anthropic (Claude) integration.
+func NewAnthropic(options ...models.OptionClient) (models.AgnoModelInterface, error) {
+	cli, err := NewClient(options...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create Anthropic client: %w", err)
 	}
 
-	opts := models.DefaultOptions()
+	opts := &models.ClientOptions{}
 	for _, option := range options {
 		option(opts)
 	}
-
 	if opts.ID == "" {
-		opts.ID = "claude-3-5-sonnet-20240620"
+		opts.ID = defaultModel
 	}
 
 	return &Anthropic{
@@ -35,73 +45,91 @@ func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
 	}, nil
 }
 
+// GetID returns the model ID.
 func (a *Anthropic) GetID() string {
 	return a.opts.ID
 }
 
+// GetClientOptions returns the client options for this Anthropic model.
 func (a *Anthropic) GetClientOptions() *models.ClientOptions {
 	return a.opts
 }
 
+// Invoke sends a message request and parses the response into a MessageResponse.
 func (a *Anthropic) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
 	if a.opts.MaxTokens != nil {
 		options = append([]models.Option{models.WithMaxTokens(*a.opts.MaxTokens)}, options...)
 	}
 
-	resp, err := a.client.CreateMessage(ctx, messages, options...)
+	resp, err := a.client.CreateChatCompletion(ctx, messages, options...)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(resp.Content) == 0 {
-		return nil, errors.New("no content in response")
-	}
-
-	// For now, we only support text content
-	var content string
-	for _, block := range resp.Content {
-		if block.Type == "text" {
-			content += block.Text
-		}
+	if len(resp.Choices) == 0 {
+		return nil, errors.New("no choices in response")
 	}
 
 	return &models.MessageResponse{
-		Role:    string(resp.Role),
-		Content: content,
-		Model:   resp.Model,
+		Model:     resp.Model,
+		Role:      resp.Choices[0].Message.Role,
+		Content:   resp.Choices[0].Message.Content,
+		ToolCalls: resp.Choices[0].Message.ToolCalls,
 	}, nil
 }
 
+// AInvoke is the asynchronous version of Invoke.
 func (a *Anthropic) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	ch := make(chan *models.MessageResponse, 1)
-	errChan := make(chan error, 1)
+	ch := make(chan *models.MessageResponse)
+	errChan := make(chan error)
 	go func() {
 		defer close(ch)
 		defer close(errChan)
 		resp, err := a.Invoke(ctx, messages, options...)
 		if err != nil {
 			errChan <- err
-		} else {
-			ch <- resp
+			return
+		}
+		ch <- resp
+	}()
+	return ch, errChan
+}
+
+// InvokeStream streams the response to the configured StreamingFunc.
+func (a *Anthropic) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
+	if a.opts.MaxTokens != nil {
+		options = append([]models.Option{models.WithMaxTokens(*a.opts.MaxTokens)}, options...)
+	}
+
+	if err := a.client.StreamChatCompletion(ctx, messages, options...); err != nil {
+		return fmt.Errorf("failed to start stream: %w", err)
+	}
+	return nil
+}
+
+// AInvokeStream is the asynchronous version of InvokeStream.
+func (a *Anthropic) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+	ch := make(chan *models.MessageResponse)
+	errChan := make(chan error)
+
+	optsFunction := models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+		ch <- &models.MessageResponse{
+			Content: string(chunk),
+		}
+		return nil
+	})
+	options = append(options, optsFunction)
+
+	go func() {
+		defer close(ch)
+		defer close(errChan)
+		if err := a.InvokeStream(ctx, messages, options...); err != nil {
+			errChan <- err
 		}
 	}()
 	return ch, errChan
 }
 
-func (a *Anthropic) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
-	return a.client.StreamMessage(ctx, messages, options...)
-}
-
-func (a *Anthropic) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	respChan := make(chan *models.MessageResponse)
-	errChan := make(chan error, 1)
-
-	// TODO: Implement streaming functionality for Anthropic
-	go func() {
-		defer close(respChan)
-		defer close(errChan)
-		errChan <- fmt.Errorf("streaming not implemented for Anthropic")
-	}()
-
-	return respChan, errChan
+// New is kept for backward compatibility; it is equivalent to NewAnthropic.
+func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
+	return NewAnthropic(options...)
 }

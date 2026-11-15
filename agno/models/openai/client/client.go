@@ -68,7 +68,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	for i, msg := range messages {
 		switch msg.Role {
 		case models.TypeUserRole:
-			openaiMessages[i] = openai.UserMessage(msg.Content)
+			openaiMessages[i] = buildUserMessage(msg)
 		case models.TypeAssistantRole:
 			// Create assistant message
 			assistantMsg := openai.ChatCompletionAssistantMessageParam{
@@ -691,6 +691,18 @@ func toRequestOptions(opts models.ClientOptions) []option.RequestOption {
 
 	if opts.BaseURL != "" {
 		reqOpts = append(reqOpts, option.WithBaseURL(opts.BaseURL))
+	}
+
+	// Default headers (e.g. Azure "api-key") applied to every request.
+	for key, values := range opts.DefaultHeaders {
+		for _, v := range values {
+			reqOpts = append(reqOpts, option.WithHeader(key, v))
+		}
+	}
+
+	// Default query params (e.g. Azure "api-version").
+	for key, v := range opts.DefaultQuery {
+		reqOpts = append(reqOpts, option.WithQuery(key, v))
 	}
 
 	return reqOpts

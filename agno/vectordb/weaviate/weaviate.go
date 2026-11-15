@@ -1,231 +1,314 @@
+// Package weaviate implements the vectordb.VectorDB interface for Weaviate
+// using its REST + GraphQL HTTP API (no external client dependency).
 package weaviate
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/document"
 	"github.com/devalexandre/agno-golang/agno/embedder"
 	"github.com/devalexandre/agno-golang/agno/vectordb"
-	"github.com/weaviate/weaviate-go-client/v4/weaviate"
-	"github.com/weaviate/weaviate-go-client/v4/weaviate/auth"
-	"github.com/weaviate/weaviate-go-client/v4/weaviate/entities/models"
-	"github.com/weaviate/weaviate-go-client/v4/weaviate/graphql"
 )
 
-type Weaviate struct {
+// WeaviateDB implements vectordb.VectorDB backed by Weaviate.
+type WeaviateDB struct {
 	*vectordb.BaseVectorDB
-	client    *weaviate.Client
-	className string
+	client  *http.Client
+	baseURL string
+	apiKey  string
+	class   string // Weaviate class name (collection)
 }
 
-type WeaviateConfig struct {
-	Host      string
-	Scheme    string
-	APIKey    string
-	ClassName string
-	Embedder  embedder.Embedder
-	Distance  vectordb.Distance
+// Options configures a WeaviateDB.
+type Options struct {
+	BaseURL  string // e.g. http://localhost:8080
+	APIKey   string // optional (Weaviate Cloud)
+	Class    string // class/collection name (required)
+	Embedder embedder.Embedder
 }
 
-func NewWeaviate(config WeaviateConfig) (*Weaviate, error) {
-	cfg := weaviate.Config{
-		Host:   config.Host,
-		Scheme: config.Scheme,
+// New creates a new WeaviateDB.
+func New(opts Options) *WeaviateDB {
+	if opts.BaseURL == "" {
+		opts.BaseURL = "http://localhost:8080"
 	}
-
-	if config.APIKey != "" {
-		cfg.AuthConfig = auth.ApiKey{Value: config.APIKey}
+	opts.BaseURL = strings.TrimRight(opts.BaseURL, "/")
+	if opts.Class == "" {
+		opts.Class = "AgnoDocuments"
 	}
+	return &WeaviateDB{
+		BaseVectorDB: vectordb.NewBaseVectorDB(opts.Embedder, vectordb.SearchTypeVector, vectordb.DistanceCosine),
+		client:       &http.Client{},
+		baseURL:      opts.BaseURL,
+		apiKey:       opts.APIKey,
+		class:        opts.Class,
+	}
+}
 
-	c, err := weaviate.NewClient(cfg)
+func (w *WeaviateDB) do(ctx context.Context, method, path string, payload interface{}) (*http.Response, error) {
+	var body io.Reader
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, w.baseURL+path, body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to weaviate: %w", err)
+		return nil, err
 	}
-
-	if config.Distance == "" {
-		config.Distance = vectordb.DistanceCosine
+	req.Header.Set("Content-Type", "application/json")
+	if w.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+w.apiKey)
 	}
-
-	return &Weaviate{
-		BaseVectorDB: vectordb.NewBaseVectorDB(config.Embedder, vectordb.SearchTypeVector, config.Distance),
-		client:       c,
-		className:    config.ClassName,
-	}, nil
+	return w.client.Do(req)
 }
 
-func (w *Weaviate) Create(ctx context.Context) error {
-	dist := "cosine"
-	switch w.Distance {
-	case vectordb.DistanceL2:
-		dist = "l2-squared"
-	case vectordb.DistanceCosine:
-		dist = "cosine"
-	case vectordb.DistanceDot:
-		dist = "dot"
+// Create creates the Weaviate class with a content property and no vectorizer
+// (vectors are provided by the configured embedder).
+func (w *WeaviateDB) Create(ctx context.Context) error {
+	if exists, _ := w.Exists(ctx); exists {
+		return nil
 	}
-
-	classObj := &models.Class{
-		Class:      w.className,
-		Vectorizer: "none",
-		VectorConfig: map[string]interface{}{
-			"distance": dist,
-		},
-		Properties: []*models.Property{
-			{
-				Name:     "content",
-				DataType: []string{"text"},
-			},
-			{
-				Name:     "metadata",
-				DataType: []string{"text"}, // Storing as JSON string for now
-			},
-			{
-				Name:     "name",
-				DataType: []string{"string"},
-			},
+	schema := map[string]interface{}{
+		"class":      w.class,
+		"vectorizer": "none",
+		"properties": []map[string]interface{}{
+			{"name": "content", "dataType": []string{"text"}},
+			{"name": "name", "dataType": []string{"text"}},
+			{"name": "source", "dataType": []string{"text"}},
 		},
 	}
-
-	return w.client.Schema().ClassCreator().WithClass(classObj).Do(ctx)
-}
-
-func (w *Weaviate) Exists(ctx context.Context) (bool, error) {
-	return w.client.Schema().ClassExistenceChecker().WithClassName(w.className).Do(ctx)
-}
-
-func (w *Weaviate) Drop(ctx context.Context) error {
-	return w.client.Schema().ClassDeleter().WithClassName(w.className).Do(ctx)
-}
-
-func (w *Weaviate) Optimize(ctx context.Context) error {
+	resp, err := w.do(ctx, "POST", "/v1/schema", schema)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("weaviate: create class: %s", string(b))
+	}
 	return nil
 }
 
-func (w *Weaviate) Insert(ctx context.Context, documents []*document.Document, filters map[string]interface{}) error {
-	if err := w.EmbedDocuments(documents); err != nil {
+// Exists reports whether the class exists.
+func (w *WeaviateDB) Exists(ctx context.Context) (bool, error) {
+	resp, err := w.do(ctx, "GET", "/v1/schema/"+w.class, nil)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK, nil
+}
+
+// Drop deletes the class.
+func (w *WeaviateDB) Drop(ctx context.Context) error {
+	resp, err := w.do(ctx, "DELETE", "/v1/schema/"+w.class, nil)
+	if err != nil {
 		return err
 	}
-
-	objects := make([]*models.Object, len(documents))
-	for i, doc := range documents {
-		v32 := make([]float32, len(doc.Embeddings))
-		for j, v := range doc.Embeddings {
-			v32[j] = float32(v)
-		}
-
-		objects[i] = &models.Object{
-			Class: w.className,
-			ID:    strToUUID(doc.ID),
-			Properties: map[string]interface{}{
-				"content":  doc.Content,
-				"metadata": doc.Metadata, // Weaviate client handles maps in properties
-				"name":     doc.Name,
-			},
-			Vector: v32,
-		}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("weaviate: drop: %s", string(b))
 	}
-
-	_, err := w.client.Batch().ObjectsBatcher().WithObjects(objects...).Do(ctx)
-	return err
+	return nil
 }
 
-func (w *Weaviate) Upsert(ctx context.Context, documents []*document.Document, filters map[string]interface{}) error {
-	// Simple implementation: Batch insert handles upsert if ID is provided in some cases,
-	// but strictly we should check or use the specific upsert logic if available.
-	return w.Insert(ctx, documents, filters)
+// Optimize is a no-op for Weaviate.
+func (w *WeaviateDB) Optimize(ctx context.Context) error { return nil }
+
+// Insert embeds and stores documents via the batch endpoint.
+func (w *WeaviateDB) Insert(ctx context.Context, docs []*document.Document, _ map[string]interface{}) error {
+	if err := w.EmbedDocuments(docs); err != nil {
+		return err
+	}
+	objects := make([]map[string]interface{}, 0, len(docs))
+	for _, d := range docs {
+		obj := map[string]interface{}{
+			"class": w.class,
+			"properties": map[string]interface{}{
+				"content": d.Content,
+				"name":    d.Name,
+				"source":  d.Source,
+			},
+			"vector": d.Embeddings,
+		}
+		if d.ID != "" {
+			obj["id"] = toUUID(d.ID)
+		}
+		objects = append(objects, obj)
+	}
+	resp, err := w.do(ctx, "POST", "/v1/batch/objects", map[string]interface{}{"objects": objects})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("weaviate: insert: %s", string(b))
+	}
+	return nil
 }
 
-func (w *Weaviate) Search(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
+// Upsert is equivalent to Insert (batch import overwrites by id).
+func (w *WeaviateDB) Upsert(ctx context.Context, docs []*document.Document, filters map[string]interface{}) error {
+	return w.Insert(ctx, docs, filters)
+}
+
+// Search performs a vector search.
+func (w *WeaviateDB) Search(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
 	return w.VectorSearch(ctx, query, limit, filters)
 }
 
-func (w *Weaviate) VectorSearch(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
-	vector, err := w.EmbedQuery(query)
+// VectorSearch runs a nearVector GraphQL query.
+func (w *WeaviateDB) VectorSearch(ctx context.Context, query string, limit int, _ map[string]interface{}) ([]*vectordb.SearchResult, error) {
+	vec, err := w.EmbedQuery(query)
 	if err != nil {
 		return nil, err
 	}
+	vecJSON, _ := json.Marshal(vec)
+	gql := fmt.Sprintf(`{ Get { %s(nearVector: {vector: %s}, limit: %d) { content name source _additional { id distance } } } }`,
+		w.class, string(vecJSON), limit)
 
-	v32 := make([]float32, len(vector))
-	for i, v := range vector {
-		v32[i] = float32(v)
-	}
-
-	result, err := w.client.GraphQL().Get().
-		WithClassName(w.className).
-		WithFields(graphql.Field{Name: "content"}, graphql.Field{Name: "metadata"}, graphql.Field{Name: "name"}, graphql.Field{Name: "_additional", Fields: []graphql.Field{{Name: "distance"}, {Name: "id"}}}).
-		WithNearVector(w.client.GraphQL().NearVectorArgBuilder().WithVector(v32)).
-		WithLimit(limit).
-		Do(ctx)
-
+	resp, err := w.do(ctx, "POST", "/v1/graphql", map[string]string{"query": gql})
 	if err != nil {
 		return nil, err
 	}
-
-	return w.parseGraphQLResponse(result)
-}
-
-func (w *Weaviate) parseGraphQLResponse(res *models.GraphQLResponse) ([]*vectordb.SearchResult, error) {
-	if res.Errors != nil {
-		return nil, fmt.Errorf("graphql error: %v", res.Errors)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("weaviate: search: %s", string(b))
 	}
 
-	data := res.Data["Get"].(map[string]interface{})[w.className].([]interface{})
-	results := make([]*vectordb.SearchResult, 0, len(data))
+	var out struct {
+		Data struct {
+			Get map[string][]struct {
+				Content    string `json:"content"`
+				Name       string `json:"name"`
+				Source     string `json:"source"`
+				Additional struct {
+					ID       string  `json:"id"`
+					Distance float64 `json:"distance"`
+				} `json:"_additional"`
+			} `json:"Get"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
 
-	for _, item := range data {
-		m := item.(map[string]interface{})
-		additional := m["_additional"].(map[string]interface{})
-
+	var results []*vectordb.SearchResult
+	for _, item := range out.Data.Get[w.class] {
 		results = append(results, &vectordb.SearchResult{
 			Document: &document.Document{
-				ID:      additional["id"].(string),
-				Content: m["content"].(string),
-				Name:    m["name"].(string),
+				ID:       item.Additional.ID,
+				Content:  item.Content,
+				Name:     item.Name,
+				Source:   item.Source,
+				Metadata: map[string]interface{}{"source": item.Source},
 			},
-			Score:    1.0 - additional["distance"].(float64), // Convert distance to score
-			Distance: additional["distance"].(float64),
+			Score:    1 - item.Additional.Distance, // cosine distance -> similarity
+			Distance: item.Additional.Distance,
 		})
 	}
-
 	return results, nil
 }
 
-func (w *Weaviate) KeywordSearch(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
-	return nil, fmt.Errorf("keyword search not implemented for weaviate")
+// KeywordSearch uses Weaviate's BM25 search.
+func (w *WeaviateDB) KeywordSearch(ctx context.Context, query string, limit int, _ map[string]interface{}) ([]*vectordb.SearchResult, error) {
+	q, _ := json.Marshal(query)
+	gql := fmt.Sprintf(`{ Get { %s(bm25: {query: %s}, limit: %d) { content name source _additional { id score } } } }`,
+		w.class, string(q), limit)
+
+	resp, err := w.do(ctx, "POST", "/v1/graphql", map[string]string{"query": gql})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		Data struct {
+			Get map[string][]struct {
+				Content    string `json:"content"`
+				Name       string `json:"name"`
+				Source     string `json:"source"`
+				Additional struct {
+					ID    string  `json:"id"`
+					Score float64 `json:"score,string"`
+				} `json:"_additional"`
+			} `json:"Get"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	var results []*vectordb.SearchResult
+	for _, item := range out.Data.Get[w.class] {
+		results = append(results, &vectordb.SearchResult{
+			Document: &document.Document{ID: item.Additional.ID, Content: item.Content, Name: item.Name, Source: item.Source},
+			Score:    item.Additional.Score,
+		})
+	}
+	return results, nil
 }
 
-func (w *Weaviate) HybridSearch(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
-	return nil, fmt.Errorf("hybrid search not implemented for weaviate")
+// HybridSearch is not implemented (Weaviate hybrid requires a server-side vectorizer or fusion config).
+func (w *WeaviateDB) HybridSearch(ctx context.Context, query string, limit int, _ map[string]interface{}) ([]*vectordb.SearchResult, error) {
+	return nil, fmt.Errorf("weaviate: hybrid search not implemented")
 }
 
-func (w *Weaviate) GetCount(ctx context.Context) (int64, error) {
-	result, err := w.client.GraphQL().Aggregate().
-		WithClassName(w.className).
-		WithFields(graphql.Field{Name: "meta", Fields: []graphql.Field{{Name: "count"}}}).
-		Do(ctx)
+// GetCount returns the number of objects in the class via Aggregate.
+func (w *WeaviateDB) GetCount(ctx context.Context) (int64, error) {
+	gql := fmt.Sprintf(`{ Aggregate { %s { meta { count } } } }`, w.class)
+	resp, err := w.do(ctx, "POST", "/v1/graphql", map[string]string{"query": gql})
 	if err != nil {
 		return 0, err
 	}
-
-	// Parsing aggregate response is nested
-	return 0, fmt.Errorf("aggregate parsing not implemented")
+	defer resp.Body.Close()
+	var out struct {
+		Data struct {
+			Aggregate map[string][]struct {
+				Meta struct {
+					Count int64 `json:"count"`
+				} `json:"meta"`
+			} `json:"Aggregate"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, err
+	}
+	if rows := out.Data.Aggregate[w.class]; len(rows) > 0 {
+		return rows[0].Meta.Count, nil
+	}
+	return 0, nil
 }
 
-func (w *Weaviate) DocExists(ctx context.Context, doc *document.Document) (bool, error) {
+// DocExists checks existence by the document's ID.
+func (w *WeaviateDB) DocExists(ctx context.Context, doc *document.Document) (bool, error) {
 	return w.IDExists(ctx, doc.ID)
 }
 
-func (w *Weaviate) NameExists(ctx context.Context, name string) (bool, error) {
-	return false, nil
+// NameExists is not supported without a filtered query.
+func (w *WeaviateDB) NameExists(ctx context.Context, name string) (bool, error) {
+	return false, fmt.Errorf("weaviate: NameExists not supported")
 }
 
-func (w *Weaviate) IDExists(ctx context.Context, id string) (bool, error) {
-	return w.client.Data().Checker().WithClassName(w.className).WithID(strToUUID(id)).Do(ctx)
+// IDExists checks whether an object with the given ID exists.
+func (w *WeaviateDB) IDExists(ctx context.Context, id string) (bool, error) {
+	resp, err := w.do(ctx, "GET", "/v1/objects/"+w.class+"/"+toUUID(id), nil)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK, nil
 }
 
-func strToUUID(id string) string {
-	// Weaviate requires UUIDs. If the provided ID is not a UUID, we should hash it or similar.
-	// For this implementation, we assume it's already a UUID or handled by the user.
-	return id
-}
+var _ vectordb.VectorDB = (*WeaviateDB)(nil)

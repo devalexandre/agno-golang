@@ -47,7 +47,7 @@ func main() {
 		log.Fatalf("Failed to get container port: %v", err)
 	}
 
-	fmt.Printf("✅ ChromaDB started at %s:%d\n", host, port.Int())
+	fmt.Printf("✅ ChromaDB started at %s:%d\n", host, int(port.Num()))
 
 	// 2. Initialize Embedder (Ollama)
 	emb := embedder.NewOllamaEmbedder(embedder.WithOllamaModel("nomic-embed-text", 768))
@@ -55,7 +55,7 @@ func main() {
 	// 3. Initialize ChromaDB Client
 	db := chroma.NewChromaDB(chroma.ChromaOptions{
 		Host:       host,
-		Port:       port.Int(),
+		Port:       int(port.Num()),
 		Collection: "test_collection",
 		Embedder:   emb,
 	})

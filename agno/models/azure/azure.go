@@ -1,115 +1,90 @@
+// Package azure provides integration with Azure OpenAI. It reuses the
+// OpenAI-compatible client, adapting authentication (api-key header) and the
+// deployment-based URL layout (api-version query) that Azure requires.
 package azure
 
 import (
-	"context"
+	"net/http"
 	"os"
+	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/openai/client"
+	"github.com/devalexandre/agno-golang/agno/models/openai/like"
 )
 
-type AzureOpenAI struct {
-	client client.ClientInterface
-	opts   *models.ClientOptions
+const (
+	// EnvAPIKey is the environment variable for the Azure OpenAI key.
+	EnvAPIKey = "AZURE_OPENAI_API_KEY"
+	// EnvEndpoint is the environment variable for the Azure resource endpoint.
+	EnvEndpoint = "AZURE_OPENAI_ENDPOINT"
+	// DefaultAPIVersion is used when no api-version is provided.
+	DefaultAPIVersion = "2024-10-21"
+)
+
+// Config holds the Azure OpenAI connection parameters.
+type Config struct {
+	APIKey     string // falls back to AZURE_OPENAI_API_KEY
+	Endpoint   string // e.g. https://my-resource.openai.azure.com (or AZURE_OPENAI_ENDPOINT)
+	Deployment string // the chat model deployment name (required)
+	APIVersion string // defaults to DefaultAPIVersion
 }
 
+// NewAzureChat creates a new Azure OpenAI chat model.
+//
+//	chat, err := azure.NewAzureChat(azure.Config{
+//	    Deployment: "gpt-4o",        // your Azure deployment name
+//	    // APIKey/Endpoint read from AZURE_OPENAI_API_KEY / AZURE_OPENAI_ENDPOINT
+//	})
+//
+// Extra models.OptionClient values (temperature, etc.) may be appended.
+func NewAzureChat(cfg Config, options ...models.OptionClient) (models.AgnoModelInterface, error) {
+	apiKey := cfg.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv(EnvAPIKey)
+	}
+	endpoint := cfg.Endpoint
+	if endpoint == "" {
+		endpoint = os.Getenv(EnvEndpoint)
+	}
+	endpoint = strings.TrimRight(endpoint, "/")
+
+	apiVersion := cfg.APIVersion
+	if apiVersion == "" {
+		apiVersion = DefaultAPIVersion
+	}
+
+	// Azure routes by deployment in the URL; the SDK appends /chat/completions.
+	baseURL := endpoint + "/openai/deployments/" + cfg.Deployment
+
+	headers := http.Header{}
+	headers.Set("api-key", apiKey)
+
+	final := []models.OptionClient{
+		models.WithBaseURL(baseURL),
+		models.WithID(cfg.Deployment),
+		models.WithAPIKey(apiKey), // satisfies the client; Azure uses the api-key header
+		models.WithDefaultHeaders(headers),
+		models.WithDefaultQuery(map[string]string{"api-version": apiVersion}),
+	}
+	final = append(final, options...)
+
+	return like.NewLikeOpenAIChat(final...)
+}
+
+// EnvDeployment is read by New when no model ID is given.
+const EnvDeployment = "AZURE_OPENAI_DEPLOYMENT_NAME"
+
+// New is kept for backward compatibility. It builds a Config from the client
+// options (ID = deployment, BaseURL = endpoint, APIKey) and falls back to the
+// AZURE_OPENAI_* environment variables.
 func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
-	opts := models.DefaultOptions()
+	opts := &models.ClientOptions{}
 	for _, option := range options {
 		option(opts)
 	}
-
-	if opts.APIKey == "" {
-		opts.APIKey = os.Getenv("AZURE_OPENAI_API_KEY")
+	deployment := opts.ID
+	if deployment == "" {
+		deployment = os.Getenv(EnvDeployment)
 	}
-
-	if opts.BaseURL == "" {
-		opts.BaseURL = os.Getenv("AZURE_OPENAI_ENDPOINT")
-	}
-
-	// For Azure, we often use the deployment name as the model ID
-	if opts.ID == "" {
-		opts.ID = os.Getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-	}
-
-	cli, err := client.NewClient(
-		models.WithID(opts.ID),
-		models.WithBaseURL(opts.BaseURL),
-		models.WithAPIKey(opts.APIKey),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &AzureOpenAI{
-		client: cli,
-		opts:   opts,
-	}, nil
-}
-
-func (a *AzureOpenAI) GetID() string {
-	return a.opts.ID
-}
-
-func (a *AzureOpenAI) GetClientOptions() *models.ClientOptions {
-	return a.opts
-}
-
-func (a *AzureOpenAI) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
-	resp, err := a.client.CreateChatCompletion(ctx, messages, options...)
-	if err != nil {
-		return nil, err
-	}
-
-	return &models.MessageResponse{
-		Role:             resp.Choices[0].Message.Role,
-		Content:          resp.Choices[0].Message.Content,
-		Model:            a.opts.ID,
-		ToolCalls:        resp.Choices[0].Message.ToolCalls,
-		ToolResults:      resp.Choices[0].Message.ToolResults,
-		ReasoningContent: resp.Choices[0].Message.ReasoningContent,
-	}, nil
-}
-
-func (a *AzureOpenAI) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	ch := make(chan *models.MessageResponse, 1)
-	errChan := make(chan error, 1)
-	go func() {
-		defer close(ch)
-		defer close(errChan)
-		resp, err := a.Invoke(ctx, messages, options...)
-		if err != nil {
-			errChan <- err
-		} else {
-			ch <- resp
-		}
-	}()
-	return ch, errChan
-}
-
-func (a *AzureOpenAI) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
-	return a.client.StreamChatCompletion(ctx, messages, options...)
-}
-
-func (a *AzureOpenAI) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	respChan := make(chan *models.MessageResponse)
-	errChan := make(chan error, 1)
-
-	optsFunction := models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-		respChan <- &models.MessageResponse{
-			Content: string(chunk),
-		}
-		return nil
-	})
-	options = append(options, optsFunction)
-
-	go func() {
-		defer close(respChan)
-		defer close(errChan)
-		if err := a.InvokeStream(ctx, messages, options...); err != nil {
-			errChan <- err
-		}
-	}()
-
-	return respChan, errChan
+	return NewAzureChat(Config{APIKey: opts.APIKey, Endpoint: opts.BaseURL, Deployment: deployment}, options...)
 }

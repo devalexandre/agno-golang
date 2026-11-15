@@ -1553,6 +1553,9 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 		}
 	}
 
+	// Attach run media to the user message so it reaches the model
+	messages = attachRunMedia(messages, options.Images, options.Audio, options.Videos, options.Files)
+
 	// Add session state to context if requested
 	if options.AddSessionStateToContext != nil && *options.AddSessionStateToContext && len(sessionState) > 0 {
 		stateJSON, _ := json.Marshal(sessionState)
@@ -1879,6 +1882,9 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 			messages = append([]models.Message{msg}, messages...)
 		}
 	}
+
+	// Attach run media to the user message so it reaches the model
+	messages = attachRunMedia(messages, options.Images, options.Audio, options.Videos, options.Files)
 
 	// Add session state to context if requested
 	if options.AddSessionStateToContext != nil && *options.AddSessionStateToContext && len(sessionState) > 0 {
