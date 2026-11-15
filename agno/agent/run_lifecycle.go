@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/metrics"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/google/uuid"
 )
@@ -16,6 +17,7 @@ type runState struct {
 	id         string
 	prompt     string
 	compaction *models.CompactionRecord
+	metrics    *metrics.RunMetrics
 }
 
 // applyRunOptions collects run options. It accepts both RunOption values and
@@ -58,7 +60,7 @@ func (a *Agent) executeRun(options *RunOptions, fn func() (models.RunResponse, e
 
 	runCtx := a.trackRun(runID)
 	prevCtx, prevRun := a.ctx, a.currentRun
-	state := &runState{id: runID}
+	state := &runState{id: runID, metrics: a.newRunMetrics()}
 	a.ctx, a.currentRun = runCtx, state
 	defer func() {
 		a.ctx, a.currentRun = prevCtx, prevRun
@@ -78,6 +80,7 @@ func (a *Agent) executeRun(options *RunOptions, fn func() (models.RunResponse, e
 		if resp.Compaction == nil {
 			resp.Compaction = state.compaction
 		}
+		attachRunMetrics(&resp, state.metrics)
 		return resp
 	}
 

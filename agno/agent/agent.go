@@ -13,9 +13,12 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/approval"
 	"github.com/devalexandre/agno-golang/agno/compaction"
+	"github.com/devalexandre/agno-golang/agno/compression"
+	"github.com/devalexandre/agno-golang/agno/fs"
 	"github.com/devalexandre/agno-golang/agno/knowledge"
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/offload"
 	"github.com/devalexandre/agno-golang/agno/reasoning"
 	"github.com/devalexandre/agno-golang/agno/skill"
 
@@ -230,9 +233,23 @@ type AgentConfig struct {
 	DelayBetweenRetries int
 	// If True, use exponential backoff for retries
 	ExponentialBackoff bool
+
+	// --- Framework modules (see framework_modules.go) ---
+	// FileSystems gives the agent durable file stores (agno/fs); each adds its
+	// tools and instructions. Python: Agent(filesystem=...).
+	FileSystems []*fs.FileSystem
+	// OffloadToolResults stores oversized tool results and adds read_result /
+	// search_result. Python: Agent(offload_tool_results=ResultStore(...)).
+	OffloadToolResults *offload.ResultStore
+	// CompressionManager compresses oversized tool results with a model.
+	// Python: Agent(compress_tool_results=True, compression_manager=...).
+	CompressionManager *compression.Manager
+	// DisableRunMetrics turns off typed run metrics collection.
+	DisableRunMetrics bool
 }
 
 type Agent struct {
+	framework              *frameworkModules
 	ctx                    context.Context
 	model                  models.AgnoModelInterface
 	modelOptions           []models.Option
@@ -621,6 +638,8 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		// If SkillsUseAll = false and SkillsToUse is empty: all loaded skills are active by default
 		agent.tools = append(agent.tools, agent.skills.GetTool())
 	}
+
+	agent.applyFrameworkModules(config)
 
 	// Set defaults
 	if agent.systemMessageRole == "" {

@@ -285,6 +285,14 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		Object:  string(resp.Object),
 		Created: resp.Created,
 		Model:   string(resp.Model),
+		Usage: Usage{
+			PromptTokens:     int(resp.Usage.PromptTokens),
+			CompletionTokens: int(resp.Usage.CompletionTokens),
+			TotalTokens:      int(resp.Usage.TotalTokens),
+			CachedTokens:     int(resp.Usage.PromptTokensDetails.CachedTokens),
+			ReasoningTokens:  int(resp.Usage.CompletionTokensDetails.ReasoningTokens),
+			AudioInputTokens: int(resp.Usage.PromptTokensDetails.AudioTokens),
+		},
 	}
 
 	if len(resp.Choices) > 0 {
@@ -677,6 +685,8 @@ func (c *Client) processToolCalls(ctx context.Context, originalMessages []models
 	// For testing purposes, we want to return a response that shows the tool calls were made
 	// We'll merge the final response content with the original tool calls
 	finalResponse.Choices[0].Message.ToolCalls = originalToolCalls
+	// Accumulate the tool loop: the follow-up's usage plus this call's.
+	finalResponse.Usage.Add(resp.Usage)
 
 	return finalResponse, nil
 }
