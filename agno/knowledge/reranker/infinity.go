@@ -59,13 +59,11 @@ type infinityRerankResponse struct {
 }
 
 // Rerank implements Reranker.
-func (r *InfinityReranker) Rerank(ctx context.Context, query string, results []*vectordb.SearchResult, topN int) ([]*vectordb.SearchResult, error) {
+func (r *InfinityReranker) Rerank(ctx context.Context, query string, results []*vectordb.SearchResult, limit int) ([]*vectordb.SearchResult, error) {
 	if len(results) == 0 {
 		return results, nil
 	}
-	if topN <= 0 {
-		topN = r.TopN
-	}
+	topN := effectiveLimit(limit, r.TopN)
 
 	docs := make([]string, len(results))
 	for i, res := range results {

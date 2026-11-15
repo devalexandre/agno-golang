@@ -54,16 +54,14 @@ type cohereRerankResponse struct {
 }
 
 // Rerank implements Reranker.
-func (r *CohereReranker) Rerank(ctx context.Context, query string, results []*vectordb.SearchResult, topN int) ([]*vectordb.SearchResult, error) {
+func (r *CohereReranker) Rerank(ctx context.Context, query string, results []*vectordb.SearchResult, limit int) ([]*vectordb.SearchResult, error) {
 	if len(results) == 0 {
 		return results, nil
 	}
 	if r.APIKey == "" {
 		return nil, fmt.Errorf("cohere reranker: API key is required")
 	}
-	if topN <= 0 {
-		topN = r.TopN
-	}
+	topN := effectiveLimit(limit, r.TopN)
 
 	docs := make([]string, len(results))
 	for i, res := range results {

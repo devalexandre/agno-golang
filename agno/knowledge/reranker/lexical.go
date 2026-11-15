@@ -21,19 +21,20 @@ func NewLexicalReranker(topN int) *LexicalReranker {
 }
 
 // Rerank implements Reranker.
-func (r *LexicalReranker) Rerank(_ context.Context, query string, results []*vectordb.SearchResult, topN int) ([]*vectordb.SearchResult, error) {
+func (r *LexicalReranker) Rerank(_ context.Context, query string, results []*vectordb.SearchResult, limit int) ([]*vectordb.SearchResult, error) {
 	if len(results) == 0 {
 		return results, nil
 	}
-	if topN <= 0 {
-		topN = r.TopN
-	}
+	topN := effectiveLimit(limit, r.TopN)
 
 	qTerms := termSet(query)
-	scored := make([]*vectordb.SearchResult, len(results))
-	copy(scored, results)
-
-	for _, res := range scored {
+	scored := make([]*vectordb.SearchResult, 0, len(results))
+	for _, in := range results {
+		if in == nil {
+			continue
+		}
+		res := copyResult(in) // do not score the caller's results in place
+		scored = append(scored, res)
 		content := ""
 		if res.Document != nil {
 			content = res.Document.Content

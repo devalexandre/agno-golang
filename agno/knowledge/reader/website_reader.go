@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -17,6 +18,16 @@ type WebsiteReader struct {
 	BaseReader
 	HTTPClient *http.Client
 	UserAgent  string
+	// PublicOnly restricts fetching to public HTTP(S) URLs on standard ports,
+	// using an SSRF-safe client (see NewPublicHTTPClient): non-global
+	// addresses are rejected at dial time after DNS resolution, redirects
+	// must stay on the same origin (max 3) and the body is capped at MaxBytes.
+	// HTTPClient is ignored when set. Off by default, as in Python
+	// (WebsiteReader(public_only=False)); turn it on whenever the URL comes
+	// from an untrusted source (users, LLM tool calls).
+	PublicOnly bool
+	// MaxBytes caps the body read in PublicOnly mode (default 4 MiB).
+	MaxBytes int64
 }
 
 // NewWebsiteReader creates a website reader.
@@ -28,26 +39,48 @@ func NewWebsiteReader() *WebsiteReader {
 	}
 }
 
+// WithPublicOnly enables or disables PublicOnly and returns the reader.
+func (r *WebsiteReader) WithPublicOnly(enabled bool) *WebsiteReader {
+	r.PublicOnly = enabled
+	return r
+}
+
 // Read fetches source (an http/https URL) and returns its extracted text.
 func (r *WebsiteReader) Read(ctx context.Context, source string) ([]*document.Document, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", source, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", r.UserAgent)
+	var root *html.Node
+	if r.PublicOnly {
+		header := http.Header{}
+		header.Set("User-Agent", r.UserAgent)
+		_, body, err := fetchPublicPage(ctx, NewPublicHTTPClient(), defaultPublicPolicy, source, r.MaxBytes, header)
+		if err != nil {
+			return nil, fmt.Errorf("website: %w", err)
+		}
+		if root, err = html.Parse(bytes.NewReader(body)); err != nil {
+			return nil, fmt.Errorf("website: parse HTML: %w", err)
+		}
+	} else {
+		req, err := http.NewRequestWithContext(ctx, "GET", source, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", r.UserAgent)
 
-	resp, err := r.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("website: GET %s returned %d", source, resp.StatusCode)
-	}
+		client := r.HTTPClient
+		if client == nil {
+			client = http.DefaultClient
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("website: GET %s returned %d", source, resp.StatusCode)
+		}
 
-	root, err := html.Parse(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("website: parse HTML: %w", err)
+		if root, err = html.Parse(resp.Body); err != nil {
+			return nil, fmt.Errorf("website: parse HTML: %w", err)
+		}
 	}
 
 	title, text := extractHTMLText(root)
