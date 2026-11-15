@@ -1,5 +1,8 @@
 // Example: inline Agno OS chart blocks with ChartTools.
 //
+// Env vars: none (no API key needed). Requires a local Ollama server with
+// llama3.2 at http://localhost:11434.
+//
 //	go run ./cookbook/tools/chart
 package main
 

@@ -1,5 +1,8 @@
 // Example: generate report files with FileGenerationTools.
 //
+// Env vars: none (no API key needed). Requires a local Ollama server with
+// llama3.2 at http://localhost:11434.
+//
 //	go run ./cookbook/tools/filegeneration
 package main
 

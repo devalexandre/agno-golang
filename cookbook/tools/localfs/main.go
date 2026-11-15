@@ -1,5 +1,8 @@
 // Example: read/write files confined to a directory with LocalFileSystemTools.
 //
+// Env vars: none (no API key needed). Requires a local Ollama server with
+// llama3.2 at http://localhost:11434.
+//
 //	go run ./cookbook/tools/localfs
 package main
 

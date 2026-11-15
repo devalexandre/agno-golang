@@ -1,5 +1,8 @@
 // Example: analyse a CSV file with CsvTools.
 //
+// Env vars: none (no API key needed). Requires a local Ollama server with
+// llama3.2 at http://localhost:11434.
+//
 //	go run ./cookbook/tools/csvtools
 package main
 
