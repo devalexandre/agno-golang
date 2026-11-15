@@ -8,6 +8,7 @@ import (
 	"github.com/devalexandre/agno-golang/agno/models/cometapi"
 	"github.com/devalexandre/agno-golang/agno/models/dashscope"
 	"github.com/devalexandre/agno-golang/agno/models/deepinfra"
+	"github.com/devalexandre/agno-golang/agno/models/ibm"
 	"github.com/devalexandre/agno-golang/agno/models/inception"
 	"github.com/devalexandre/agno-golang/agno/models/internlm"
 	"github.com/devalexandre/agno-golang/agno/models/langdb"
@@ -53,6 +54,7 @@ func init() {
 		"cometapi":         optionsCtor(cometapi.NewCometAPIChat),
 		"dashscope":        optionsCtor(dashscope.NewDashScopeChat),
 		"deepinfra":        optionsCtor(deepinfra.NewDeepInfraChat),
+		"ibm":              optionsCtor(ibm.NewWatsonXChat),
 		"inception":        optionsCtor(inception.NewInceptionChat),
 		"internlm":         optionsCtor(internlm.NewInternLMChat),
 		"langdb":           optionsCtor(langdb.NewLangDBChat),
@@ -91,6 +93,7 @@ func init() {
 		"workers-ai":             "cloudflare",
 		"qwen":                   "dashscope",
 		"inceptionlabs":          "inception",
+		"watsonx":                "ibm",
 		"llama_cpp":              "llama-cpp",
 		"llamacpp":               "llama-cpp",
 		"lm-studio":              "lmstudio",

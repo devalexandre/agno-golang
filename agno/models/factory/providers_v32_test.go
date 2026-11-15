@@ -9,6 +9,7 @@ import (
 func TestV32ProvidersBuild(t *testing.T) {
 	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct")
 	t.Setenv("LANGDB_PROJECT_ID", "proj")
+	t.Setenv("IBM_WATSONX_PROJECT_ID", "proj")
 	t.Setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com")
 
 	cases := []struct{ spec, id string }{
@@ -18,6 +19,8 @@ func TestV32ProvidersBuild(t *testing.T) {
 		{"cometapi:gpt-5-mini", "gpt-5-mini"},
 		{"dashscope:qwen-plus", "qwen-plus"},
 		{"deepinfra:meta-llama/Llama-3.3-70B-Instruct", "meta-llama/Llama-3.3-70B-Instruct"},
+		{"ibm:ibm/granite-3-8b-instruct", "ibm/granite-3-8b-instruct"},
+		{"watsonx:ibm/granite-3-8b-instruct", "ibm/granite-3-8b-instruct"},
 		{"inception:mercury-2", "mercury-2"},
 		{"internlm:internlm2.5-latest", "internlm2.5-latest"},
 		{"langdb:gpt-4o", "gpt-4o"},
