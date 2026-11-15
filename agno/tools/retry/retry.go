@@ -209,12 +209,25 @@ func (mc *MetricsCollector) GetMetrics(operationName string) *RetryMetrics {
 		return nil
 	}
 
-	metrics.mu.RLock()
-	defer metrics.mu.RUnlock()
+	return metrics.snapshot()
+}
 
-	// Return a copy
-	copy := *metrics
-	return &copy
+// snapshot returns a copy of the metrics without copying the mutex.
+func (m *RetryMetrics) snapshot() *RetryMetrics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return &RetryMetrics{
+		OperationName:         m.OperationName,
+		TotalAttempts:         m.TotalAttempts,
+		SuccessfulAttempts:    m.SuccessfulAttempts,
+		FailedAttempts:        m.FailedAttempts,
+		SuccessAfterRetry:     m.SuccessAfterRetry,
+		FailedAfterRetries:    m.FailedAfterRetries,
+		AverageRetryCount:     m.AverageRetryCount,
+		LastRetryTimestamp:    m.LastRetryTimestamp,
+		SuccessRate:           m.SuccessRate,
+		SuccessAfterRetryRate: m.SuccessAfterRetryRate,
+	}
 }
 
 // GetAllMetrics retrieves all metrics
@@ -224,10 +237,7 @@ func (mc *MetricsCollector) GetAllMetrics() map[string]*RetryMetrics {
 
 	result := make(map[string]*RetryMetrics)
 	for k, v := range mc.metrics {
-		v.mu.RLock()
-		copy := *v
-		v.mu.RUnlock()
-		result[k] = &copy
+		result[k] = v.snapshot()
 	}
 	return result
 }

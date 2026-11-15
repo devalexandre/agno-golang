@@ -202,7 +202,9 @@ func (e *DefaultParallelExecutor) executeWithMetrics(ctx context.Context, tool i
 	}
 
 	if e.config.Timeout > 0 {
-		ctx, _ = context.WithTimeout(ctx, e.config.Timeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, e.config.Timeout)
+		defer cancel()
 	}
 
 	result.Metrics.EndTime = time.Now()
