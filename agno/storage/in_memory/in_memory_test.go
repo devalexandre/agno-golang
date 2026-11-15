@@ -10,6 +10,8 @@ import (
 
 func TestInMemoryConformance(t *testing.T) {
 	storagetest.RunDBConformance(t, New())
+	storagetest.RunSessionSearchConformance(t, New())
+	storagetest.RunMetricsConformance(t, New())
 }
 
 func TestInMemoryDuplicateErrors(t *testing.T) {

@@ -39,5 +39,5 @@ func New(dsn, tablePrefix string) (*sqlstore.SQLStore, error) {
 
 // NewWithDB builds a storage.DB from an existing *sql.DB.
 func NewWithDB(db *sql.DB, tablePrefix string) *sqlstore.SQLStore {
-	return sqlstore.New(db, sqlstore.Dialect{Driver: "mysql", Positional: false}, tablePrefix)
+	return sqlstore.New(db, sqlstore.Dialect{Driver: "mysql", Positional: false, CaseInsensitiveCollation: true}, tablePrefix)
 }

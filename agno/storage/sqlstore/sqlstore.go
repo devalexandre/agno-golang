@@ -20,6 +20,10 @@ type Dialect struct {
 	Driver string
 	// Positional reports whether placeholders are positional ($1) vs "?".
 	Positional bool
+	// CaseInsensitiveCollation reports that the default string collation is
+	// case-insensitive (MySQL, SingleStore); session filters then compare
+	// with BINARY to keep EQ/IN case-sensitive.
+	CaseInsensitiveCollation bool
 }
 
 // ph renders placeholder n (1-based) for the dialect.
@@ -50,8 +54,12 @@ func (d Dialect) rebind(query string) string {
 
 // SQLStore is a database/sql-backed storage.DB.
 type SQLStore struct {
+	// MetricsEngine provides the storage.MetricsStore API over this store.
+	*storage.MetricsEngine
+
 	db        *sql.DB
 	dialect   Dialect
+	prefix    string
 	sessTable string
 	runTable  string
 }
@@ -61,12 +69,15 @@ func New(db *sql.DB, dialect Dialect, tablePrefix string) *SQLStore {
 	if tablePrefix == "" {
 		tablePrefix = "agno"
 	}
-	return &SQLStore{
+	s := &SQLStore{
 		db:        db,
 		dialect:   dialect,
+		prefix:    tablePrefix,
 		sessTable: tablePrefix + "_sessions",
 		runTable:  tablePrefix + "_runs",
 	}
+	s.MetricsEngine = storage.NewMetricsEngine(s)
+	return s
 }
 
 // DB returns the underlying *sql.DB.
@@ -136,7 +147,7 @@ func (s *SQLStore) CreateTables(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, runDDL); err != nil {
 		return fmt.Errorf("sqlstore: create runs table: %w", err)
 	}
-	return nil
+	return s.createExtendedTables(ctx)
 }
 
 // UpgradeSchema is a no-op (single schema version).
@@ -144,7 +155,7 @@ func (s *SQLStore) UpgradeSchema(_ context.Context) error { return nil }
 
 // DropTables drops the session and run tables.
 func (s *SQLStore) DropTables(ctx context.Context) error {
-	for _, t := range []string{s.sessTable, s.runTable} {
+	for _, t := range append([]string{s.sessTable, s.runTable}, s.extendedTables()...) {
 		if _, err := s.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+t); err != nil {
 			return fmt.Errorf("sqlstore: drop %s: %w", t, err)
 		}
@@ -182,9 +193,9 @@ func (s *SQLStore) ReadSession(ctx context.Context, sessionID string) (*storage.
 		 FROM %s WHERE session_id = ?`, s.sessTable))
 
 	var (
-		out                                          storage.AgentSession
-		memory, sessData, extraData, agentData       string
-		teamSess                                     sql.NullString
+		out                                    storage.AgentSession
+		memory, sessData, extraData, agentData string
+		teamSess                               sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, q, sessionID).Scan(
 		&out.SessionID, &out.UserID, &out.AgentID,
@@ -299,9 +310,9 @@ func (s *SQLStore) ReadRun(ctx context.Context, runID string) (*storage.AgentRun
 		 FROM %s WHERE id = ?`, s.runTable))
 
 	var (
-		out                          storage.AgentRun
-		runData, messages, metrics   string
-		createdAt, updatedAt         int64
+		out                        storage.AgentRun
+		runData, messages, metrics string
+		createdAt, updatedAt       int64
 	)
 	err := s.db.QueryRowContext(ctx, q, runID).Scan(
 		&out.ID, &out.SessionID, &out.UserID, &out.RunName,

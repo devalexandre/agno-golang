@@ -14,6 +14,10 @@ import (
 
 // InMemoryDB is a concurrency-safe in-memory storage.DB implementation.
 type InMemoryDB struct {
+	// MetricsEngine provides the storage.MetricsStore API.
+	*storage.MetricsEngine
+
+	metrics  *metricsData
 	mu       sync.RWMutex
 	sessions map[string]*storage.AgentSession
 	runs     map[string]*storage.AgentRun
@@ -21,10 +25,13 @@ type InMemoryDB struct {
 
 // New creates a new in-memory database.
 func New() *InMemoryDB {
-	return &InMemoryDB{
+	d := &InMemoryDB{
 		sessions: make(map[string]*storage.AgentSession),
 		runs:     make(map[string]*storage.AgentRun),
+		metrics:  &metricsData{rows: map[string]storage.ComponentMetricsRow{}},
 	}
+	d.MetricsEngine = storage.NewMetricsEngine(metricsBackend{d})
+	return d
 }
 
 // cloneSession returns a shallow copy so callers cannot mutate stored state.
@@ -186,6 +193,10 @@ func (d *InMemoryDB) DropTables(_ context.Context) error {
 	defer d.mu.Unlock()
 	d.sessions = make(map[string]*storage.AgentSession)
 	d.runs = make(map[string]*storage.AgentRun)
+	d.metrics.mu.Lock()
+	d.metrics.rows = map[string]storage.ComponentMetricsRow{}
+	d.metrics.state = nil
+	d.metrics.mu.Unlock()
 	return nil
 }
 

@@ -23,6 +23,27 @@ func TestSQLStoreConformanceSQLite(t *testing.T) {
 	storagetest.RunDBConformance(t, store)
 }
 
+func newSQLite(t *testing.T) *SQLStore {
+	t.Helper()
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+	return New(db, Dialect{Driver: "sqlite3"}, "agno_test")
+}
+
+func TestSQLStoreExtendedConformanceSQLite(t *testing.T) {
+	storagetest.RunSessionSearchConformance(t, newSQLite(t))
+	storagetest.RunMetricsConformance(t, newSQLite(t))
+	s := newSQLite(t)
+	if err := s.CreateTables(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	storagetest.RunKnowledgeConformance(t, s)
+}
+
 func TestRebindPositional(t *testing.T) {
 	d := Dialect{Positional: true}
 	got := d.rebind("SELECT * FROM t WHERE a = ? AND b = ?")
