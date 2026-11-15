@@ -69,13 +69,19 @@ func TestListProviders(t *testing.T) {
 		"together", "vertexai", "vllm", "xai", "yapi",
 	}
 
+	// Additional providers are registered from other files (see providers_v32.go),
+	// so check the core set is present and the whole list is sorted.
 	got := ListProviders()
-	if len(got) != len(want) {
-		t.Fatalf("ListProviders() returned %d providers, want %d: %v", len(got), len(want), got)
+	present := map[string]bool{}
+	for i, name := range got {
+		present[name] = true
+		if i > 0 && got[i-1] >= name {
+			t.Errorf("ListProviders() must be sorted and unique: %q before %q", got[i-1], name)
+		}
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("ListProviders()[%d] = %q, want %q (list must be sorted)", i, got[i], want[i])
+	for _, name := range want {
+		if !present[name] {
+			t.Errorf("ListProviders() is missing %q: %v", name, got)
 		}
 	}
 }
