@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/google/uuid"
 )
 
@@ -15,6 +16,7 @@ type WorkflowExecutionInput struct {
 	Images         []ImageArtifact        `json:"images,omitempty"`
 	Videos         []VideoArtifact        `json:"videos,omitempty"`
 	Audio          []AudioArtifact        `json:"audio,omitempty"`
+	Files          []models.File          `json:"files,omitempty"`
 }
 
 // GetMessageAsString converts the message to a string representation
@@ -65,6 +67,9 @@ func (w *WorkflowExecutionInput) ToMap() map[string]interface{} {
 		}
 		result["audio"] = audio
 	}
+	if len(w.Files) > 0 {
+		result["files"] = w.Files
+	}
 
 	return result
 }
@@ -78,6 +83,14 @@ type StepInput struct {
 	Images              []ImageArtifact        `json:"images,omitempty"`
 	Videos              []VideoArtifact        `json:"videos,omitempty"`
 	Audio               []AudioArtifact        `json:"audio,omitempty"`
+	// Files carries documents (CSV, Markdown, PDF, ...) available to the step:
+	// the workflow input files plus every file produced by earlier steps.
+	Files []models.File `json:"files,omitempty"`
+
+	// progress reports StepProgress updates to the running workflow, if any.
+	progress     progressSink
+	progressStep string
+	attempt      int
 }
 
 // GetMessageAsString converts the message to a string representation
@@ -214,6 +227,9 @@ func (s *StepInput) ToMap() map[string]interface{} {
 		}
 		result["audio"] = audio
 	}
+	if len(s.Files) > 0 {
+		result["files"] = s.Files
+	}
 
 	return result
 }
@@ -232,7 +248,9 @@ type StepOutput struct {
 	Images              []ImageArtifact        `json:"images,omitempty"`
 	Videos              []VideoArtifact        `json:"videos,omitempty"`
 	Audio               []AudioArtifact        `json:"audio,omitempty"`
-	Metrics             *StepMetrics           `json:"metrics,omitempty"`
+	// Files produced by the step (file artifacts such as data.csv or output.md).
+	Files   []models.File `json:"files,omitempty"`
+	Metrics *StepMetrics  `json:"metrics,omitempty"`
 }
 
 // ToMap converts StepOutput to a map
@@ -294,6 +312,9 @@ func (s *StepOutput) ToMap() map[string]interface{} {
 			audio[i] = aud.ToMap()
 		}
 		result["audio"] = audio
+	}
+	if len(s.Files) > 0 {
+		result["files"] = s.Files
 	}
 	if s.Metrics != nil {
 		result["metrics"] = s.Metrics.ToMap()

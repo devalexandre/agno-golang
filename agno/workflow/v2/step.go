@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/guardrails"
 	"github.com/devalexandre/agno-golang/agno/models"
 )
 
@@ -243,7 +244,7 @@ func (s *Step) Execute(ctx context.Context, input *StepInput) (*StepOutput, erro
 			fmt.Printf("Retrying step '%s' (attempt %d/%d)\n", s.Name, attempt, s.MaxRetries)
 		}
 
-		output, err := s.executeOnce(ctx, input)
+		output, err := s.executeOnce(ctx, input.forStep(s.Name, attempt+1))
 		if err == nil {
 			return output, nil
 		}
@@ -253,6 +254,13 @@ func (s *Step) Execute(ctx context.Context, input *StepInput) (*StepOutput, erro
 
 		// Don't retry if context is cancelled
 		if ctx.Err() != nil {
+			break
+		}
+
+		// A guardrail rejection (input/output check error) is deterministic:
+		// replaying the executor would only repeat its side effects. Stop
+		// retrying but still honour SkipOnFailure below.
+		if _, isCheck := guardrails.AsCheckError(err); isCheck {
 			break
 		}
 

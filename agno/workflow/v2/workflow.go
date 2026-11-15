@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/utils"
 )
 
@@ -48,15 +49,18 @@ const (
 
 // WorkflowRunResponse represents the response from a workflow run
 type WorkflowRunResponse struct {
-	RunID      string                 `json:"run_id"`
-	WorkflowID string                 `json:"workflow_id"`
-	Status     RunStatus              `json:"status"`
-	Content    interface{}            `json:"content,omitempty"`
-	Event      WorkflowRunEvent       `json:"event,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
-	Metrics    *WorkflowMetrics       `json:"metrics,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
-	UpdatedAt  time.Time              `json:"updated_at"`
+	RunID      string      `json:"run_id"`
+	WorkflowID string      `json:"workflow_id"`
+	Status     RunStatus   `json:"status"`
+	Content    interface{} `json:"content,omitempty"`
+	// Files holds the workflow input files followed by every file produced by
+	// the executed steps, including files produced inside container steps.
+	Files     []models.File          `json:"files,omitempty"`
+	Event     WorkflowRunEvent       `json:"event,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Metrics   *WorkflowMetrics       `json:"metrics,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // WorkflowRunResponseEvent represents an event during workflow execution
@@ -150,6 +154,7 @@ type Workflow struct {
 	stepOutputs   map[string]*StepOutput
 	metrics       *WorkflowMetrics
 	eventHandlers map[WorkflowRunEvent][]func(*WorkflowRunResponseEvent)
+	runFiles      []models.File
 }
 
 // NewWorkflow creates a new Workflow instance
@@ -299,6 +304,7 @@ func (w *Workflow) RunWithStream(ctx context.Context, input interface{}, stream 
 	w.RunID = GenerateID()
 	w.metrics.RunID = w.RunID
 	w.metrics.StartTime = time.Now()
+	w.resetRunFiles()
 
 	// Create workflow execution input
 	execInput := w.createExecutionInput(input)
@@ -391,6 +397,7 @@ func (w *Workflow) RunWithStream(ctx context.Context, input interface{}, stream 
 		WorkflowID: w.WorkflowID,
 		Status:     status,
 		Content:    content,
+		Files:      w.collectRunFiles(execInput),
 		Metrics:    w.metrics,
 		CreatedAt:  w.metrics.StartTime,
 		UpdatedAt:  w.metrics.EndTime,
@@ -435,6 +442,7 @@ func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResp
 	w.RunID = GenerateID()
 	w.metrics.RunID = w.RunID
 	w.metrics.StartTime = time.Now()
+	w.resetRunFiles()
 
 	// Create workflow execution input
 	execInput := w.createExecutionInput(input)
@@ -527,6 +535,7 @@ func (w *Workflow) Run(ctx context.Context, input interface{}) (*WorkflowRunResp
 		WorkflowID: w.WorkflowID,
 		Status:     status,
 		Content:    content,
+		Files:      w.collectRunFiles(execInput),
 		Metrics:    w.metrics,
 		CreatedAt:  w.metrics.StartTime,
 		UpdatedAt:  w.metrics.EndTime,
@@ -569,6 +578,7 @@ func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*S
 		Images:              execInput.Images,
 		Videos:              execInput.Videos,
 		Audio:               execInput.Audio,
+		Files:               append([]models.File(nil), execInput.Files...),
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
 
@@ -598,6 +608,8 @@ func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*S
 		if step.Name != "" {
 			stepName = step.Name
 		}
+
+		w.attachProgress(stepInput, stepName, i)
 
 		// Emit step started event
 		w.emitEvent(&WorkflowRunResponseEvent{
@@ -729,6 +741,8 @@ func (w *Workflow) executeStepSequenceWithStream(ctx context.Context, steps []*S
 
 		// Update step input for next iteration
 		stepInput.PreviousStepOutputs[stepName] = output
+		stepInput.Files = appendFiles(stepInput.Files, output)
+		w.recordFiles(output)
 
 		// Emit step completed event
 		w.emitEvent(&WorkflowRunResponseEvent{
@@ -757,6 +771,7 @@ func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps
 		Images:              execInput.Images,
 		Videos:              execInput.Videos,
 		Audio:               execInput.Audio,
+		Files:               append([]models.File(nil), execInput.Files...),
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
 
@@ -791,6 +806,8 @@ func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps
 
 		var output *StepOutput
 		var err error
+
+		w.attachProgress(stepInput, stepItemName(item, i), i)
 
 		// Executa o passo com base no tipo
 		switch v := item.(type) {
@@ -970,6 +987,8 @@ func (w *Workflow) executeInterfaceSequenceWithStream(ctx context.Context, steps
 
 			// Atualiza o PreviousStepOutputs para os próximos passos
 			stepInput.PreviousStepOutputs[stepName] = output
+			stepInput.Files = appendFiles(stepInput.Files, output)
+			w.recordFiles(output)
 			lastOutput = output
 		}
 	}
@@ -985,7 +1004,9 @@ func (w *Workflow) executeFunctionWorkflowWithStream(ctx context.Context, fn Exe
 		Images:         execInput.Images,
 		Videos:         execInput.Videos,
 		Audio:          execInput.Audio,
+		Files:          append([]models.File(nil), execInput.Files...),
 	}
+	w.attachProgress(stepInput, "function_workflow", 0)
 
 	// Emit step started event
 	w.emitEvent(&WorkflowRunResponseEvent{
@@ -997,6 +1018,7 @@ func (w *Workflow) executeFunctionWorkflowWithStream(ctx context.Context, fn Exe
 	})
 
 	output, err := fn(stepInput)
+	w.recordFiles(output)
 	if err != nil {
 		w.metrics.StepsFailed++
 	} else {
@@ -1026,6 +1048,7 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 		Images:              execInput.Images,
 		Videos:              execInput.Videos,
 		Audio:               execInput.Audio,
+		Files:               append([]models.File(nil), execInput.Files...),
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
 
@@ -1055,6 +1078,8 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 		if step.Name != "" {
 			stepName = step.Name
 		}
+
+		w.attachProgress(stepInput, stepName, i)
 
 		// Emit step started event
 		w.emitEvent(&WorkflowRunResponseEvent{
@@ -1112,6 +1137,8 @@ func (w *Workflow) executeStepSequence(ctx context.Context, steps []*Step, execI
 
 		// Update step input for next iteration
 		stepInput.PreviousStepOutputs[stepName] = output
+		stepInput.Files = appendFiles(stepInput.Files, output)
+		w.recordFiles(output)
 
 		// Emit step completed event
 		w.emitEvent(&WorkflowRunResponseEvent{
@@ -1140,6 +1167,7 @@ func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interfa
 		Images:              execInput.Images,
 		Videos:              execInput.Videos,
 		Audio:               execInput.Audio,
+		Files:               append([]models.File(nil), execInput.Files...),
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
 
@@ -1174,6 +1202,8 @@ func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interfa
 
 		var output *StepOutput
 		var err error
+
+		w.attachProgress(stepInput, stepItemName(item, i), i)
 
 		// Executa o passo com base no tipo
 		switch v := item.(type) {
@@ -1282,6 +1312,8 @@ func (w *Workflow) executeInterfaceSequence(ctx context.Context, steps []interfa
 
 			// Atualiza o PreviousStepOutputs para os próximos passos
 			stepInput.PreviousStepOutputs[stepName] = output
+			stepInput.Files = appendFiles(stepInput.Files, output)
+			w.recordFiles(output)
 			lastOutput = output
 		}
 	}
@@ -1297,7 +1329,9 @@ func (w *Workflow) executeFunctionWorkflow(ctx context.Context, fn ExecutorFunc,
 		Images:         execInput.Images,
 		Videos:         execInput.Videos,
 		Audio:          execInput.Audio,
+		Files:          append([]models.File(nil), execInput.Files...),
 	}
+	w.attachProgress(stepInput, "function_workflow", 0)
 
 	// Emit step started event
 	w.emitEvent(&WorkflowRunResponseEvent{
@@ -1309,6 +1343,7 @@ func (w *Workflow) executeFunctionWorkflow(ctx context.Context, fn ExecutorFunc,
 	})
 
 	output, err := fn(stepInput)
+	w.recordFiles(output)
 	if err != nil {
 		w.metrics.StepsFailed++
 	} else {
@@ -1344,6 +1379,9 @@ func (w *Workflow) createExecutionInput(input interface{}) *WorkflowExecutionInp
 			execInput := &WorkflowExecutionInput{Message: msg}
 			if additionalData, ok := v["additional_data"].(map[string]interface{}); ok {
 				execInput.AdditionalData = additionalData
+			}
+			if files, ok := v["files"].([]models.File); ok {
+				execInput.Files = files
 			}
 			return execInput
 		}

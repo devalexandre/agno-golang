@@ -3,6 +3,8 @@ package v2
 import (
 	"context"
 	"fmt"
+
+	"github.com/devalexandre/agno-golang/agno/models"
 )
 
 // Steps represents a collection of steps that can be executed sequentially
@@ -103,6 +105,8 @@ func (s *Steps) Execute(ctx context.Context, input *StepInput) (*StepOutput, err
 		Audio:               input.Audio,
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
+	stepInput.inheritRuntime(input)
+	var producedFiles []models.File
 
 	// Copy previous step outputs
 	if input.PreviousStepOutputs != nil {
@@ -176,6 +180,8 @@ func (s *Steps) Execute(ctx context.Context, input *StepInput) (*StepOutput, err
 
 			// Update step input for next iteration
 			stepInput.PreviousStepOutputs[stepName] = output
+			stepInput.Files = appendFiles(stepInput.Files, output)
+			producedFiles = appendFiles(producedFiles, output)
 			lastOutput = output
 		}
 	}
@@ -190,6 +196,7 @@ func (s *Steps) Execute(ctx context.Context, input *StepInput) (*StepOutput, err
 			"success_count": successCount,
 			"failure_count": failureCount,
 		},
+		Files: producedFiles,
 	}
 
 	// Add errors to metadata if any

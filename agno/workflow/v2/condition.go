@@ -3,6 +3,8 @@ package v2
 import (
 	"context"
 	"fmt"
+
+	"github.com/devalexandre/agno-golang/agno/models"
 )
 
 // ConditionFunc represents a function that evaluates a condition
@@ -130,6 +132,8 @@ func (c *Condition) Execute(ctx context.Context, input *StepInput) (*StepOutput,
 		Audio:               input.Audio,
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
+	stepInput.inheritRuntime(input)
+	var producedFiles []models.File
 
 	// Copy previous step outputs
 	if input.PreviousStepOutputs != nil {
@@ -183,6 +187,8 @@ func (c *Condition) Execute(ctx context.Context, input *StepInput) (*StepOutput,
 			}
 
 			stepInput.PreviousStepOutputs[stepName] = output
+			stepInput.Files = appendFiles(stepInput.Files, output)
+			producedFiles = appendFiles(producedFiles, output)
 			lastOutput = output
 		}
 	}
@@ -197,6 +203,7 @@ func (c *Condition) Execute(ctx context.Context, input *StepInput) (*StepOutput,
 			"executed_branch":  c.executedBranch,
 			"steps_executed":   len(stepsToExecute),
 		},
+		Files: producedFiles,
 	}
 
 	if lastOutput != nil {

@@ -144,8 +144,18 @@ func TestDurableWorkflow(t *testing.T) {
 	// Verify checkpoint exists for step 2
 	checkpoint, _ = storage.LoadCheckpoint(ctx, sessionID)
 	if checkpoint == nil || checkpoint.NextStepIdx != 2 {
-		t.Errorf("Expected checkpoint at index 2, got %v", checkpoint)
+		t.Fatalf("Expected checkpoint at index 2, got %v", checkpoint)
 	}
+
+	// The second run completed every step, so its checkpoint (index 2) leaves
+	// nothing to resume. Simulate a process that crashed right after step 1
+	// completed: only step 1 is checkpointed and step 2 is still pending.
+	storage.SaveCheckpoint(ctx, sessionID, &WorkflowCheckpoint{
+		SessionID:   sessionID,
+		RunID:       checkpoint.RunID,
+		NextStepIdx: 1,
+		StepOutputs: map[string]*StepOutput{"step1": checkpoint.StepOutputs["step1"]},
+	})
 
 	// Now simulate failure in step 2
 	step2Fail, _ := NewStep(

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/devalexandre/agno-golang/agno/models"
 )
 
 // RouterFunc represents a function that determines which route to take
@@ -150,6 +152,8 @@ func (r *Router) Execute(ctx context.Context, input *StepInput) (*StepOutput, er
 		Audio:               input.Audio,
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
+	stepInput.inheritRuntime(input)
+	var producedFiles []models.File
 
 	// Copy previous step outputs
 	if input.PreviousStepOutputs != nil {
@@ -203,6 +207,8 @@ func (r *Router) Execute(ctx context.Context, input *StepInput) (*StepOutput, er
 			}
 
 			stepInput.PreviousStepOutputs[stepName] = output
+			stepInput.Files = appendFiles(stepInput.Files, output)
+			producedFiles = appendFiles(producedFiles, output)
 			lastOutput = output
 		}
 	}
@@ -218,6 +224,7 @@ func (r *Router) Execute(ctx context.Context, input *StepInput) (*StepOutput, er
 			"executed_route": r.executedRoute,
 			"steps_executed": len(stepsToExecute),
 		},
+		Files: producedFiles,
 	}
 
 	if lastOutput != nil {
