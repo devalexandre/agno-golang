@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/agent"
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/os/component"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
 
@@ -916,7 +918,12 @@ func generateDeterministicID(prefix, input string) string {
 	return fmt.Sprintf("%s_%x", prefix, hash%0xFFFFFF)
 }
 
-// continueAgentRunHandler continues an agent run - compatible with Python API
+// continueAgentRunHandler resumes a PAUSED agent run (Python POST
+// /agents/{id}/runs/{run_id}/continue). The "tools" field is a JSON list of
+// tool executions (Python ToolExecution.to_dict) carrying the user's decisions
+// (confirmed, confirmation_note, user_input_schema values, result for external
+// execution); each becomes a RunRequirement matched to the paused run by tool
+// call id. stream defaults to true, as in Python.
 func (os *AgentOS) continueAgentRunHandler(c *gin.Context) {
 	agentID := c.Param("id")
 	runID := c.Param("run_id")
@@ -925,161 +932,113 @@ func (os *AgentOS) continueAgentRunHandler(c *gin.Context) {
 		Tools     string `form:"tools" json:"tools"`
 		SessionID string `form:"session_id" json:"session_id"`
 		UserID    string `form:"user_id" json:"user_id"`
-		Stream    bool   `form:"stream" json:"stream"`
+		Stream    *bool  `form:"stream" json:"stream"`
 	}
-
 	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	stream := req.Stream == nil || *req.Stream
 
-	// Find the agent
 	var targetAgent *agent.Agent
-	for _, agent := range os.agents {
-		agentIDGenerated := generateDeterministicID("agent", agent.GetName())
-		if agentIDGenerated == agentID || agent.GetName() == agentID {
-			targetAgent = agent
+	for _, ag := range os.agents {
+		if generateDeterministicID("agent", ag.GetName()) == agentID || ag.GetName() == agentID {
+			targetAgent = ag
 			break
 		}
 	}
-
 	if targetAgent == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
 		return
 	}
 
-	// Parse tools from JSON string
-	var toolsData []map[string]interface{}
+	var toolsData []map[string]any
 	if req.Tools != "" {
 		if err := json.Unmarshal([]byte(req.Tools), &toolsData); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":   "Invalid JSON in tools field",
-				"details": err.Error(),
-			})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON in tools field", "details": err.Error()})
 			return
 		}
 	}
-
-	// For now, continue run is implemented as a new run with the updated tools context
-	// In the future, this should use actual run state restoration
-
-	if req.Stream {
-		// Set SSE headers for streaming
-		origin := c.GetHeader("Origin")
-		if origin == "https://os.agno.com" || origin == "http://localhost:3000" {
-			c.Header("Access-Control-Allow-Origin", origin)
-		} else {
-			c.Header("Access-Control-Allow-Origin", "*")
+	// Python: RunRequirement(tool_execution=ToolExecution.from_dict(tool)).
+	// Items that are already requirements (they carry "tool_execution", as the
+	// Go remote client may send) are used as-is.
+	wrapped := make([]map[string]any, 0, len(toolsData))
+	for _, t := range toolsData {
+		if _, isRequirement := t["tool_execution"]; isRequirement {
+			wrapped = append(wrapped, t)
+			continue
 		}
-		c.Header("Access-Control-Allow-Headers", "Cache-Control, Content-Type, Authorization, Accept, Accept-Language, Accept-Encoding")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Expose-Headers", "*")
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("X-Accel-Buffering", "no")
+		wrapped = append(wrapped, map[string]any{"tool_execution": t})
+	}
+	requirements, err := component.DecodeRequirements(wrapped)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid structure or content for tools: " + err.Error()})
+		return
+	}
 
-		// Send RunStarted event
-		startEventData := map[string]interface{}{
-			"event":      "RunStarted",
-			"created_at": time.Now().Unix(),
-			"agent_id":   agentID,
-			"agent_name": targetAgent.GetName(),
-			"run_id":     runID,
-			"session_id": req.SessionID,
-		}
-		startEventJSON, _ := json.Marshal(startEventData)
-		c.Writer.Write([]byte(fmt.Sprintf("event: RunStarted\ndata: %s\n\n", startEventJSON)))
-		c.Writer.Flush()
+	paused := &models.RunResponse{RunID: runID, SessionID: req.SessionID}
+	if _, err := targetAgent.PausedRun(runID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No paused run found", "details": err.Error(), "run_id": runID})
+		return
+	}
 
-		// Build continuation message with tools context
-		continueMessage := fmt.Sprintf("Continuing from previous run. Updated tools: %s", req.Tools)
+	startTime := time.Now()
+	resp, runErr := targetAgent.ContinueRun(c.Request.Context(), paused, requirements...)
 
-		// Run the agent
-		var finalmessage string
-		_ = targetAgent.RunStream(continueMessage, func(chunk []byte) error {
-			finalmessage += string(chunk)
-
-			// Send RunContent event
-			contentEvent := RunContentEvent{
-				CreatedAt:        time.Now().Unix(),
-				Event:            "RunContent",
-				AgentID:          agentID,
-				AgentName:        targetAgent.GetName(),
-				RunID:            runID,
-				SessionID:        req.SessionID,
-				Content:          string(chunk),
-				ContentType:      "str",
-				ReasoningContent: "",
+	if !stream {
+		if runErr != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(runErr, agent.ErrApprovalPending) {
+				status = http.StatusConflict
 			}
-
-			contentEventJSON, _ := json.Marshal(contentEvent)
-			c.Writer.Write([]byte(fmt.Sprintf("event: RunContent\ndata: %s\n\n", contentEventJSON)))
-			c.Writer.Flush()
-
-			return nil
-		})
-
-		// Send RunContentCompleted event
-		contentCompletedEvent := RunContentCompletedEvent{
-			CreatedAt: time.Now().Unix(),
-			Event:     "RunContentCompleted",
-			AgentID:   agentID,
-			AgentName: targetAgent.GetName(),
-			RunID:     runID,
-			SessionID: req.SessionID,
-		}
-		contentCompletedJSON, _ := json.Marshal(contentCompletedEvent)
-		c.Writer.Write([]byte(fmt.Sprintf("event: RunContentCompleted\ndata: %s\n\n", contentCompletedJSON)))
-		c.Writer.Flush()
-
-		// Send RunCompleted event
-		runCompletedEvent := RunCompletedEvent{
-			CreatedAt:   time.Now().Unix(),
-			Event:       "RunCompleted",
-			AgentID:     agentID,
-			AgentName:   targetAgent.GetName(),
-			RunID:       runID,
-			SessionID:   req.SessionID,
-			Content:     finalmessage,
-			ContentType: "str",
-		}
-		runCompletedJSON, _ := json.Marshal(runCompletedEvent)
-		c.Writer.Write([]byte(fmt.Sprintf("event: RunCompleted\ndata: %s\n\n", runCompletedJSON)))
-		c.Writer.Flush()
-
-	} else {
-		// Non-streaming response
-		continueMessage := fmt.Sprintf("Continuing from previous run. Updated tools: %s", req.Tools)
-
-		runOpts := []agent.RunOption{}
-		if req.SessionID != "" {
-			runOpts = append(runOpts, agent.WithSessionID(req.SessionID))
-		}
-		if req.UserID != "" {
-			runOpts = append(runOpts, agent.WithUserID(req.UserID))
-		}
-
-		// Convert runOpts to interface{} slice
-		interfaceOpts := make([]interface{}, len(runOpts))
-		for i, opt := range runOpts {
-			interfaceOpts[i] = opt
-		}
-		response, err := targetAgent.Run(continueMessage, interfaceOpts...)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Failed to continue run",
-				"details": err.Error(),
-			})
+			c.JSON(status, gin.H{"error": runErr.Error(), "run_id": runID, "session_id": req.SessionID, "status": "ERROR"})
 			return
 		}
-
 		c.JSON(http.StatusOK, gin.H{
-			"run_id":     runID,
-			"agent_id":   agentID,
-			"session_id": req.SessionID,
-			"content":    response.TextContent,
+			"run_id":       resp.RunID,
+			"agent_id":     agentID,
+			"agent_name":   targetAgent.GetName(),
+			"session_id":   resp.SessionID,
+			"content":      resp.TextContent,
+			"content_type": "str",
+			"status":       resp.Status,
+			"requirements": component.EncodeRequirements(resp.ActiveRequirements()),
+			"metrics":      runCompletedMetrics(&resp, startTime),
 		})
+		return
 	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	send := func(event string, data map[string]any) {
+		data["event"] = event
+		data["created_at"] = time.Now().Unix()
+		data["agent_id"] = agentID
+		data["agent_name"] = targetAgent.GetName()
+		data["run_id"] = runID
+		data["session_id"] = req.SessionID
+		b, _ := json.Marshal(data)
+		c.Writer.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event, b)))
+		c.Writer.Flush()
+	}
+
+	send("RunContinued", map[string]any{})
+	if runErr != nil {
+		send("RunError", map[string]any{"error": runErr.Error()})
+		return
+	}
+	if resp.TextContent != "" {
+		send("RunContent", map[string]any{"content": resp.TextContent, "content_type": "str"})
+	}
+	if resp.IsPaused() {
+		send("RunPaused", map[string]any{"requirements": component.EncodeRequirements(resp.ActiveRequirements())})
+		return
+	}
+	send("RunCompleted", map[string]any{
+		"content":      resp.TextContent,
+		"content_type": "str",
+		"metrics":      runCompletedMetrics(&resp, startTime),
+	})
 }
