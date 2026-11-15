@@ -68,6 +68,10 @@ type TeamConfig struct {
 	Debug                bool
 	Stream               bool
 	Async                bool // Execute members concurrently when possible
+
+	// Followups generates suggested follow-up prompts after a successful run
+	// into RunResponse.Followups. Nil disables it.
+	Followups *agent.FollowupConfig
 }
 
 // Team represents a multi-agent system
@@ -78,6 +82,7 @@ type Team struct {
 	description  string
 	instructions []string
 	model        models.AgnoModelInterface
+	followups    *agent.FollowupConfig
 	members      []TeamMember
 	mode         TeamMode
 	tools        []toolkit.Tool
@@ -154,6 +159,7 @@ func NewTeam(config TeamConfig) *Team {
 		description:  config.Description,
 		instructions: config.Instructions,
 		model:        config.Model,
+		followups:    config.Followups,
 		members:      members,
 		mode:         config.Mode,
 		tools:        config.Tools,
@@ -223,7 +229,26 @@ func (t *Team) Run(prompt string) (models.RunResponse, error) {
 		t.saveToMemory(prompt, response)
 	}
 
-	return response, err
+	if err != nil {
+		response.Status = models.RunStatusError
+		if t.ctx != nil && t.ctx.Err() != nil {
+			response.Status = models.RunStatusCancelled
+			response.CancellationStage = models.CancellationStageExecuting
+		}
+		return response, err
+	}
+	response.Status = models.RunStatusCompleted
+
+	// Generate follow-up suggestions; a failure never affects the answer.
+	if t.followups != nil && response.TextContent != "" {
+		if suggestions, ferr := agent.GenerateFollowups(t.ctx, t.model, t.followups, prompt, response.TextContent); ferr == nil {
+			response.Followups = suggestions
+		} else if t.debug {
+			fmt.Printf("Warning: error generating followups: %v\n", ferr)
+		}
+	}
+
+	return response, nil
 }
 
 // runRouteMode routes the request to the most appropriate team member

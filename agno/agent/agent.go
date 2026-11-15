@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/compaction"
 	"github.com/devalexandre/agno-golang/agno/knowledge"
 	"github.com/devalexandre/agno-golang/agno/memory"
 	"github.com/devalexandre/agno-golang/agno/models"
@@ -71,6 +73,15 @@ type AgentConfig struct {
 	EnableSessionSummaries  bool
 	ReadChatHistory         bool
 	EnableAgenticState      bool // Allow tools to modify session state dynamically
+
+	// Compaction folds older history into a generated summary when the request
+	// grows past a threshold (and/or on context-overflow errors). Nil disables it.
+	// Use compaction.OverflowOnly() for the equivalent of Python's compaction=True.
+	Compaction *compaction.Config
+
+	// Followups generates suggested follow-up prompts after a successful run
+	// into RunResponse.Followups. Nil disables it.
+	Followups *FollowupConfig
 
 	// Default Tools Configuration
 	EnableReadChatHistoryTool     bool // Enable read_chat_history default tool
@@ -245,6 +256,16 @@ type Agent struct {
 	enableSessionSummaries  bool
 	readChatHistory         bool
 	enableAgenticState      bool
+
+	// Compaction
+	compactor        *compaction.Compactor
+	compactionRecord *compaction.Record
+
+	// Follow-up suggestions
+	followups *FollowupConfig
+
+	// Per-run bookkeeping for the run currently executing
+	currentRun *runState
 
 	// Session state
 	messages     []models.Message
@@ -597,6 +618,28 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("semantic compression is enabled but no semantic model or agent provided")
 	}
 
+	agent.activeRuns = make(map[string]context.CancelFunc)
+
+	if config.Compaction != nil {
+		compactor, err := compaction.New(*config.Compaction)
+		if err != nil {
+			return nil, err
+		}
+		compactor.SetDefaultModel(agent.model)
+		agent.compactor = compactor
+		if !agent.addHistoryToMessages && compactor.Config().HasThreshold() {
+			log.Printf("Warning: compaction has a CompactAtTokens threshold but AddHistoryToMessages is false; " +
+				"there is no replayed history to fold")
+		}
+	}
+
+	if config.Followups != nil {
+		if _, _, err := config.Followups.CountRange(); err != nil {
+			return nil, err
+		}
+		agent.followups = config.Followups
+	}
+
 	// Load existing session if storage is provided
 	if agent.db != nil {
 		agent.loadSession()
@@ -745,7 +788,14 @@ func (a *Agent) trackRun(runID string) context.Context {
 	defer a.runMutex.Unlock()
 
 	// Create a new context with cancellation for this run
-	ctx, cancel := context.WithCancel(a.ctx)
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	if a.activeRuns == nil {
+		a.activeRuns = make(map[string]context.CancelFunc)
+	}
 	a.activeRuns[runID] = cancel
 	return ctx
 }
@@ -1460,13 +1510,13 @@ func (a *Agent) unmarshalIntoSchema(jsonStr string) (interface{}, error) {
 
 // RunWithOptions is the new method with full options support
 func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.RunResponse, error) {
-	// Apply options
-	options := &RunOptions{}
-	for _, opt := range opts {
-		if runOpt, ok := opt.(func(*RunOptions)); ok {
-			runOpt(options)
-		}
-	}
+	options := applyRunOptions(opts)
+	return a.executeRun(options, func() (models.RunResponse, error) {
+		return a.runWithOptions(input, options)
+	})
+}
+
+func (a *Agent) runWithOptions(input interface{}, options *RunOptions) (models.RunResponse, error) {
 
 	// Override agent settings with run options if provided
 	if options.SessionID != nil {
@@ -1543,15 +1593,13 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 		return models.RunResponse{}, fmt.Errorf("failed to prepare input: %w", err)
 	}
 
+	if a.currentRun != nil {
+		a.currentRun.prompt = prompt
+	}
+
 	// Add system message and history normally
 	baseMessages := a.prepareMessages(prompt, options.KnowledgeFilters)
-	for _, msg := range baseMessages {
-		if msg.Role == models.TypeUserRole {
-			messages = append(messages, msg)
-		} else {
-			messages = append([]models.Message{msg}, messages...)
-		}
-	}
+	messages = append(messages, baseMessages...)
 
 	// Attach run media to the user message so it reaches the model
 	messages = attachRunMedia(messages, options.Images, options.Audio, options.Videos, options.Files)
@@ -1721,12 +1769,7 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 		})
 
 		// Keep only recent messages based on history limit
-		if a.numHistoryRuns > 0 {
-			maxMessages := a.numHistoryRuns * 2 // user + assistant per run
-			if len(a.messages) > maxMessages {
-				a.messages = a.messages[len(a.messages)-maxMessages:]
-			}
-		}
+		a.trimHistory()
 	}
 
 	// Step 1: Parse response with ParserModel if configured
@@ -1773,14 +1816,19 @@ func (a *Agent) RunWithOptions(input interface{}, opts ...interface{}) (models.R
 
 // Run executes the agent with the given input and options
 // This method accepts optional RunOptions using the functional options pattern
+//
+// The returned RunResponse carries RunID, Status (COMPLETED / ERROR /
+// CANCELLED) and, for cancelled runs, the CancellationStage; it is populated
+// even when an error is returned. Pass WithRunID to cancel the run with
+// CancelRun while it executes.
 func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse, error) {
-	// Apply options
-	options := &RunOptions{}
-	for _, opt := range opts {
-		if runOpt, ok := opt.(func(*RunOptions)); ok {
-			runOpt(options)
-		}
-	}
+	options := applyRunOptions(opts)
+	return a.executeRun(options, func() (models.RunResponse, error) {
+		return a.run(input, options)
+	})
+}
+
+func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse, error) {
 
 	// Execute pre-hooks for validation and preprocessing
 	if len(a.preHooks) > 0 {
@@ -1865,43 +1913,42 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 		retries = *options.Retries
 	}
 
-	var messages []models.Message
-
 	// Prepare input according to schema if configured
 	prompt, err := a.prepareInputWithSchema(input)
 	if err != nil {
 		return models.RunResponse{}, fmt.Errorf("failed to prepare input: %w", err)
 	}
 
-	// Add system message and history normally
-	baseMessages := a.prepareMessages(prompt, options.KnowledgeFilters)
-	for _, msg := range baseMessages {
-		if msg.Role == models.TypeUserRole {
-			messages = append(messages, msg)
-		} else {
-			messages = append([]models.Message{msg}, messages...)
-		}
+	if a.currentRun != nil {
+		a.currentRun.prompt = prompt
 	}
 
+	// Build system message, replayed history and the current input. Kept as
+	// separate parts so the history can be swapped after a compaction.
+	parts := splitRequest(a.prepareMessages(prompt, options.KnowledgeFilters))
+
+	// Fold older history into a summary when the request crosses the threshold.
+	a.maybeCompactBeforeRun(&parts)
+
 	// Attach run media to the user message so it reaches the model
-	messages = attachRunMedia(messages, options.Images, options.Audio, options.Videos, options.Files)
+	parts.suffix = attachRunMedia(parts.suffix, options.Images, options.Audio, options.Videos, options.Files)
 
 	// Add session state to context if requested
 	if options.AddSessionStateToContext != nil && *options.AddSessionStateToContext && len(sessionState) > 0 {
 		stateJSON, _ := json.Marshal(sessionState)
-		messages = append([]models.Message{{
+		parts.prefix = append([]models.Message{{
 			Role:    models.TypeSystemRole,
 			Content: fmt.Sprintf("Session State: %s", string(stateJSON)),
-		}}, messages...)
+		}}, parts.prefix...)
 	}
 
 	// Add dependencies to context if requested
 	if options.AddDependenciesToContext != nil && *options.AddDependenciesToContext && len(dependencies) > 0 {
 		depsJSON, _ := json.Marshal(dependencies)
-		messages = append([]models.Message{{
+		parts.prefix = append([]models.Message{{
 			Role:    models.TypeSystemRole,
 			Content: fmt.Sprintf("Dependencies: %s", string(depsJSON)),
-		}}, messages...)
+		}}, parts.prefix...)
 	}
 
 	// Reasoning: if not using agent mode, use simple reasoning
@@ -1929,7 +1976,7 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 					}
 					allStepsMsg += stepMsg + "\n"
 				}
-				messages = append(messages, models.Message{
+				parts.suffix = append(parts.suffix, models.Message{
 					Role:    "assistant",
 					Content: allStepsMsg,
 				})
@@ -1959,7 +2006,7 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 						}
 						allStepsMsg += stepMsg + "\n"
 					}
-					messages = append(messages, models.Message{
+					parts.suffix = append(parts.suffix, models.Message{
 						Role:    "assistant",
 						Content: allStepsMsg,
 					})
@@ -1996,10 +2043,17 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 		modelOptions = append(modelOptions, a.modelOptions...)
 	}
 
+	messages := parts.join()
+
+	if err := a.checkCancelled(); err != nil {
+		return models.RunResponse{}, err
+	}
+
 	// Check if streaming is enabled
 	if options.Stream != nil && *options.Stream {
 		resp, lastErr = a.runWithStreaming(prompt, messages)
 	} else {
+		overflowRecovered := false
 		for attempt := 0; attempt <= retries; attempt++ {
 			if a.debug && attempt > 0 {
 				fmt.Printf("Retry attempt %d/%d\n", attempt, retries)
@@ -2009,6 +2063,18 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 			if lastErr == nil {
 				break
 			}
+			if err := a.checkCancelled(); err != nil {
+				lastErr = err
+				break
+			}
+
+			// Context-window rejection: fold the history and retry once.
+			if !overflowRecovered && a.recoverFromOverflow(&parts, lastErr) {
+				overflowRecovered = true
+				messages = parts.join()
+				attempt--
+				continue
+			}
 
 			if attempt < retries {
 				// Apply exponential backoff if enabled
@@ -2016,13 +2082,19 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 				if a.exponentialBackoff && attempt > 0 {
 					delay = delay * time.Duration(1<<uint(attempt)) // 2^attempt
 				}
-				time.Sleep(delay)
+				if err := a.sleepOrCancel(delay); err != nil {
+					lastErr = err
+					break
+				}
 			}
 		}
 	}
 
 	if lastErr != nil {
 		return models.RunResponse{}, lastErr
+	}
+	if err := a.checkCancelled(); err != nil {
+		return models.RunResponse{}, err
 	}
 
 	// Debug: print response in json
@@ -2233,12 +2305,7 @@ func (a *Agent) Run(input interface{}, opts ...interface{}) (models.RunResponse,
 		})
 
 		// Keep only recent messages based on history limit
-		if a.numHistoryRuns > 0 {
-			maxMessages := a.numHistoryRuns * 2 // user + assistant per run
-			if len(a.messages) > maxMessages {
-				a.messages = a.messages[len(a.messages)-maxMessages:]
-			}
-		}
+		a.trimHistory()
 	}
 
 	// Step 1: Parse response with ParserModel if configured
@@ -2643,10 +2710,8 @@ func (a *Agent) prepareMessages(prompt string, knowledgeFilters map[string]inter
 			},
 		}
 
-		// Add history if enabled
-		if a.addHistoryToMessages {
-			messages = append(messages, a.messages...)
-		}
+		// Add history if enabled (with the compaction summary in front, when one is in force)
+		messages = append(messages, a.historyView()...)
 
 		// Add user prompt
 		messages = append(messages, models.Message{
@@ -2881,11 +2946,8 @@ func (a *Agent) prepareMessages(prompt string, knowledgeFilters map[string]inter
 		})
 	}
 
-	// Add chat history if enabled
-	if a.addHistoryToMessages && len(a.messages) > 0 {
-		historyMessages := a.filterToolCallsFromHistory(a.messages)
-		messages = append(messages, historyMessages...)
-	}
+	// Add chat history if enabled (with the compaction summary in front, when one is in force)
+	messages = append(messages, a.historyView()...)
 
 	compressedPrompt := a.ApplySemanticCompression(prompt)
 
@@ -2980,15 +3042,38 @@ func (a *Agent) loadSession() error {
 			return fmt.Errorf("failed to load session runs: %w", err)
 		}
 
+		// Restore the compaction in force and drop the runs it folded, before
+		// the NumHistoryRuns window is applied.
+		// Replay runs in chronological order; not every backend returns them sorted.
+		sort.SliceStable(runs, func(i, j int) bool { return runs[i].CreatedAt.Before(runs[j].CreatedAt) })
+
+		anchorOffset := 0
+		a.loadCompaction(session)
+		if a.compactionRecord != nil {
+			a.runs = runs
+			a.buildMessageHistoryFromRuns()
+			if idx := compaction.FindMessage(a.messages, a.compactionRecord.FirstKeptMessageID, 0); idx >= 0 {
+				var runIdx int
+				runIdx, anchorOffset = locateRunMessage(runs, idx)
+				runs = runs[runIdx:]
+			} else {
+				a.compactionRecord = nil // anchor no longer resolves: fail open
+			}
+		}
+
 		// Keep only the most recent runs based on numHistoryRuns
-		if a.numHistoryRuns > 0 && len(runs) > a.numHistoryRuns {
-			runs = runs[len(runs)-a.numHistoryRuns:]
+		if limit := a.historyRunLimit(); limit > 0 && len(runs) > limit {
+			runs = runs[len(runs)-limit:]
+			anchorOffset = 0
 		}
 
 		a.runs = runs
 
 		// Build message history from runs
 		a.buildMessageHistoryFromRuns()
+		if anchorOffset > 0 && anchorOffset <= len(a.messages) {
+			a.messages = a.messages[anchorOffset:]
+		}
 	}
 
 	return nil
@@ -3054,8 +3139,8 @@ func (a *Agent) saveRun(userMessage, agentResponse string, messages []models.Mes
 	a.runs = append(a.runs, run)
 
 	// Keep only the most recent runs in memory
-	if a.numHistoryRuns > 0 && len(a.runs) > a.numHistoryRuns {
-		a.runs = a.runs[len(a.runs)-a.numHistoryRuns:]
+	if limit := a.historyRunLimit(); limit > 0 && len(a.runs) > limit {
+		a.runs = a.runs[len(a.runs)-limit:]
 	}
 
 	return nil
@@ -3164,12 +3249,7 @@ func (a *Agent) RunStream(prompt string, fn func([]byte) error) error {
 			})
 
 			// Keep only recent messages based on history limit
-			if a.numHistoryRuns > 0 {
-				maxMessages := a.numHistoryRuns * 2 // user + assistant per run
-				if len(a.messages) > maxMessages {
-					a.messages = a.messages[len(a.messages)-maxMessages:]
-				}
-			}
+			a.trimHistory()
 		}
 	}
 

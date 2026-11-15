@@ -185,7 +185,71 @@ type RunResponse struct {
 	CreatedAt          int64                    `json:"created_at,omitempty"`
 	ParsedOutput       interface{}              `json:"parsed_output,omitempty"` // Deprecated: Use Output instead
 	Output             interface{}              `json:"output,omitempty"`        // Structured output when using OutputSchema (already type-asserted)
+
+	// Status is the run's final state (COMPLETED, ERROR, CANCELLED, ...).
+	// Empty for responses produced by code paths that do not track status.
+	Status RunStatus `json:"status,omitempty"`
+	// CancellationStage records where a CANCELLED run was when it was cancelled.
+	// Empty means unknown or not cancelled.
+	CancellationStage CancellationStage `json:"cancellation_stage,omitempty"`
+	// Compaction describes the history compaction performed during this run, if any.
+	Compaction *CompactionRecord `json:"compaction,omitempty"`
+	// Followups holds suggested follow-up prompts generated after the run, when enabled.
+	Followups []string `json:"followups,omitempty"`
 	// TODO: implement images, videos, audio, response_audio, citations, extra_data
+}
+
+// RunStatus is the state of a run (mirrors Python agno.run.base.RunStatus).
+type RunStatus string
+
+const (
+	RunStatusPending   RunStatus = "PENDING"
+	RunStatusRunning   RunStatus = "RUNNING"
+	RunStatusCompleted RunStatus = "COMPLETED"
+	RunStatusPaused    RunStatus = "PAUSED"
+	RunStatusCancelled RunStatus = "CANCELLED"
+	RunStatusError     RunStatus = "ERROR"
+)
+
+// CancellationStage is where a CANCELLED run was when it was cancelled
+// (mirrors Python agno.run.base.CancellationStage). Values are a wire contract.
+//
+//   - PENDING: the run never started executing.
+//   - EXECUTING: the run was stopped mid-execution.
+//   - PAUSED: the run was parked for a human-in-the-loop continuation.
+type CancellationStage string
+
+const (
+	CancellationStagePending   CancellationStage = "PENDING"
+	CancellationStageExecuting CancellationStage = "EXECUTING"
+	CancellationStagePaused    CancellationStage = "PAUSED"
+)
+
+// IsCancelled reports whether the run was cancelled.
+func (r *RunResponse) IsCancelled() bool { return r.Status == RunStatusCancelled }
+
+// CompactionRecord describes one history compaction: the summary that replaced
+// older messages and the anchor of the first message kept verbatim. It mirrors
+// Python's agno.compaction.types.CompactionRecord; the agno/compaction package
+// aliases it as compaction.Record.
+type CompactionRecord struct {
+	// ID of this record.
+	ID string `json:"id,omitempty"`
+	// RunID of the run that produced it (empty for a manual compaction).
+	RunID string `json:"run_id,omitempty"`
+	// MessagesCompacted is the number of history messages the summary replaced.
+	MessagesCompacted int `json:"messages_compacted"`
+	// Summary is the generated summary standing in for the folded messages.
+	Summary string `json:"summary"`
+	// FirstKeptMessageID anchors the boundary: a fingerprint of the first message kept verbatim.
+	FirstKeptMessageID string `json:"first_kept_message_id,omitempty"`
+	// Archived reports whether the folded transcript was stored alongside the record.
+	Archived bool `json:"archived,omitempty"`
+	// TokensBefore / TokensAfter are local estimates of the context around the fold.
+	TokensBefore int `json:"tokens_before,omitempty"`
+	TokensAfter  int `json:"tokens_after,omitempty"`
+	// CreatedAt is a unix timestamp.
+	CreatedAt int64 `json:"created_at"`
 }
 
 // TypedRunResponse is a generic wrapper for RunResponse with typed Output

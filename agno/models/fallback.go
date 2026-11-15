@@ -53,6 +53,13 @@ func classifyError(err error) errorClass {
 	return classGeneric
 }
 
+// IsContextOverflowError reports whether err looks like a provider rejection
+// for exceeding the model's context window. It uses the same heuristics as the
+// fallback router.
+func IsContextOverflowError(err error) bool {
+	return err != nil && classifyError(err) == classContextOverflow
+}
+
 // FallbackCallback is invoked when a fallback model is activated.
 // Signature: (primaryModelID, fallbackModelID, error).
 type FallbackCallback func(primaryID, fallbackID string, err error)
