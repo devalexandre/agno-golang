@@ -92,6 +92,9 @@ func (a *Agent) executeRun(options *RunOptions, fn func() (models.RunResponse, e
 	resp, err := fn()
 	resp = finish(resp)
 	switch {
+	case err == nil && resp.Status == models.RunStatusPaused:
+		// Human-in-the-loop pause: the run continues through ContinueRun.
+		resp.CancellationStage = ""
 	case err == nil:
 		resp.Status = models.RunStatusCompleted
 		resp.CancellationStage = ""

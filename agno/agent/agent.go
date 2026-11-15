@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devalexandre/agno-golang/agno/approval"
 	"github.com/devalexandre/agno-golang/agno/compaction"
 	"github.com/devalexandre/agno-golang/agno/knowledge"
 	"github.com/devalexandre/agno-golang/agno/memory"
@@ -164,6 +165,17 @@ type AgentConfig struct {
 	PreHooks []func(ctx context.Context, input interface{}) error
 	// Functions called after output is generated but before response is returned
 	PostHooks []func(ctx context.Context, output *models.RunResponse) error
+	// PreRunHooks run before the model is called, with Python pre_hooks
+	// semantics: a guardrails.CheckError aborts the run, other errors are
+	// logged and ignored. Hooks may rewrite the input (args.Input). Use
+	// GuardrailHook to plug a guardrail in and BackgroundHook to run a hook
+	// asynchronously.
+	PreRunHooks []Hook
+	// PostRunHooks run on the final output, with Python post_hooks semantics.
+	PostRunHooks []Hook
+	// ApprovalStore keeps approval records for tools registered with
+	// toolkit.WithApproval. When nil and DB implements approval.Store, the DB is used.
+	ApprovalStore approval.Store
 	// ToolBeforeHooks are called before a tool is executed
 	ToolBeforeHooks []func(ctx context.Context, toolName string, args map[string]interface{}) error
 	// ToolAfterHooks are called after a tool is executed
@@ -266,6 +278,14 @@ type Agent struct {
 
 	// Per-run bookkeeping for the run currently executing
 	currentRun *runState
+
+	// Human-in-the-loop
+	hitlMu        sync.Mutex
+	hitl          *hitlRecorder
+	pausedRuns    map[string]*pausedRun
+	approvalStore approval.Store
+	preRunHooks   []Hook
+	postRunHooks  []Hook
 
 	// Session state
 	messages     []models.Message
@@ -543,6 +563,10 @@ func NewAgent(config AgentConfig) (*Agent, error) {
 		agent.tools = agent.WrapToolsWithHooks(agent.tools)
 	}
 
+	// Human-in-the-loop: tools with confirmation / user input / external
+	// execution / stop-after / show-result flags are intercepted by the agent.
+	agent.setupHITL(config)
+
 	// Add default tools if enabled
 	defaultTools := CreateDefaultTools(agent, DefaultToolsConfig{
 		EnableReadChatHistory:     config.EnableReadChatHistoryTool,
@@ -735,51 +759,6 @@ func (a *Agent) CancelRun(runID string) bool {
 
 	// Run ID not found in active runs
 	return false
-}
-
-// ContinueRun continues a previous run with updated tools
-func (a *Agent) ContinueRun(runID string, updatedTools []map[string]interface{}, sessionID, userID *string) (models.RunResponse, error) {
-	// For now, we'll implement a basic continue run mechanism
-	// In a more sophisticated implementation, we would load the previous run state
-	// and continue from where it left off
-
-	// Track the run for cancellation
-	_ = a.trackRun(runID)
-	defer a.untrackRun(runID)
-
-	// Create a simple prompt indicating this is a continuation
-	prompt := "Continuing from previous run. Please proceed with the task."
-
-	// Add tool information to context if provided
-	if len(updatedTools) > 0 {
-		toolInfo := "Updated tools available:\n"
-		for _, tool := range updatedTools {
-			if name, ok := tool["name"].(string); ok {
-				toolInfo += fmt.Sprintf("- %s\n", name)
-			}
-		}
-		prompt = toolInfo + "\n" + prompt
-	}
-
-	// Execute the agent with the continuation prompt
-	// In a real implementation, this would restore the previous state
-	options := []interface{}{}
-	if sessionID != nil {
-		options = append(options, WithSessionID(*sessionID))
-	}
-	if userID != nil {
-		options = append(options, WithUserID(*userID))
-	}
-
-	// Add updated tools to the agent's tool set if needed
-	// For now, we'll just pass them as context
-
-	response, err := a.Run(prompt, options...)
-	if err != nil {
-		return models.RunResponse{}, err
-	}
-
-	return response, nil
 }
 
 // trackRun adds a run to the active runs tracking map
@@ -1690,13 +1669,16 @@ func (a *Agent) runWithOptions(input interface{}, options *RunOptions) (models.R
 	var resp *models.MessageResponse
 	var lastErr error
 
+	hitlRec := a.beginHITL()
+	defer a.endHITL(hitlRec)
 	for attempt := 0; attempt <= retries; attempt++ {
 		if a.debug && attempt > 0 {
 			fmt.Printf("Retry attempt %d/%d\n", attempt, retries)
 		}
 
-		resp, lastErr = a.model.Invoke(a.ctx, messages, models.WithTools(a.tools))
-		if lastErr == nil {
+		hitlRec.resetForRetry()
+		resp, lastErr = a.model.Invoke(hitlRec.ctx, messages, models.WithTools(a.tools))
+		if lastErr == nil || hitlRec.interrupted() {
 			break
 		}
 
@@ -1705,6 +1687,9 @@ func (a *Agent) runWithOptions(input interface{}, options *RunOptions) (models.R
 		}
 	}
 
+	if hitlRec.interrupted() {
+		return a.handleInterrupt(hitlRec, prompt, messages)
+	}
 	if lastErr != nil {
 		return models.RunResponse{}, lastErr
 	}
@@ -1837,6 +1822,13 @@ func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse,
 				return models.RunResponse{}, fmt.Errorf("pre-hook %d failed: %w", i, err)
 			}
 		}
+	}
+
+	// Execute pre-run hooks (Python pre_hooks semantics; may rewrite input)
+	if hooked, err := a.runPreRunHooks(input, options.Metadata); err != nil {
+		return models.RunResponse{}, err
+	} else {
+		input = hooked
 	}
 
 	// Execute input guardrails
@@ -2049,6 +2041,11 @@ func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse,
 		return models.RunResponse{}, err
 	}
 
+	// Human-in-the-loop: record tool calls so the run can pause on tools
+	// needing confirmation / user input / external execution.
+	hitlRec := a.beginHITL()
+	defer a.endHITL(hitlRec)
+
 	// Check if streaming is enabled
 	if options.Stream != nil && *options.Stream {
 		resp, lastErr = a.runWithStreaming(prompt, messages)
@@ -2059,8 +2056,9 @@ func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse,
 				fmt.Printf("Retry attempt %d/%d\n", attempt, retries)
 			}
 
-			resp, lastErr = a.model.Invoke(a.ctx, messages, modelOptions...)
-			if lastErr == nil {
+			hitlRec.resetForRetry()
+			resp, lastErr = a.model.Invoke(hitlRec.ctx, messages, modelOptions...)
+			if lastErr == nil || hitlRec.interrupted() {
 				break
 			}
 			if err := a.checkCancelled(); err != nil {
@@ -2090,11 +2088,17 @@ func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse,
 		}
 	}
 
+	if hitlRec.interrupted() {
+		return a.handleInterrupt(hitlRec, prompt, messages)
+	}
 	if lastErr != nil {
 		return models.RunResponse{}, lastErr
 	}
 	if err := a.checkCancelled(); err != nil {
 		return models.RunResponse{}, err
+	}
+	if shown := hitlRec.shownText(); shown != "" && len(resp.ToolCalls) == 0 {
+		resp.Content = shown + "\n\n" + resp.Content
 	}
 
 	// Debug: print response in json
@@ -2224,6 +2228,9 @@ func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse,
 				}
 			}
 		}
+		if err := a.runPostRunHooks(&runResponse); err != nil {
+			return models.RunResponse{}, err
+		}
 
 		return runResponse, nil
 	}
@@ -2234,6 +2241,9 @@ func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse,
 
 		// Execute tool calls and get final result
 		finalResult, toolMessages, _, _, err := a.processToolCallsFromResponse(resp)
+		if hitlRec.interrupted() {
+			return a.handleInterrupt(hitlRec, prompt, messages)
+		}
 		if err != nil {
 			return models.RunResponse{}, fmt.Errorf("tool call processing failed: %w", err)
 		}
@@ -2363,6 +2373,9 @@ func (a *Agent) run(input interface{}, options *RunOptions) (models.RunResponse,
 				return models.RunResponse{}, fmt.Errorf("post-hook %d failed: %w", i, err)
 			}
 		}
+	}
+	if err := a.runPostRunHooks(&runResponse); err != nil {
+		return models.RunResponse{}, err
 	}
 
 	return runResponse, nil
@@ -3655,7 +3668,7 @@ func (a *Agent) AddTool(tool toolkit.Tool) error {
 		return fmt.Errorf("tool with name '%s' already exists", tool.GetName())
 	}
 
-	a.tools = append(a.tools, tool)
+	a.tools = append(a.tools, a.wrapHITLTool(tool))
 	return nil
 }
 

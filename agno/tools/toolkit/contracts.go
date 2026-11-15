@@ -59,6 +59,23 @@ type Method struct {
 	RequiresConfirmation bool
 	// StopAfterCall tells the agent to stop the tool-calling loop after this method executes.
 	StopAfterCall bool
+	// ShowResult makes the agent include the method result in the run content.
+	ShowResult bool
+	// RequiresUserInput pauses the run until the user provides the
+	// UserInputFields (all parameters when UserInputFields is empty).
+	RequiresUserInput bool
+	// UserInputFields lists the parameters provided by the user. They are
+	// hidden from the model-facing schema.
+	UserInputFields []string
+	// UserInputSchema describes the user-provided parameters (derived at registration).
+	UserInputSchema []UserInputFieldSpec
+	// ExternalExecution pauses the run: the call is executed outside the agent
+	// and its result handed back through ContinueRun.
+	ExternalExecution bool
+	// ExternalExecutionSilent suppresses the verbose paused message for external execution.
+	ExternalExecutionSilent bool
+	// ApprovalType is ApprovalRequired (blocking) or ApprovalAudit (audit trail), or empty.
+	ApprovalType string
 	// Per-method hooks (in addition to toolkit-level hooks)
 	PreHooks  []HookFunc
 	PostHooks []PostHookFunc

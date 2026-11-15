@@ -196,6 +196,11 @@ type RunResponse struct {
 	Compaction *CompactionRecord `json:"compaction,omitempty"`
 	// Followups holds suggested follow-up prompts generated after the run, when enabled.
 	Followups []string `json:"followups,omitempty"`
+	// Requirements lists what a human must resolve before a PAUSED run can
+	// continue (see Agent.ContinueRun).
+	Requirements []*RunRequirement `json:"requirements,omitempty"`
+	// ToolExecutions lists the tool calls of the run, with their HITL state.
+	ToolExecutions []*ToolExecution `json:"tool_executions,omitempty"`
 	// TODO: implement images, videos, audio, response_audio, citations, extra_data
 }
 

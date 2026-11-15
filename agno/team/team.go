@@ -111,6 +111,9 @@ type Team struct {
 
 	// Session state
 	messages []models.Message
+
+	// Human-in-the-loop: team runs paused by a member
+	hitl teamHITL
 }
 
 // AgentWrapper wraps an agent to implement the TeamMember interface
@@ -224,6 +227,11 @@ func (t *Team) Run(prompt string) (models.RunResponse, error) {
 		response, err = t.runCoordinateMode(prompt) // Default to coordinate
 	}
 
+	// A member paused for human-in-the-loop: the team run is paused too.
+	if err == nil && response.Status == models.RunStatusPaused {
+		return response, nil
+	}
+
 	// Save to memory and/or storage if successful
 	if err == nil && (t.memory != nil || t.storage != nil) {
 		t.saveToMemory(prompt, response)
@@ -280,15 +288,11 @@ func (t *Team) runRouteMode(prompt string) (models.RunResponse, error) {
 		if err != nil {
 			return models.RunResponse{}, err
 		}
+		if memberResponse.Status == models.RunStatusPaused {
+			return t.pauseForMember(&teamPausedRun{Prompt: prompt, Mode: RouteMode, MemberIndex: 0, Model: resp.Model}, memberResponse), nil
+		}
 
-		return models.RunResponse{
-			TextContent: memberResponse.TextContent,
-			ContentType: memberResponse.ContentType,
-			Event:       "TeamRouteResponse",
-			Messages:    memberResponse.Messages,
-			Model:       resp.Model,
-			CreatedAt:   time.Now().Unix(),
-		}, nil
+		return routeResponse(memberResponse, resp.Model), nil
 	}
 
 	return models.RunResponse{
@@ -322,24 +326,17 @@ func (t *Team) runCoordinateMode(prompt string) (models.RunResponse, error) {
 	}
 
 	// Step 2: Execute members (simplified - execute all for now)
-	memberResponses := []string{}
-
-	for i, member := range t.members {
-		memberResp, err := member.Run(prompt)
-		if err != nil {
-			if t.debug {
-				memberResponses = append(memberResponses, fmt.Sprintf("Member %d (%s) error: %v", i+1, member.GetName(), err))
-			}
-			continue
-		}
-
-		if t.showMembersResponses {
-			memberResponses = append(memberResponses, fmt.Sprintf("**%s Response:**\n%s", member.GetName(), memberResp.TextContent))
-		} else {
-			memberResponses = append(memberResponses, memberResp.TextContent)
-		}
+	memberResponses, pause := t.runMembersFrom(prompt, 0, nil)
+	if pause != nil {
+		pause.state.Mode = CoordinateMode
+		return t.pauseForMember(pause.state, pause.memberResp), nil
 	}
 
+	return t.finishCoordinate(prompt, memberResponses)
+}
+
+// finishCoordinate synthesizes the member responses (coordinate mode).
+func (t *Team) finishCoordinate(prompt string, memberResponses []string) (models.RunResponse, error) {
 	// Step 3: Synthesize responses
 	synthesisPrompt := t.buildSynthesisPrompt(prompt, memberResponses)
 
@@ -385,22 +382,17 @@ func (t *Team) runCollaborateMode(prompt string) (models.RunResponse, error) {
 	}
 
 	// Sequential execution
-	for i, member := range t.members {
-		memberResp, err := member.Run(prompt)
-		if err != nil {
-			if t.debug {
-				memberResponses = append(memberResponses, fmt.Sprintf("Member %d (%s) error: %v", i+1, member.GetName(), err))
-			}
-			continue
-		}
-
-		if t.showMembersResponses {
-			memberResponses = append(memberResponses, fmt.Sprintf("**%s Response:**\n%s", member.GetName(), memberResp.TextContent))
-		} else {
-			memberResponses = append(memberResponses, memberResp.TextContent)
-		}
+	memberResponses, pause := t.runMembersFrom(prompt, 0, memberResponses)
+	if pause != nil {
+		pause.state.Mode = CollaborateMode
+		return t.pauseForMember(pause.state, pause.memberResp), nil
 	}
 
+	return t.finishCollaborate(prompt, memberResponses)
+}
+
+// finishCollaborate resolves conflicts and synthesizes (collaborate mode).
+func (t *Team) finishCollaborate(prompt string, memberResponses []string) (models.RunResponse, error) {
 	// Step 2: Detect and resolve conflicts if needed
 	hasConflicts, conflictAnalysis := t.detectConflicts(memberResponses)
 
