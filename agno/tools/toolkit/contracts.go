@@ -69,6 +69,12 @@ type Method struct {
 	UserInputFields []string
 	// UserInputSchema describes the user-provided parameters (derived at registration).
 	UserInputSchema []UserInputFieldSpec
+	// UserInputBuilder builds the user-input fields from the call arguments
+	// (WithUserInputFromArgs).
+	UserInputBuilder UserInputBuilder
+	// UserFeedbackBuilder builds feedback questions from the call arguments
+	// (WithUserFeedback).
+	UserFeedbackBuilder UserFeedbackBuilder
 	// ExternalExecution pauses the run: the call is executed outside the agent
 	// and its result handed back through ContinueRun.
 	ExternalExecution bool

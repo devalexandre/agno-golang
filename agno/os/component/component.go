@@ -88,7 +88,8 @@ type ContinueRequest struct {
 	SessionID string
 	UserID    string
 	// Requirements are the requirements of the paused run, resolved by the
-	// caller (e.g. {"tool_execution": {...}, "confirmed": true}).
+	// caller, in the wire form of models.RunRequirement (see requirements.go),
+	// e.g. {"id": "...", "tool_execution": {...}, "confirmation": true}.
 	Requirements []map[string]any
 }
 

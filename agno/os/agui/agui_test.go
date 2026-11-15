@@ -18,7 +18,7 @@ func testComp() *component.Func {
 		StreamFunc: func(_ context.Context, req component.RunRequest, emit func(component.Event) error) (*component.RunResult, error) {
 			if req.Input == "delete it" {
 				return &component.RunResult{Status: component.StatusPaused, Requirements: []map[string]any{{
-					"pause_type": "confirmation", "tool_execution": map[string]any{"tool_call_id": "call-1", "tool_name": "delete", "tool_args": map[string]any{"path": "/x"}}}}}, nil
+					"pause_type": "confirmation", "tool_execution": map[string]any{"tool_call_id": "call-1", "tool_name": "delete", "tool_args": map[string]any{"path": "/x"}, "requires_confirmation": true}}}}, nil
 			}
 			_ = emit(component.Event{Type: component.EventRunContent, Content: "Hi "})
 			_ = emit(component.Event{Type: component.EventToolCallStarted, Tool: &component.ToolCall{ID: "t1", Name: "lookup", Args: map[string]any{"q": 1}}})
@@ -104,16 +104,19 @@ func TestRunAndResume(t *testing.T) {
 const runErrorSuffix = "RUN_ERROR"
 
 func TestResolveRequirementsPartial(t *testing.T) {
-	reqs := []map[string]any{{"tool_execution": map[string]any{"tool_call_id": "a"}}, {"tool_execution": map[string]any{"tool_call_id": "b"}}}
+	reqs := []map[string]any{
+		{"tool_execution": map[string]any{"tool_call_id": "a", "external_execution_required": true}},
+		{"tool_execution": map[string]any{"tool_call_id": "b", "external_execution_required": true}},
+	}
 	c, _ := json.Marshal("result")
 	if _, err := ResolveRequirements(reqs, []Message{{Role: "tool", ToolCallID: "a", Content: c}}); err == nil {
 		t.Fatal("partial resume must fail")
 	}
 	out, err := ResolveRequirements(reqs[:1], []Message{{Role: "tool", ToolCallID: "a", Content: c}})
-	if err != nil || out[0]["tool_execution"].(map[string]any)["result"] != "result" {
+	if err != nil || out[0]["external_execution_result"] != "result" || out[0]["tool_execution"].(map[string]any)["result"] != "result" {
 		t.Fatalf("external execution: %v %v", out, err)
 	}
-	if _, ok := reqs[0]["result"]; ok {
+	if _, ok := reqs[0]["tool_execution"].(map[string]any)["result"]; ok {
 		t.Fatal("input requirements must not be mutated")
 	}
 }

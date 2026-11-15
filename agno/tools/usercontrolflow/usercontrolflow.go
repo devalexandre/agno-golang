@@ -1,16 +1,16 @@
 // Package usercontrolflow ports Agno's UserControlFlowTools: the agent calls
 // GetUserInput to pause the run and ask the user to fill in fields.
 //
-// In Python the agent loop intercepts get_user_input and pauses the run
-// (human-in-the-loop "user input"). The Go agent's HITL user-input support is
-// being added separately; until it lands, the method is registered with
-// toolkit.WithStopAfterCall so the tool loop stops after the call, and the
-// requested fields are available from PendingFields for the application to
-// collect and send back in the next message.
+// As in Python, the call does not run the tool: it pauses the agent run
+// (human-in-the-loop "user input"). The paused RunResponse carries one
+// RunRequirement whose UserInputSchema lists the fields the model asked for;
+// fill them with RunRequirement.ProvideUserInput and resume with
+// Agent.ContinueRun. The model then receives the values as the tool result
+// ("User inputs retrieved: [...]").
 package usercontrolflow
 
 import (
-	"sync"
+	"fmt"
 
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
@@ -31,9 +31,6 @@ type UserControlFlowTools struct {
 
 	enGetUserInput bool
 	custom         *string
-
-	mu      sync.Mutex
-	pending []UserInputField
 }
 
 // Option configures UserControlFlowTools.
@@ -72,29 +69,47 @@ func NewUserControlFlowTools(opts ...Option) *UserControlFlowTools {
 	u.Toolkit.Name = "user_control_flow_tools"
 	u.Toolkit.Description = "Interrupt the run to ask the user for input."
 	if u.enGetUserInput {
-		u.Toolkit.RegisterWithOptions("GetUserInput", "Use this tool to get user input for the given fields. Provide all the fields that you require the user to fill in, as if they were filling in a form.", u, u.GetUserInput, GetUserInputParams{}, toolkit.WithStopAfterCall())
+		u.Toolkit.RegisterWithOptions("GetUserInput", "Use this tool to get user input for the given fields. Provide all the fields that you require the user to fill in, as if they were filling in a form.", u, u.GetUserInput, GetUserInputParams{}, toolkit.WithUserInputFromArgs(FieldsFromArgs))
 	}
 	return u
 }
 
-// GetUserInput records the requested fields; the run is paused by the agent.
+// FieldsFromArgs turns GetUserInput's arguments into the user-input fields
+// of the paused run (Python's get_user_input handling in Model).
+func FieldsFromArgs(args map[string]interface{}) []toolkit.UserInputFieldSpec {
+	raw, _ := args["user_input_fields"].([]interface{})
+	var out []toolkit.UserInputFieldSpec
+	for _, item := range raw {
+		f, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name := str(f["field_name"])
+		if name == "" {
+			continue
+		}
+		ft := str(f["field_type"])
+		if ft == "" {
+			ft = "str"
+		}
+		out = append(out, toolkit.UserInputFieldSpec{Name: name, FieldType: ft, Description: str(f["field_description"])})
+	}
+	return out
+}
+
+func str(v interface{}) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+// GetUserInput is only executed when the call asks for no fields (or outside
+// an agent run); otherwise the agent pauses the run instead of calling it.
 func (u *UserControlFlowTools) GetUserInput(p GetUserInputParams) (interface{}, error) {
-	u.mu.Lock()
-	u.pending = append([]UserInputField(nil), p.UserInputFields...)
-	u.mu.Unlock()
 	return "User input received", nil
-}
-
-// PendingFields returns the fields requested by the last GetUserInput call.
-func (u *UserControlFlowTools) PendingFields() []UserInputField {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return append([]UserInputField(nil), u.pending...)
-}
-
-// ClearPending forgets the pending request (after the user answered).
-func (u *UserControlFlowTools) ClearPending() {
-	u.mu.Lock()
-	u.pending = nil
-	u.mu.Unlock()
 }

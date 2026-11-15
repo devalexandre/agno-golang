@@ -31,6 +31,55 @@ func WithUserInput(fields ...string) MethodOption {
 	}
 }
 
+// UserFeedbackOptionSpec is an option of a user-feedback question.
+type UserFeedbackOptionSpec struct {
+	Label       string
+	Description string
+}
+
+// UserFeedbackQuestionSpec is a structured question with predefined options.
+type UserFeedbackQuestionSpec struct {
+	Question    string
+	Header      string
+	Options     []UserFeedbackOptionSpec
+	MultiSelect bool
+}
+
+// UserInputBuilder derives the user-input fields from the call arguments.
+type UserInputBuilder func(args map[string]interface{}) []UserInputFieldSpec
+
+// UserFeedbackBuilder derives the feedback questions from the call arguments.
+type UserFeedbackBuilder func(args map[string]interface{}) []UserFeedbackQuestionSpec
+
+// WithUserInputFromArgs pauses the run for user input whose fields are
+// chosen by the model at call time (Python's get_user_input). build turns the
+// call arguments into the fields to collect; when it returns none the call
+// runs normally. The model-facing schema is left untouched. On ContinueRun
+// the tool is not executed: the model receives the collected values.
+func WithUserInputFromArgs(build UserInputBuilder) MethodOption {
+	return func(m *Method) {
+		m.RequiresUserInput = true
+		m.UserInputBuilder = build
+	}
+}
+
+// WithUserFeedback pauses the run with structured questions built from the
+// call arguments (Python's ask_user). When build returns none the call runs
+// normally. On ContinueRun the tool is not executed: the model receives the
+// selected options.
+func WithUserFeedback(build UserFeedbackBuilder) MethodOption {
+	return func(m *Method) {
+		m.RequiresUserInput = true
+		m.UserFeedbackBuilder = build
+	}
+}
+
+// IsDynamicUserInput reports whether the method's pause is built from the
+// call arguments (WithUserInputFromArgs or WithUserFeedback).
+func (m Method) IsDynamicUserInput() bool {
+	return m.UserInputBuilder != nil || m.UserFeedbackBuilder != nil
+}
+
 // WithExternalExecution marks the method as executed outside the agent: the
 // run pauses and the caller supplies the result through ContinueRun.
 func WithExternalExecution() MethodOption {
@@ -92,7 +141,7 @@ func finalizeMethod(name string, m *Method) {
 		log.Printf("toolkit: %s: invalid approval type %q; ignoring", name, m.ApprovalType)
 		m.ApprovalType = ""
 	}
-	if m.RequiresUserInput {
+	if m.RequiresUserInput && !m.IsDynamicUserInput() {
 		m.UserInputSchema, m.Schema = splitUserInputSchema(m.Schema, m.UserInputFields)
 	}
 }

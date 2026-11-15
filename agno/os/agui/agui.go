@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/os/component"
 	"github.com/google/uuid"
 )
@@ -393,101 +394,99 @@ func (s *streamState) pausedTools(res *component.RunResult) {
 	}
 }
 
-// pauseType infers the requirement's pause type.
-func pauseType(r map[string]any) string {
-	if t, _ := r["pause_type"].(string); t != "" {
-		return t
-	}
-	src := r
-	if te, ok := r["tool_execution"].(map[string]any); ok {
-		src = te
-	}
-	switch {
-	case src["requires_confirmation"] == true:
-		return "confirmation"
-	case src["requires_user_input"] == true:
-		return "user_input"
-	}
-	return "external_execution"
-}
-
 // ResolveRequirements answers paused requirements with the frontend's tool
-// messages (Python resolve_requirements_from_tool_messages) and fails on a
-// partial resume.
+// messages (Python resolve_requirements_from_tool_messages) through the
+// models.RunRequirement API, and fails on a partial resume. The tool message
+// content per pause type is:
+//
+//	confirmation        {"accepted": true|false, "note": "..."}
+//	user_input          {"values": {"field": value, ...}}
+//	user_feedback       {"selections": {"question": ["label", ...]}}
+//	external_execution  the raw result (an error message marks a failed call)
+//
+// The input maps are not modified; the resolved requirements are returned in
+// the component wire form.
 func ResolveRequirements(reqs []map[string]any, tools []Message) ([]map[string]any, error) {
+	decoded, err := component.DecodeRequirements(reqs)
+	if err != nil {
+		return nil, err
+	}
 	byID := map[string]Message{}
 	for _, m := range tools {
 		byID[m.ToolCallID] = m
 	}
-	var unresolved []string
-	out := make([]map[string]any, 0, len(reqs))
-	for _, orig := range reqs {
-		r := map[string]any{}
-		for k, v := range orig {
-			r[k] = v
+	for _, r := range decoded {
+		te := r.ToolExecution
+		if r.IsResolved() || te == nil || te.ToolCallID == "" {
+			continue
 		}
-		id, _, _ := toolOf(r)
-		msg, ok := byID[id]
+		msg, ok := byID[te.ToolCallID]
 		if !ok {
-			unresolved = append(unresolved, id)
-			out = append(out, r)
 			continue
 		}
 		content := msg.Text()
-		te, _ := r["tool_execution"].(map[string]any)
-		if te != nil {
-			cp := map[string]any{}
-			for k, v := range te {
-				cp[k] = v
+		if r.PauseType() == models.PauseTypeExternalExecution {
+			if msg.Error != "" {
+				te.ToolCallError = true
+				content = msg.Error
 			}
-			te = cp
-			r["tool_execution"] = te
-		}
-		set := func(k string, v any) {
-			r[k] = v
-			if te != nil {
-				te[k] = v
+			if err := r.SetExternalExecutionResult(content); err != nil {
+				return nil, fmt.Errorf("tool call %s: %w", te.ToolCallID, err)
 			}
+			continue
 		}
 		var payload map[string]any
 		_ = json.Unmarshal([]byte(content), &payload)
-		switch pauseType(r) {
-		case "confirmation":
-			accepted := msg.Error == "" && payload["accepted"] == true
-			set("confirmed", accepted)
-			if note, _ := payload["note"].(string); note != "" || msg.Error != "" {
+		switch r.PauseType() {
+		case models.PauseTypeConfirmation:
+			if msg.Error != "" || payload["accepted"] != true {
+				note, _ := payload["note"].(string)
 				if note == "" {
 					note = msg.Error
 				}
-				set("confirmation_note", note)
+				err = r.Reject(note)
+			} else {
+				err = r.Confirm()
 			}
-		case "user_input":
+		case models.PauseTypeUserInput:
 			values, ok := payload["values"].(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("user_input expects {'values': {...}} for tool call %s", id)
+				return nil, fmt.Errorf("user_input expects {'values': {...}} for tool call %s", te.ToolCallID)
 			}
-			set("user_input", values)
-		case "user_feedback":
-			sel, ok := payload["selections"].(map[string]any)
+			err = r.ProvideUserInput(values)
+		case models.PauseTypeUserFeedback:
+			raw, ok := payload["selections"].(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("user_feedback expects {'selections': {...}} for tool call %s", id)
+				return nil, fmt.Errorf("user_feedback expects {'selections': {question: [labels]}} for tool call %s", te.ToolCallID)
 			}
-			set("user_feedback", sel)
-		default:
-			result := content
-			if msg.Error != "" {
-				result = msg.Error
-				set("tool_call_error", true)
+			selections := map[string][]string{}
+			for q, v := range raw {
+				list, ok := v.([]any)
+				if !ok {
+					return nil, fmt.Errorf("user_feedback expects {'selections': {question: [labels]}} for tool call %s", te.ToolCallID)
+				}
+				labels := []string{}
+				for _, l := range list {
+					labels = append(labels, fmt.Sprint(l))
+				}
+				selections[q] = labels
 			}
-			set("result", result)
-			set("external_execution_result", result)
+			err = r.ProvideUserFeedback(selections)
 		}
-		out = append(out, r)
+		if err != nil {
+			return nil, fmt.Errorf("tool call %s: %w", te.ToolCallID, err)
+		}
+	}
+	var unresolved []string
+	for _, r := range decoded {
+		if !r.IsResolved() && r.ToolExecution != nil {
+			unresolved = append(unresolved, r.ToolExecution.ToolCallID)
+		}
 	}
 	if len(unresolved) > 0 {
 		return nil, fmt.Errorf("partial resume: requirements %v still unresolved", unresolved)
 	}
-	return out, nil
+	return component.EncodeRequirements(decoded), nil
 }
 
 func (s *Server) resume(ctx context.Context, threadID, userID string, tools []Message) (*component.RunResult, error) {

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -17,6 +18,7 @@ type PauseType string
 const (
 	PauseTypeConfirmation      PauseType = "confirmation"
 	PauseTypeUserInput         PauseType = "user_input"
+	PauseTypeUserFeedback      PauseType = "user_feedback"
 	PauseTypeExternalExecution PauseType = "external_execution"
 )
 
@@ -30,6 +32,24 @@ type UserInputField struct {
 	FieldType   string      `json:"field_type,omitempty"`
 	Description string      `json:"description,omitempty"`
 	Value       interface{} `json:"value,omitempty"`
+}
+
+// UserFeedbackOption is an option of a user-feedback question.
+type UserFeedbackOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Selected    bool   `json:"selected,omitempty"`
+}
+
+// UserFeedbackQuestion is a structured question with predefined options
+// (Python agno.tools.function.UserFeedbackQuestion). SelectedOptions is nil
+// until the user answers; an empty slice is a valid "nothing selected" answer.
+type UserFeedbackQuestion struct {
+	Question        string                `json:"question"`
+	Header          string                `json:"header,omitempty"`
+	Options         []*UserFeedbackOption `json:"options,omitempty"`
+	MultiSelect     bool                  `json:"multi_select,omitempty"`
+	SelectedOptions []string              `json:"selected_options"`
 }
 
 // ToolExecution describes one tool call of a run, including its HITL state.
@@ -49,7 +69,10 @@ type ToolExecution struct {
 
 	RequiresUserInput bool              `json:"requires_user_input,omitempty"`
 	UserInputSchema   []*UserInputField `json:"user_input_schema,omitempty"`
-	Answered          bool              `json:"answered,omitempty"`
+	// UserFeedbackSchema holds the questions of a user-feedback pause
+	// (UserFeedbackTools.AskUser).
+	UserFeedbackSchema []*UserFeedbackQuestion `json:"user_feedback_schema,omitempty"`
+	Answered           bool                    `json:"answered,omitempty"`
 
 	ExternalExecutionRequired bool `json:"external_execution_required,omitempty"`
 	ExternalExecutionSilent   bool `json:"external_execution_silent,omitempty"`
@@ -66,11 +89,13 @@ func (t *ToolExecution) IsPaused() bool {
 }
 
 // PauseType returns the most specific reason the call paused
-// (external > user input > confirmation, as in Python).
+// (user feedback > external > user input > confirmation, as in Python).
 func (t *ToolExecution) PauseType() PauseType {
 	switch {
 	case t == nil:
 		return PauseTypeConfirmation
+	case len(t.UserFeedbackSchema) > 0:
+		return PauseTypeUserFeedback
 	case t.ExternalExecutionRequired:
 		return PauseTypeExternalExecution
 	case t.RequiresUserInput:
@@ -135,7 +160,8 @@ func (r *RunRequirement) NeedsUserInput() bool {
 	if r == nil || r.ToolExecution == nil || r.ToolExecution.Answered {
 		return false
 	}
-	if !r.ToolExecution.RequiresUserInput {
+	if !r.ToolExecution.RequiresUserInput || len(r.ToolExecution.UserFeedbackSchema) > 0 {
+		// Feedback questions are answered with ProvideUserFeedback.
 		return false
 	}
 	for _, f := range r.ToolExecution.UserInputSchema {
@@ -145,6 +171,27 @@ func (r *RunRequirement) NeedsUserInput() bool {
 	}
 	// No schema (or all values present) but not marked answered yet.
 	return len(r.ToolExecution.UserInputSchema) == 0
+}
+
+// UserFeedbackSchema returns the questions the user must answer (nil when none).
+func (r *RunRequirement) UserFeedbackSchema() []*UserFeedbackQuestion {
+	if r == nil || r.ToolExecution == nil {
+		return nil
+	}
+	return r.ToolExecution.UserFeedbackSchema
+}
+
+// NeedsUserFeedback reports whether feedback questions are still unanswered.
+func (r *RunRequirement) NeedsUserFeedback() bool {
+	if r == nil || r.ToolExecution == nil || r.ToolExecution.Answered {
+		return false
+	}
+	for _, q := range r.ToolExecution.UserFeedbackSchema {
+		if q.SelectedOptions == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // NeedsExternalExecution reports whether the external result is still missing.
@@ -211,6 +258,41 @@ func (r *RunRequirement) ProvideUserInput(values map[string]interface{}) error {
 	return nil
 }
 
+// ProvideUserFeedback answers feedback questions: selections maps the
+// question text to the selected option labels. The requirement is answered
+// once every question has a selection (an empty list means "none").
+func (r *RunRequirement) ProvideUserFeedback(selections map[string][]string) error {
+	if !r.NeedsUserFeedback() {
+		return ErrRequirementMismatch
+	}
+	te := r.ToolExecution
+	for _, q := range te.UserFeedbackSchema {
+		sel, ok := selections[q.Question]
+		if !ok {
+			continue
+		}
+		if sel == nil {
+			sel = []string{}
+		}
+		q.SelectedOptions = append([]string{}, sel...)
+		for _, opt := range q.Options {
+			opt.Selected = false
+			for _, l := range sel {
+				if opt.Label == l {
+					opt.Selected = true
+				}
+			}
+		}
+	}
+	for _, q := range te.UserFeedbackSchema {
+		if q.SelectedOptions == nil {
+			return nil
+		}
+	}
+	te.Answered = true
+	return nil
+}
+
 // SetExternalExecutionResult records the result of a call executed outside the agent.
 func (r *RunRequirement) SetExternalExecutionResult(result string) error {
 	if !r.NeedsExternalExecution() {
@@ -223,7 +305,7 @@ func (r *RunRequirement) SetExternalExecutionResult(result string) error {
 
 // IsResolved reports whether nothing is left to do for this requirement.
 func (r *RunRequirement) IsResolved() bool {
-	return !r.NeedsConfirmation() && !r.NeedsUserInput() && !r.NeedsExternalExecution()
+	return !r.NeedsConfirmation() && !r.NeedsUserInput() && !r.NeedsUserFeedback() && !r.NeedsExternalExecution()
 }
 
 // PauseType returns why the requirement paused the run.
@@ -232,6 +314,84 @@ func (r *RunRequirement) PauseType() PauseType {
 		return PauseTypeConfirmation
 	}
 	return r.ToolExecution.PauseType()
+}
+
+// requirementJSON is the wire form of RunRequirement. Like Python's
+// RunRequirement.to_dict it also carries the user input / feedback schemas at
+// the top level, so clients can fill them in without digging into
+// tool_execution.
+type requirementJSON struct {
+	*requirementAlias
+	PauseType          PauseType               `json:"pause_type,omitempty"`
+	UserInputSchema    []*UserInputField       `json:"user_input_schema,omitempty"`
+	UserFeedbackSchema []*UserFeedbackQuestion `json:"user_feedback_schema,omitempty"`
+}
+
+type requirementAlias RunRequirement
+
+// MarshalJSON adds pause_type and the top-level schemas.
+func (r RunRequirement) MarshalJSON() ([]byte, error) {
+	out := requirementJSON{requirementAlias: (*requirementAlias)(&r)}
+	if r.ToolExecution != nil {
+		out.PauseType = r.ToolExecution.PauseType()
+		out.UserInputSchema = r.ToolExecution.UserInputSchema
+		out.UserFeedbackSchema = r.ToolExecution.UserFeedbackSchema
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON accepts resolutions given at the top level (confirmation,
+// external_execution_result, user_input_schema values, user_feedback_schema
+// selections) and pushes them onto tool_execution, as Python's
+// RunRequirement.from_dict does. Values already set on tool_execution win.
+func (r *RunRequirement) UnmarshalJSON(b []byte) error {
+	in := requirementJSON{requirementAlias: (*requirementAlias)(r)}
+	if err := json.Unmarshal(b, &in); err != nil {
+		return err
+	}
+	te := r.ToolExecution
+	if te == nil {
+		return nil
+	}
+	if r.Confirmation != nil && te.Confirmed == nil {
+		c := *r.Confirmation
+		te.Confirmed = &c
+		if !c && te.ConfirmationNote == "" {
+			te.ConfirmationNote = r.ConfirmationNote
+		}
+	}
+	if r.ExternalExecutionResult != nil && te.Result == nil {
+		res := *r.ExternalExecutionResult
+		te.Result = &res
+	}
+	for _, top := range in.UserInputSchema {
+		if top == nil || top.Value == nil {
+			continue
+		}
+		for _, f := range te.UserInputSchema {
+			if f.Name == top.Name && f.Value == nil {
+				f.Value = top.Value
+			}
+		}
+	}
+	for _, top := range in.UserFeedbackSchema {
+		if top == nil || top.SelectedOptions == nil {
+			continue
+		}
+		for _, q := range te.UserFeedbackSchema {
+			if q.Question == top.Question && q.SelectedOptions == nil {
+				q.SelectedOptions = top.SelectedOptions
+				for _, opt := range q.Options {
+					for _, l := range top.SelectedOptions {
+						if opt.Label == l {
+							opt.Selected = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // IsPaused reports whether the run is paused waiting on requirements.
@@ -264,6 +424,17 @@ func (r *RunResponse) RequirementsNeedingUserInput() []*RunRequirement {
 	var out []*RunRequirement
 	for _, req := range r.Requirements {
 		if req.NeedsUserInput() {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+// RequirementsNeedingUserFeedback returns unresolved user-feedback requirements.
+func (r *RunResponse) RequirementsNeedingUserFeedback() []*RunRequirement {
+	var out []*RunRequirement
+	for _, req := range r.Requirements {
+		if req.NeedsUserFeedback() {
 			out = append(out, req)
 		}
 	}

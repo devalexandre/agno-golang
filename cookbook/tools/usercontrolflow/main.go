@@ -1,64 +1,75 @@
-// Example: ask the user for missing information with UserControlFlowTools.
+// Example: let the agent ask the user for missing information with
+// UserControlFlowTools.
 //
-// Env vars: none (no API key needed). Requires a local Ollama server with
-// llama3.2 at http://localhost:11434.
+// The model calls GetUserInput with the fields it needs. The run pauses (as
+// Python's get_user_input does): the requirement's UserInputSchema lists the
+// fields the model asked for, ProvideUserInput fills them and ContinueRun
+// hands the values back to the model as the tool result.
 //
-// GetUserInput stops the tool loop (StopAfterCall); the app reads the fields
-// with PendingFields, collects the values, and sends them back. Native HITL
-// "user input" pausing is being added to the agent separately.
+// Runs offline with a scripted stub model; no env vars or services needed.
+// Replace toolcallstub with a real model (e.g. ollama or openai) to let an
+// LLM choose the fields.
 //
 //	go run ./cookbook/tools/usercontrolflow
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
-	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/ollama"
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 	"github.com/devalexandre/agno-golang/agno/tools/usercontrolflow"
+	"github.com/devalexandre/agno-golang/cookbook/internal/toolcallstub"
 )
 
 func main() {
 	ctx := context.Background()
-	model, err := ollama.NewOllamaChat(models.WithID("llama3.2:latest"), models.WithBaseURL("http://localhost:11434"))
-	if err != nil {
-		log.Fatalf("Failed to create model: %v", err)
-	}
-
 	uc := usercontrolflow.NewUserControlFlowTools()
+
+	// The stub plays the model: it asks for the recipient and the date.
+	model := toolcallstub.New("Drafted the invitation.", "user_control_flow_tools_GetUserInput",
+		`{"user_input_fields":[
+			{"field_name":"recipient","field_type":"str","field_description":"Who should be invited"},
+			{"field_name":"date","field_type":"str","field_description":"Meeting date"}]}`)
+
 	ag, err := agent.NewAgent(agent.AgentConfig{
-		Context:       ctx,
-		Name:          "Email Drafter",
-		Model:         model,
-		Instructions:  "You draft emails.\n" + uc.Instructions,
-		Tools:         []toolkit.Tool{uc},
-		ShowToolsCall: true,
-		Markdown:      true,
+		Context:      ctx,
+		Name:         "Email Drafter",
+		Model:        model,
+		Instructions: "You draft emails.\n" + uc.Instructions,
+		Tools:        []toolkit.Tool{uc},
 	})
 	if err != nil {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
 
-	ag.PrintResponse("Draft an email inviting someone to a meeting.", true, true)
+	// 1. Run: the model calls GetUserInput and the run pauses.
+	resp, err := ag.Run("Draft an email inviting someone to a meeting.")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("status=%s\n%s\n", resp.Status, resp.TextContent)
 
-	fields := uc.PendingFields()
-	if len(fields) == 0 {
-		return
+	// 2. Answer: fill in the fields the model asked for (read them from the
+	// user in a real app).
+	answers := map[string]interface{}{"recipient": "ana@example.com", "date": "next Monday"}
+	for _, req := range resp.RequirementsNeedingUserInput() {
+		values := map[string]interface{}{}
+		for _, f := range req.UserInputSchema() {
+			fmt.Printf("field %s (%s): %s -> %v\n", f.Name, f.FieldType, f.Description, answers[f.Name])
+			values[f.Name] = answers[f.Name]
+		}
+		if err := req.ProvideUserInput(values); err != nil {
+			log.Fatal(err)
+		}
 	}
-	reader := bufio.NewReader(os.Stdin)
-	var values []string
-	for _, f := range fields {
-		fmt.Printf("%s (%s) - %s: ", f.FieldName, f.FieldType, f.FieldDescription)
-		line, _ := reader.ReadString('\n')
-		values = append(values, fmt.Sprintf("%s=%s", f.FieldName, strings.TrimSpace(line)))
+
+	// 3. Continue: the model receives the values and finishes the run.
+	out, err := ag.ContinueRun(ctx, &resp)
+	if err != nil {
+		log.Fatal(err)
 	}
-	uc.ClearPending()
-	ag.PrintResponse("Here is the information: "+strings.Join(values, ", "), true, true)
+	fmt.Printf("status=%s\n%s\n", out.Status, out.TextContent)
 }

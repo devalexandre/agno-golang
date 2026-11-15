@@ -8,10 +8,16 @@ import (
 )
 
 func TestFromRunResponseStatus(t *testing.T) {
+	pending := models.NewRunRequirement(&models.ToolExecution{ToolCallID: "c1", ToolName: "delete", RequiresConfirmation: true})
+	resolved := models.NewRunRequirement(&models.ToolExecution{ToolCallID: "c2", ToolName: "lookup", RequiresConfirmation: true})
+	_ = resolved.Confirm()
 	res := FromRunResponse(models.RunResponse{TextContent: "x", Status: models.RunStatusPaused,
-		Tools: []map[string]interface{}{{"tool_call_id": "c1", "tool_name": "delete"}}})
-	if res.Status != StatusPaused || len(res.Requirements) != 1 {
+		Requirements: []*models.RunRequirement{pending, resolved}})
+	if res.Status != StatusPaused || len(res.Requirements) != 1 || res.Requirements[0]["id"] != pending.ID {
 		t.Fatalf("paused: %+v", res)
+	}
+	if r := FromRunResponse(models.RunResponse{Status: models.RunStatusCompleted, Requirements: []*models.RunRequirement{resolved}}); r.Status != StatusCompleted || len(r.Requirements) != 0 {
+		t.Fatalf("completed run with resolved requirements: %+v", r)
 	}
 	if r := FromRunResponse(models.RunResponse{TextContent: "ok"}); r.Status != StatusCompleted {
 		t.Fatalf("default: %+v", r)

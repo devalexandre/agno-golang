@@ -1,15 +1,16 @@
 // Package userfeedback ports Agno's UserFeedbackTools: the agent calls AskUser
 // to present structured questions with predefined options.
 //
-// In Python the agent loop intercepts ask_user and pauses for user feedback
-// (human-in-the-loop "user input"). The Go agent's HITL user-input support is
-// being added separately; until it lands, the method is registered with
-// toolkit.WithStopAfterCall so the tool loop stops after the call, and the
-// questions are available from PendingQuestions for the application to render.
+// As in Python, the call does not run the tool: it pauses the agent run
+// (human-in-the-loop "user feedback"). The paused RunResponse carries one
+// RunRequirement whose UserFeedbackSchema holds the questions; answer them with
+// RunRequirement.ProvideUserFeedback (question text -> selected labels) and
+// resume with Agent.ContinueRun. The model then receives the selections as the
+// tool result ("User feedback received: [...]").
 package userfeedback
 
 import (
-	"sync"
+	"fmt"
 
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
@@ -35,9 +36,6 @@ type UserFeedbackTools struct {
 	AddInstructions bool
 
 	custom *string
-
-	mu      sync.Mutex
-	pending []AskUserQuestion
 }
 
 // Option configures UserFeedbackTools.
@@ -67,28 +65,46 @@ func NewUserFeedbackTools(opts ...Option) *UserFeedbackTools {
 	u.Toolkit = toolkit.NewToolkit()
 	u.Toolkit.Name = "user_feedback_tools"
 	u.Toolkit.Description = "Present structured questions with predefined options to the user."
-	u.Toolkit.RegisterWithOptions("AskUser", "Present structured questions with predefined options to the user.", u, u.AskUser, AskUserParams{}, toolkit.WithStopAfterCall())
+	u.Toolkit.RegisterWithOptions("AskUser", "Present structured questions with predefined options to the user.", u, u.AskUser, AskUserParams{}, toolkit.WithUserFeedback(QuestionsFromArgs))
 	return u
 }
 
-// AskUser records the questions; the run is paused by the agent.
+// QuestionsFromArgs turns AskUser's arguments into the feedback questions of
+// the paused run (Python's ask_user handling in Model).
+func QuestionsFromArgs(args map[string]interface{}) []toolkit.UserFeedbackQuestionSpec {
+	raw, _ := args["questions"].([]interface{})
+	var out []toolkit.UserFeedbackQuestionSpec
+	for _, item := range raw {
+		q, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		spec := toolkit.UserFeedbackQuestionSpec{Question: str(q["question"]), Header: str(q["header"])}
+		spec.MultiSelect, _ = q["multi_select"].(bool)
+		opts, _ := q["options"].([]interface{})
+		for _, o := range opts {
+			if om, ok := o.(map[string]interface{}); ok {
+				spec.Options = append(spec.Options, toolkit.UserFeedbackOptionSpec{Label: str(om["label"]), Description: str(om["description"])})
+			}
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+func str(v interface{}) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+// AskUser is only executed when the call has no questions (or outside an
+// agent run); otherwise the agent pauses the run instead of calling it.
 func (u *UserFeedbackTools) AskUser(p AskUserParams) (interface{}, error) {
-	u.mu.Lock()
-	u.pending = append([]AskUserQuestion(nil), p.Questions...)
-	u.mu.Unlock()
 	return "User feedback received", nil
-}
-
-// PendingQuestions returns the questions from the last AskUser call.
-func (u *UserFeedbackTools) PendingQuestions() []AskUserQuestion {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return append([]AskUserQuestion(nil), u.pending...)
-}
-
-// ClearPending forgets the pending questions.
-func (u *UserFeedbackTools) ClearPending() {
-	u.mu.Lock()
-	u.pending = nil
-	u.mu.Unlock()
 }

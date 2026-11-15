@@ -114,7 +114,7 @@ func (s *Server) registerBuiltins() error {
 		"run_id":     strProp("ID of the paused run, returned in the PAUSED result.", s.maxID()),
 		"session_id": strProp("ID of the session containing the paused run, returned in the PAUSED result.", s.maxID()),
 		"requirements": {Types: []string{"array", "null"}, MaxItems: ptr(maxReq), Items: &jsonschema.Schema{Type: "object"},
-			Description: "Copy the requirements from the PAUSED result and fill in each requested resolution, such as confirmed=true."},
+			Description: "Copy the requirements from the PAUSED result and fill in each requested resolution, such as confirmation=true (or false with confirmation_note), user_input_schema[].value, user_feedback_schema[].selected_options or external_execution_result."},
 		"user_id": optStrProp("Optional user ID to associate with the run. Authenticated deployments use the caller's identity.", s.maxID()),
 	}
 	ownerProps(s, continueProps)

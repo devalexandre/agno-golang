@@ -158,30 +158,16 @@ func (c *AgentComponent) RunStream(ctx context.Context, req RunRequest, emit fun
 	return res, emit(TerminalEvent(res))
 }
 
-// agentContinuer is the ContinueRun signature of the Go Agent at the time of
-// writing. It is matched dynamically so a richer HITL API landing in the agent
-// package does not break this adapter at compile time.
-// TODO(hitl): when Agent exposes a requirement-aware continue API (Python
-// Agent.continue_run(requirements=...)), match it here first.
-type agentContinuer interface {
-	ContinueRun(runID string, updatedTools []map[string]interface{}, sessionID, userID *string) (models.RunResponse, error)
-}
-
+// ContinueRun resumes a paused run with Agent.ContinueRun. The requirements
+// are the wire form documented in requirements.go.
 func (c *AgentComponent) ContinueRun(ctx context.Context, req ContinueRequest) (*RunResult, error) {
-	k, ok := any(c.agent).(agentContinuer)
-	if !ok {
-		return nil, ErrNotSupported
+	reqs, err := DecodeRequirements(req.Requirements)
+	if err != nil {
+		return nil, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var sid, uid *string
-	if req.SessionID != "" {
-		sid = &req.SessionID
-	}
-	if req.UserID != "" {
-		uid = &req.UserID
-	}
-	resp, err := k.ContinueRun(req.RunID, req.Requirements, sid, uid)
+	resp, err := c.agent.ContinueRun(ctx, models.RunResponse{RunID: req.RunID, SessionID: req.SessionID, Requirements: reqs})
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +221,25 @@ func (c *TeamComponent) Run(ctx context.Context, req RunRequest) (*RunResult, er
 	res.ComponentID = c.id
 	res.Kind = KindTeam
 	fillIDs(res, req)
+	return res, nil
+}
+
+// ContinueRun resumes a paused team run with Team.ContinueRun.
+func (c *TeamComponent) ContinueRun(ctx context.Context, req ContinueRequest) (*RunResult, error) {
+	reqs, err := DecodeRequirements(req.Requirements)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	resp, err := c.team.ContinueRun(ctx, models.RunResponse{RunID: req.RunID, SessionID: req.SessionID, Requirements: reqs})
+	if err != nil {
+		return nil, err
+	}
+	res := FromRunResponse(resp)
+	res.ComponentID = c.id
+	res.Kind = KindTeam
+	fillIDs(res, RunRequest{SessionID: req.SessionID, UserID: req.UserID, RunID: req.RunID})
 	return res, nil
 }
 
@@ -391,11 +396,9 @@ func fillIDs(res *RunResult, req RunRequest) {
 	}
 }
 
-// FromRunResponse converts a models.RunResponse. Requirements are read by
-// field name so HITL requirement fields added to RunResponse
-// (Requirements/ActiveRequirements) are picked up without a compile-time
-// dependency on them; until then a PAUSED run carries its paused tool calls
-// (RunResponse.Tools) as requirements.
+// FromRunResponse converts a models.RunResponse. A PAUSED run carries its
+// unresolved requirements (RunResponse.ActiveRequirements) in wire form; a
+// completed run carries none, even when it went through a pause.
 func FromRunResponse(resp models.RunResponse) *RunResult {
 	res := &RunResult{
 		RunID:     resp.RunID,
@@ -414,23 +417,9 @@ func FromRunResponse(resp models.RunResponse) *RunResult {
 	if resp.Status != "" {
 		res.Status = NormalizeStatus(string(resp.Status))
 	}
-	v := reflect.ValueOf(resp)
-	for _, name := range []string{"ActiveRequirements", "Requirements"} {
-		if f := v.FieldByName(name); f.IsValid() && !f.IsZero() {
-			if reqs := toMaps(f.Interface()); len(reqs) > 0 {
-				res.Requirements = reqs
-				break
-			}
-		}
-	}
-	if res.Status == StatusPaused && len(res.Requirements) == 0 && len(resp.Tools) > 0 {
-		res.Requirements = resp.Tools
-	}
-	if strings.EqualFold(resp.Event, "RunPaused") {
+	if resp.IsPaused() || resp.Event == models.RunEventPaused {
 		res.Status = StatusPaused
-	}
-	if len(res.Requirements) > 0 && res.Status == StatusCompleted {
-		res.Status = StatusPaused
+		res.Requirements = EncodeRequirements(resp.ActiveRequirements())
 	}
 	return res
 }

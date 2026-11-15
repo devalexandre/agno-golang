@@ -57,9 +57,28 @@ func main() {
 	}
 	fmt.Printf("[%s] %s\n", res.Status, res.Content)
 	if res.IsInputRequired() {
-		// A paused run: resolve its requirements and send them back.
+		// A paused run: resolve its requirements and send them back. Each
+		// requirement is a models.RunRequirement in JSON form: set
+		// "confirmation" (true/false), fill user_input_schema[].value or
+		// user_feedback_schema[].selected_options, or set
+		// external_execution_result, then send {"requirements": [...]} with
+		// SendOptions{TaskID: res.TaskID, Data: ...}.
 		data, _ := res.Data.(map[string]any)
-		fmt.Printf("task waits on: %v (answer with SendOptions{TaskID: %q, Data: ...})\n", data, res.TaskID)
+		fmt.Printf("task waits on: %v\n", data)
+		if reqs, ok := data["requirements"].([]any); ok {
+			for _, r := range reqs {
+				m, _ := r.(map[string]any)
+				te, _ := m["tool_execution"].(map[string]any)
+				if te["requires_confirmation"] == true {
+					m["confirmation"] = true // approve (false + confirmation_note rejects)
+				}
+			}
+			cont, err := client.SendMessage(ctx, "", a2a.SendOptions{TaskID: res.TaskID, Data: map[string]any{"requirements": reqs}})
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("[%s] %s\n", cont.Status, cont.Content)
+		}
 	}
 
 	// 2. Streaming, continuing the same conversation (context id).

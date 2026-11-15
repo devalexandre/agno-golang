@@ -33,7 +33,7 @@ func testAgent() *component.Func {
 			return &component.RunResult{RunID: req.RunID, Status: component.StatusCompleted, Content: "Hello " + req.Input}, nil
 		},
 		ContinueFunc: func(_ context.Context, req component.ContinueRequest) (*component.RunResult, error) {
-			if req.Requirements[0]["confirmed"] != true {
+			if req.Requirements[0]["confirmation"] != true {
 				return &component.RunResult{RunID: req.RunID, Status: component.StatusCompleted, Content: "rejected"}, nil
 			}
 			return &component.RunResult{RunID: req.RunID, Status: component.StatusCompleted, Content: "deleted"}, nil
@@ -142,7 +142,7 @@ func TestInputRequiredAndContinue(t *testing.T) {
 	if err != nil || !bad.IsInputRequired() || !strings.Contains(bad.Content, "not the ones") {
 		t.Fatalf("bad continue: %+v %v", bad, err)
 	}
-	reqs[0].(map[string]any)["confirmed"] = true
+	reqs[0].(map[string]any)["confirmation"] = true
 	done, err := c.SendMessage(ctx, "", a2a.SendOptions{TaskID: res.TaskID, Data: map[string]any{"requirements": reqs}})
 	if err != nil || !done.IsCompleted() || done.Content != "deleted" {
 		t.Fatalf("continue: %+v %v", done, err)

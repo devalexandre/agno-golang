@@ -95,7 +95,7 @@ func (h *hitlTool) Execute(methodName string, input json.RawMessage) (interface{
 	if !ok {
 		return h.Tool.Execute(methodName, input)
 	}
-	if m.RequiresHITL() {
+	if m.RequiresHITL() && newToolExecution(methodName, input, m).IsPaused() {
 		if rec == nil {
 			return nil, fmt.Errorf("tool %s requires human-in-the-loop resolution; call it through Agent.Run, which pauses the run", methodName)
 		}
@@ -151,10 +151,28 @@ func newToolExecution(methodName string, input json.RawMessage, m toolkit.Method
 		ExternalExecutionSilent:   m.ExternalExecutionSilent,
 		ApprovalType:              m.ApprovalType,
 	}
-	for _, f := range m.UserInputSchema {
+	specs := m.UserInputSchema
+	if m.UserInputBuilder != nil {
+		specs = m.UserInputBuilder(args)
+	}
+	for _, f := range specs {
 		te.UserInputSchema = append(te.UserInputSchema, &models.UserInputField{
 			Name: f.Name, FieldType: f.FieldType, Description: f.Description,
 		})
+	}
+	if m.UserFeedbackBuilder != nil {
+		for _, q := range m.UserFeedbackBuilder(args) {
+			fq := &models.UserFeedbackQuestion{Question: q.Question, Header: q.Header, MultiSelect: q.MultiSelect}
+			for _, o := range q.Options {
+				fq.Options = append(fq.Options, &models.UserFeedbackOption{Label: o.Label, Description: o.Description})
+			}
+			te.UserFeedbackSchema = append(te.UserFeedbackSchema, fq)
+		}
+	}
+	// A dynamic pause (get_user_input / ask_user) with nothing to ask runs
+	// the tool normally, as in Python.
+	if m.IsDynamicUserInput() && len(te.UserInputSchema) == 0 && len(te.UserFeedbackSchema) == 0 {
+		te.RequiresUserInput = false
 	}
 	return te
 }
@@ -344,7 +362,7 @@ func pausedContent(paused []*models.ToolExecution) string {
 	if need[models.PauseTypeConfirmation] {
 		parts = append(parts, "confirmation")
 	}
-	if need[models.PauseTypeUserInput] {
+	if need[models.PauseTypeUserInput] || need[models.PauseTypeUserFeedback] {
 		parts = append(parts, "user input")
 	}
 	if need[models.PauseTypeExternalExecution] {
@@ -728,6 +746,7 @@ func mergeRequirement(dst, src *models.RunRequirement) {
 	if ste.Result != nil && dte.ExternalExecutionRequired {
 		r := *ste.Result
 		dte.Result = &r
+		dte.ToolCallError = dte.ToolCallError || ste.ToolCallError
 	}
 	values := map[string]interface{}{}
 	for _, f := range ste.UserInputSchema {
@@ -740,9 +759,27 @@ func mergeRequirement(dst, src *models.RunRequirement) {
 			f.Value = v
 		}
 	}
+	selections := map[string][]string{}
+	for _, q := range ste.UserFeedbackSchema {
+		if q.SelectedOptions != nil {
+			selections[q.Question] = q.SelectedOptions
+		}
+	}
+	for _, q := range dte.UserFeedbackSchema {
+		if sel, ok := selections[q.Question]; ok && q.SelectedOptions == nil {
+			q.SelectedOptions = append([]string{}, sel...)
+			for _, opt := range q.Options {
+				for _, l := range sel {
+					if opt.Label == l {
+						opt.Selected = true
+					}
+				}
+			}
+		}
+	}
 	if ste.Answered {
 		dte.Answered = true
-		if len(dte.UserInputSchema) == 0 {
+		if len(dte.UserInputSchema) == 0 && len(dte.UserFeedbackSchema) == 0 {
 			for k, v := range ste.ToolArgs {
 				if dte.ToolArgs == nil {
 					dte.ToolArgs = map[string]interface{}{}
@@ -770,7 +807,15 @@ func syncRequirement(req *models.RunRequirement) {
 		r := *req.ExternalExecutionResult
 		te.Result = &r
 	}
-	if te.RequiresUserInput && len(te.UserInputSchema) > 0 && !te.Answered {
+	if te.RequiresUserInput && len(te.UserFeedbackSchema) > 0 && !te.Answered {
+		all := true
+		for _, q := range te.UserFeedbackSchema {
+			if q.SelectedOptions == nil {
+				all = false
+			}
+		}
+		te.Answered = all
+	} else if te.RequiresUserInput && len(te.UserInputSchema) > 0 && !te.Answered {
 		all := true
 		for _, f := range te.UserInputSchema {
 			if f.Value == nil {
@@ -848,6 +893,14 @@ func (a *Agent) resolvePausedCall(runID string, te *models.ToolExecution) {
 		status = approval.StatusRejected
 	case te.ExternalExecutionRequired:
 		// Result supplied by the caller.
+	case len(te.UserFeedbackSchema) > 0:
+		// ask_user: the model receives the selections (Python handle_ask_user_tool_update).
+		res := userFeedbackResult(te)
+		te.Result = &res
+	case te.RequiresUserInput && a.isDynamicUserInput(te.ToolName):
+		// get_user_input: the model receives the values (Python handle_get_user_input_tool_update).
+		res := userInputResult(te)
+		te.Result = &res
 	default:
 		if te.RequiresUserInput {
 			if te.ToolArgs == nil {
@@ -863,6 +916,49 @@ func (a *Agent) resolvePausedCall(runID string, te *models.ToolExecution) {
 	a.createAuditApproval(runID, te, status)
 	te.RequiresConfirmation, te.RequiresUserInput, te.ExternalExecutionRequired = false, false, false
 	te.Answered = te.Answered || !isRejected(te)
+}
+
+// userInputResult renders collected user input for the model.
+func userInputResult(te *models.ToolExecution) string {
+	type kv struct {
+		Name  string      `json:"name"`
+		Value interface{} `json:"value"`
+	}
+	out := make([]kv, 0, len(te.UserInputSchema))
+	for _, f := range te.UserInputSchema {
+		out = append(out, kv{f.Name, f.Value})
+	}
+	b, _ := json.Marshal(out)
+	return "User inputs retrieved: " + string(b)
+}
+
+// userFeedbackResult renders the user's selections for the model.
+func userFeedbackResult(te *models.ToolExecution) string {
+	type qa struct {
+		Question string   `json:"question"`
+		Selected []string `json:"selected"`
+	}
+	out := make([]qa, 0, len(te.UserFeedbackSchema))
+	for _, q := range te.UserFeedbackSchema {
+		sel := q.SelectedOptions
+		if sel == nil {
+			sel = []string{}
+		}
+		out = append(out, qa{q.Question, sel})
+	}
+	b, _ := json.Marshal(out)
+	return "User feedback received: " + string(b)
+}
+
+// isDynamicUserInput reports whether the named method builds its user input
+// from the call arguments (toolkit.WithUserInputFromArgs / WithUserFeedback).
+func (a *Agent) isDynamicUserInput(name string) bool {
+	for _, t := range a.tools {
+		if m, ok := t.GetMethods()[name]; ok {
+			return m.IsDynamicUserInput()
+		}
+	}
+	return false
 }
 
 // executeResolvedCall runs a confirmed / answered call, bypassing the HITL wrapper.
