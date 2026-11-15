@@ -41,7 +41,9 @@ func WithBaseURL(u string) Option { return func(b *BraveSearchTools) { b.baseURL
 func WithFixedMaxResults(n int) Option { return func(b *BraveSearchTools) { b.fixedMaxResults = n } }
 
 // WithFixedLanguage forces the search language regardless of the call argument.
-func WithFixedLanguage(lang string) Option { return func(b *BraveSearchTools) { b.fixedLanguage = lang } }
+func WithFixedLanguage(lang string) Option {
+	return func(b *BraveSearchTools) { b.fixedLanguage = lang }
+}
 
 // WithTimeout sets the HTTP timeout.
 func WithTimeout(d time.Duration) Option { return func(b *BraveSearchTools) { b.Toolkit.Timeout = d } }

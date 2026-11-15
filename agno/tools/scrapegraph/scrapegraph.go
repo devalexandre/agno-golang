@@ -88,7 +88,9 @@ func WithCrawlPollInterval(d time.Duration) Option {
 }
 
 // WithCrawlMaxWait sets the maximum time to wait for a crawl (default 180s).
-func WithCrawlMaxWait(d time.Duration) Option { return func(s *ScrapeGraphTools) { s.crawlMaxWait = d } }
+func WithCrawlMaxWait(d time.Duration) Option {
+	return func(s *ScrapeGraphTools) { s.crawlMaxWait = d }
+}
 
 // SmartscraperParams are the parameters of Smartscraper.
 type SmartscraperParams struct {

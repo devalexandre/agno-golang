@@ -130,7 +130,9 @@ func WithEnableSearchEngine(v bool) Option {
 }
 
 // WithEnableWebDataFeed toggles WebDataFeed (default true).
-func WithEnableWebDataFeed(v bool) Option { return func(b *BrightDataTools) { b.enableWebDataFeed = v } }
+func WithEnableWebDataFeed(v bool) Option {
+	return func(b *BrightDataTools) { b.enableWebDataFeed = v }
+}
 
 // WithAll enables every tool.
 func WithAll() Option { return func(b *BrightDataTools) { b.all = true } }

@@ -26,7 +26,7 @@ type ParallelTools struct {
 	httpClient              *http.Client
 	client                  *restkit.Client
 	taskClient              *restkit.Client
-	enableSearch           bool
+	enableSearch            bool
 	enableExtract           bool
 	enableTask              bool
 	enableMonitor           bool
@@ -113,7 +113,9 @@ func WithDefaultMonitorFrequency(s string) Option {
 }
 
 // WithDefaultTimeout sets the task-result wait in seconds (default 1800).
-func WithDefaultTimeout(seconds int) Option { return func(p *ParallelTools) { p.defaultTimeout = seconds } }
+func WithDefaultTimeout(seconds int) Option {
+	return func(p *ParallelTools) { p.defaultTimeout = seconds }
+}
 
 // WithDefaultOutputSchema sets the structured-output schema used by tasks and
 // monitors: a string description or a map such as {"type": "auto"}.
