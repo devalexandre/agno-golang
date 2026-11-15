@@ -31,7 +31,7 @@ func NewCrawl4AITool(maxDepth int) *Crawl4AITool {
 	}
 
 	t := &Crawl4AITool{
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(4 * toolkit.DefaultHTTPTimeout),
 		maxDepth:   maxDepth,
 	}
 

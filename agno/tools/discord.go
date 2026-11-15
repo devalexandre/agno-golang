@@ -45,7 +45,7 @@ func NewDiscordTool(botToken string) *DiscordTool {
 
 	t := &DiscordTool{
 		botToken:   botToken,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

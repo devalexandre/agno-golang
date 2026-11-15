@@ -50,7 +50,7 @@ func NewSerperTool(apiKey string) *SerperTool {
 
 	t := &SerperTool{
 		apiKey:     apiKey,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

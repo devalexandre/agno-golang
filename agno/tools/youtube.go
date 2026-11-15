@@ -67,7 +67,7 @@ func (t *YouTubeTool) SearchVideos(params YouTubeSearchParams) (string, error) {
 	apiURL := fmt.Sprintf("https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=%s&maxResults=%d&key=%s",
 		url.QueryEscape(params.Query), params.Count, t.APIKey)
 
-	resp, err := http.Get(apiURL)
+	resp, err := toolkit.NewHTTPClient(0).Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to search youtube: %w", err)
 	}

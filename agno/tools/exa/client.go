@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+
+	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
 type Client struct {
@@ -110,7 +112,7 @@ func (c *Client) doRequest(url string, payload interface{}) (map[string]interfac
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := toolkit.NewHTTPClient(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

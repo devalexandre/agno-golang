@@ -67,7 +67,7 @@ func (c *ConfluenceTool) SearchConfluence(input SearchConfluenceInput) (interfac
 		return nil, err
 	}
 	c.setAuth(req)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolkit.NewHTTPClient(0).Do(req)
 	if err != nil {
 		fmt.Printf("[ConfluenceTool] SearchConfluence: Error on request: %v\n", err)
 		return nil, err
@@ -101,7 +101,7 @@ func (c *ConfluenceTool) GetPageContent(input GetPageContentInput) (interface{},
 		return nil, err
 	}
 	c.setAuth(req)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolkit.NewHTTPClient(0).Do(req)
 	if err != nil {
 		return nil, err
 	}

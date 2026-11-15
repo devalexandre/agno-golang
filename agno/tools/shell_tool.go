@@ -14,9 +14,45 @@ import (
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
 )
 
-// ShellTool provides command execution capabilities
+// ShellTool provides command execution capabilities.
+//
+// By default commands run WITHOUT a shell: the command line is tokenized with a
+// POSIX-like word splitter and executed directly as argv, and unquoted shell
+// operators (; | & < > ` $( and newlines) are rejected. This neutralizes
+// operator/substitution injection from model-generated input (port of Agno
+// Python #10210/#10220). Running through `sh -c` / `cmd /C` (params.shell=true)
+// requires an explicit opt-in with WithShellMode().
+//
+// The allowlist and operator rejection are harm reduction, not a sandbox: an
+// allowed interpreter can still run arbitrary scripts. Do not expose this tool
+// to untrusted input without human supervision.
 type ShellTool struct {
 	toolkit.Toolkit
+
+	// AllowShell permits params.shell=true (execution through the system shell).
+	AllowShell bool
+	// AllowedCommands, when non-nil, restricts the executable (basename of argv[0]).
+	AllowedCommands []string
+}
+
+// ShellOption configures a ShellTool.
+type ShellOption func(*ShellTool)
+
+// WithShellMode opts in to executing commands through the system shell when the
+// caller sets shell=true. This restores the legacy (pre-hardening) behaviour and
+// should only be used for trusted, supervised workloads. Shell mode cannot be
+// combined with WithAllowedCommands, since an allowlist cannot be enforced once a
+// shell interprets the string.
+func WithShellMode() ShellOption {
+	return func(st *ShellTool) { st.AllowShell = true }
+}
+
+// WithAllowedCommands restricts executable names (e.g. "ls", "git"). Matching is
+// done on the basename, so "/usr/bin/ls" matches "ls".
+func WithAllowedCommands(commands ...string) ShellOption {
+	return func(st *ShellTool) {
+		st.AllowedCommands = append([]string{}, commands...)
+	}
 }
 
 // ShellResult represents the result of command execution
@@ -38,7 +74,7 @@ type ExecuteParams struct {
 	Args       []string `json:"args,omitempty" description:"Command arguments"`
 	WorkingDir string   `json:"working_dir,omitempty" description:"Working directory for command execution"`
 	Timeout    int      `json:"timeout,omitempty" description:"Timeout in seconds. Default: 30"`
-	Shell      bool     `json:"shell,omitempty" description:"Execute in shell environment. Default: false"`
+	Shell      bool     `json:"shell,omitempty" description:"Execute through the system shell (only honoured when the tool was created WithShellMode). Default: false"`
 }
 
 // SystemInfoParams represents parameters for system information
@@ -47,12 +83,15 @@ type SystemInfoParams struct {
 }
 
 // NewShellTool creates a new ShellTool instance
-func NewShellTool() *ShellTool {
+func NewShellTool(opts ...ShellOption) *ShellTool {
 	tk := toolkit.NewToolkit()
 	tk.Name = "ShellTool"
 	tk.Description = "A powerful shell tool for executing system commands, managing processes, and retrieving system information. Supports cross-platform command execution with timeout and error handling."
 
-	st := &ShellTool{tk}
+	st := &ShellTool{Toolkit: tk}
+	for _, opt := range opts {
+		opt(st)
+	}
 
 	// Register methods
 	st.Toolkit.Register("Execute", "Execute shell commands", st, st.Execute, ExecuteParams{})
@@ -133,33 +172,26 @@ func (st *ShellTool) executeCommand(params ExecuteParams) (interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(params.Timeout)*time.Second)
 	defer cancel()
 
+	argv, useShell, err := st.buildCommand(params)
+	if err != nil {
+		return nil, err
+	}
+
 	start := time.Now()
 	var cmd *exec.Cmd
 
-	// Prepare command based on shell flag and platform
-	if params.Shell {
-		// Execute in shell
-		switch runtime.GOOS {
-		case "windows":
-			fullCommand := params.Command
-			if len(params.Args) > 0 {
-				fullCommand += " " + strings.Join(params.Args, " ")
-			}
+	if useShell {
+		fullCommand := params.Command
+		if len(params.Args) > 0 {
+			fullCommand += " " + strings.Join(params.Args, " ")
+		}
+		if runtime.GOOS == "windows" {
 			cmd = exec.CommandContext(ctx, "cmd", "/C", fullCommand)
-		default:
-			fullCommand := params.Command
-			if len(params.Args) > 0 {
-				fullCommand += " " + strings.Join(params.Args, " ")
-			}
+		} else {
 			cmd = exec.CommandContext(ctx, "sh", "-c", fullCommand)
 		}
 	} else {
-		// Execute directly
-		if len(params.Args) > 0 {
-			cmd = exec.CommandContext(ctx, params.Command, params.Args...)
-		} else {
-			cmd = exec.CommandContext(ctx, params.Command)
-		}
+		cmd = exec.CommandContext(ctx, argv[0], argv[1:]...)
 	}
 
 	// Set working directory

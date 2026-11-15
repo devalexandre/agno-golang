@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 
 	"github.com/devalexandre/agno-golang/agno/tools/toolkit"
@@ -42,7 +41,7 @@ func (t *WikipediaTool) Search(params WikipediaSearchParams) (string, error) {
 	searchURL := fmt.Sprintf("https://%s.wikipedia.org/w/api.php?action=opensearch&search=%s&limit=1&namespace=0&format=json",
 		t.Language, url.QueryEscape(params.Query))
 
-	resp, err := http.Get(searchURL)
+	resp, err := toolkit.NewHTTPClient(0).Get(searchURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to search wikipedia: %w", err)
 	}
@@ -68,7 +67,7 @@ func (t *WikipediaTool) Search(params WikipediaSearchParams) (string, error) {
 	contentURL := fmt.Sprintf("https://%s.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&titles=%s&format=json",
 		t.Language, url.QueryEscape(title))
 
-	resp, err = http.Get(contentURL)
+	resp, err = toolkit.NewHTTPClient(0).Get(contentURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to get page content: %w", err)
 	}

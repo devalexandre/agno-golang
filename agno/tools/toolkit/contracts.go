@@ -32,13 +32,16 @@ type cacheEntry struct {
 type Toolkit struct {
 	Name        string
 	Description string
-	methods     map[string]Method
+	// Timeout bounds the primary I/O operation of the toolkit (e.g. HTTP
+	// requests via HTTPClient). Zero means DefaultHTTPTimeout.
+	Timeout time.Duration
+	methods map[string]Method
 	// Hook system
 	preHooks  []HookFunc
 	postHooks []PostHookFunc
 	// Caching
-	Cache      CacheConfig
-	cache      *sync.Map
+	Cache CacheConfig
+	cache *sync.Map
 	// Filtering
 	includedTools map[string]bool
 	excludedTools map[string]bool

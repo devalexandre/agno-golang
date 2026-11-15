@@ -46,7 +46,7 @@ func NewFirecrawlTool(apiKey string) *FirecrawlTool {
 
 	t := &FirecrawlTool{
 		apiKey:     apiKey,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(4 * toolkit.DefaultHTTPTimeout),
 	}
 
 	tk := toolkit.NewToolkit()

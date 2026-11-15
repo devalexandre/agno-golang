@@ -48,7 +48,7 @@ func NewNotionTool(apiKey string) *NotionTool {
 
 	t := &NotionTool{
 		apiKey:     apiKey,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

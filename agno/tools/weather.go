@@ -42,7 +42,7 @@ func GetCurrentWeatherHandler(queryParams map[string]interface{}) (string, error
 	q.Set("hourly", "temperature_2m,relative_humidity_2m,wind_speed_10m")
 	u.RawQuery = q.Encode()
 
-	resp, err := http.Get(u.String())
+	resp, err := toolkit.NewHTTPClient(0).Get(u.String())
 	if err != nil {
 		return "", fmt.Errorf("error fetching data: %v", err)
 	}

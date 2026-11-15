@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"strings"
 
@@ -64,7 +63,7 @@ func (t *ArxivTool) Search(params ArxivSearchParams) (string, error) {
 	apiURL := fmt.Sprintf("http://export.arxiv.org/api/query?search_query=all:%s&start=0&max_results=%d",
 		url.QueryEscape(params.Query), t.MaxResults)
 
-	resp, err := http.Get(apiURL)
+	resp, err := toolkit.NewHTTPClient(0).Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to search arxiv: %w", err)
 	}

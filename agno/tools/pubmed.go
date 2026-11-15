@@ -39,7 +39,7 @@ func NewPubMedTool(maxResults int) *PubMedTool {
 
 	t := &PubMedTool{
 		maxResults: maxResults,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()
@@ -79,7 +79,7 @@ type pubmedArticle struct {
 				} `xml:"Author"`
 			} `xml:"AuthorList"`
 			Journal struct {
-				Title string `xml:"Title"`
+				Title   string `xml:"Title"`
 				PubDate struct {
 					Year  string `xml:"Year"`
 					Month string `xml:"Month"`

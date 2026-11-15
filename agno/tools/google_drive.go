@@ -49,7 +49,7 @@ func NewGoogleDriveTool(accessToken string) *GoogleDriveTool {
 
 	t := &GoogleDriveTool{
 		accessToken: accessToken,
-		httpClient:  &http.Client{},
+		httpClient:  toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

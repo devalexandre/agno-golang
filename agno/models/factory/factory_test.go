@@ -63,10 +63,10 @@ func TestAllProvidersResolve(t *testing.T) {
 
 func TestListProviders(t *testing.T) {
 	want := []string{
-		"anthropic", "aws", "azure", "cohere", "deepseek", "fireworks", "google",
-		"groq", "huggingface", "litellm", "maritaca", "meta", "mistral", "nvidia",
-		"ollama", "openai", "openrouter", "perplexity", "together", "vertexai",
-		"vllm", "xai",
+		"aimlapi", "anthropic", "aws", "azure", "cohere", "deepseek", "fireworks",
+		"flexai", "google", "groq", "heabsy", "huggingface", "litellm", "maritaca",
+		"meta", "mistral", "nvidia", "ollama", "openai", "openrouter", "perplexity",
+		"together", "vertexai", "vllm", "xai", "yapi",
 	}
 
 	got := ListProviders()

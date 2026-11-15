@@ -15,14 +15,17 @@ import (
 	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/models"
+	"github.com/devalexandre/agno-golang/agno/models/aimlapi"
 	"github.com/devalexandre/agno-golang/agno/models/anthropic"
 	"github.com/devalexandre/agno-golang/agno/models/aws/bedrock"
 	"github.com/devalexandre/agno-golang/agno/models/azure"
 	"github.com/devalexandre/agno-golang/agno/models/cohere"
 	"github.com/devalexandre/agno-golang/agno/models/deepseek"
 	"github.com/devalexandre/agno-golang/agno/models/fireworks"
+	"github.com/devalexandre/agno-golang/agno/models/flexai"
 	"github.com/devalexandre/agno-golang/agno/models/google/gemini"
 	"github.com/devalexandre/agno-golang/agno/models/groq"
+	"github.com/devalexandre/agno-golang/agno/models/heabsy"
 	"github.com/devalexandre/agno-golang/agno/models/huggingface"
 	"github.com/devalexandre/agno-golang/agno/models/litellm"
 	"github.com/devalexandre/agno-golang/agno/models/maritaca"
@@ -37,6 +40,7 @@ import (
 	"github.com/devalexandre/agno-golang/agno/models/vertexai"
 	"github.com/devalexandre/agno-golang/agno/models/vllm"
 	"github.com/devalexandre/agno-golang/agno/models/xai"
+	"github.com/devalexandre/agno-golang/agno/models/yapi"
 )
 
 // constructor builds a model for a given model ID and client options.
@@ -44,6 +48,9 @@ type constructor func(id string, opts []models.OptionClient) (models.AgnoModelIn
 
 // providers maps the canonical provider name to its constructor.
 var providers = map[string]constructor{
+	"aimlapi": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
+		return aimlapi.NewAIMLAPIChat(withID(id, opts)...)
+	},
 	"anthropic": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
 		return anthropic.NewAnthropic(withID(id, opts)...)
 	},
@@ -80,11 +87,17 @@ var providers = map[string]constructor{
 	"fireworks": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
 		return fireworks.NewFireworksChat(withID(id, opts)...)
 	},
+	"flexai": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
+		return flexai.NewFlexAIChat(withID(id, opts)...)
+	},
 	"google": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
 		return gemini.NewGemini(withID(id, opts)...)
 	},
 	"groq": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
 		return groq.NewGroqChat(withID(id, opts)...)
+	},
+	"heabsy": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
+		return heabsy.NewHeabsyChat(withID(id, opts)...)
 	},
 	"huggingface": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
 		return huggingface.NewHuggingFaceChat(withID(id, opts)...)
@@ -135,6 +148,9 @@ var providers = map[string]constructor{
 	"xai": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
 		return xai.NewXaiChat(withID(id, opts)...)
 	},
+	"yapi": func(id string, opts []models.OptionClient) (models.AgnoModelInterface, error) {
+		return yapi.NewYAPIChat(withID(id, opts)...)
+	},
 }
 
 // aliases maps convenient spellings to the canonical provider name.
@@ -155,6 +171,8 @@ var aliases = map[string]string{
 	"vertex":       "vertexai",
 	"vertex-ai":    "vertexai",
 	"vertex_ai":    "vertexai",
+	"y-api":        "yapi",
+	"aiml":         "aimlapi",
 }
 
 // GetModel resolves a model from a "provider:model-id" spec and returns the

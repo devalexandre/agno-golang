@@ -57,7 +57,7 @@ func (t *YFinanceTool) GetStockPrice(params StockPriceParams) (string, error) {
 	symbol := strings.ToUpper(params.Symbol)
 	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=1d", symbol)
 
-	resp, err := http.Get(url)
+	resp, err := toolkit.NewHTTPClient(0).Get(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch stock data: %w", err)
 	}

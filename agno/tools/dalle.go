@@ -44,7 +44,7 @@ func NewDalleTool(apiKey, model string) *DalleTool {
 	t := &DalleTool{
 		apiKey:     apiKey,
 		model:      model,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(4 * toolkit.DefaultHTTPTimeout),
 	}
 
 	tk := toolkit.NewToolkit()
