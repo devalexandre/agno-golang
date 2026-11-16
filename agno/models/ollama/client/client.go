@@ -73,6 +73,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		opts["num_predict"] = val
 		delete(opts, "max_tokens")
 	}
+	mergeRequestParams(opts, callOptions.RequestParams)
+	applyThink(req, opts)
 
 	req.Options = opts
 
@@ -94,99 +96,126 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	// Store tool results for returning to caller
 	var toolResults []models.ToolResult
 
-	err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
-		resp_ = resp
-		if len(resp.Message.ToolCalls) == 0 {
-			return nil
-		}
-
-		// Add assistant message with tool calls first
-		responseTools = append(responseTools, api.Message{
-			Role:      resp.Message.Role,
-			Content:   resp.Message.Content,
-			ToolCalls: resp.Message.ToolCalls,
-		})
-
-		// Process each tool call and add their responses
-		for _, tc := range resp.Message.ToolCalls {
-			if tool, ok := maptools[tc.Function.Name]; ok {
-				args := tc.Function.Arguments
-
-				if showToolsCall != nil && showToolsCall.(bool) {
-					// Tool call start panel
-					startTool := fmt.Sprintf("🚀 Running tool %s with args:", tc.Function.Name)
-					utils.ToolCallPanel(startTool)
-					argsJsonPanel, _ := json.MarshalIndent(args, "", "  ")
-					utils.ToolCallPanel(string(argsJsonPanel))
-				}
-
-				// Convert back to JSON
-				argsJSON, err := json.Marshal(args)
-				if err != nil {
-					return fmt.Errorf("error converting arguments to JSON: %v", err)
-				}
-
-				// Execute the tool with the corrected arguments
-				resTool, err := tool.Execute(tc.Function.Name, argsJSON)
-
-				// Capture tool result for returning to caller
-				toolResult := models.ToolResult{
-					ToolName:  tc.Function.Name,
-					ToolInput: string(argsJSON),
-					Result:    resTool,
-				}
-				if err != nil {
-					toolResult.Error = err.Error()
-					toolResults = append(toolResults, toolResult)
-					return fmt.Errorf("error executing tool %s: %w", tc.Function.Name, err)
-				}
-				toolResults = append(toolResults, toolResult)
-
-				// Tool call completion panel
-				if showToolsCall != nil && showToolsCall.(bool) {
-					endTool := fmt.Sprintf("✅ Tool %s finished", tc.Function.Name)
-					utils.ToolCallPanel(endTool)
-				}
-
-				// Convert tool result to string
-				var toolResultStr string
-				switch result := resTool.(type) {
-				case string:
-					toolResultStr = result
-				case map[string]interface{}:
-					// Convert map to JSON
-					resultJSON, err := json.Marshal(result)
-					if err != nil {
-						return fmt.Errorf("error converting tool result to JSON: %w", err)
-					}
-					toolResultStr = string(resultJSON)
-				default:
-					// Try to convert any other type to JSON
-					resultJSON, err := json.Marshal(result)
-					if err != nil {
-						return fmt.Errorf("error converting tool result to JSON: %w", err)
-					}
-					toolResultStr = string(resultJSON)
-				}
-
-				// Add tool response
-				responseTools = append(responseTools, api.Message{
-					Role:    "tool",
-					Content: toolResultStr,
-				})
+	// The model may need several rounds of tool calls (read a file, then
+	// another, then answer): keep asking until it answers in text.
+	for round := 0; ; round++ {
+		responseTools = nil
+		err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
+			resp_ = resp
+			if len(resp.Message.ToolCalls) == 0 {
+				return nil
 			}
+
+			// Add assistant message with tool calls first
+			responseTools = append(responseTools, api.Message{
+				Role:      resp.Message.Role,
+				Content:   resp.Message.Content,
+				ToolCalls: resp.Message.ToolCalls,
+			})
+
+			// Process each tool call and add their responses
+			for _, tc := range resp.Message.ToolCalls {
+				if tool, ok := maptools[tc.Function.Name]; ok {
+					args := tc.Function.Arguments
+
+					if showToolsCall != nil && showToolsCall.(bool) {
+						// Tool call start panel
+						startTool := fmt.Sprintf("🚀 Running tool %s with args:", tc.Function.Name)
+						utils.ToolCallPanel(startTool)
+						argsJsonPanel, _ := json.MarshalIndent(args, "", "  ")
+						utils.ToolCallPanel(string(argsJsonPanel))
+					}
+
+					// Convert back to JSON
+					argsJSON, err := json.Marshal(args)
+					if err != nil {
+						return fmt.Errorf("error converting arguments to JSON: %v", err)
+					}
+
+					// Execute the tool with the corrected arguments
+					resTool, err := tool.Execute(tc.Function.Name, argsJSON)
+
+					// Capture tool result for returning to caller
+					toolResult := models.ToolResult{
+						ToolName:  tc.Function.Name,
+						ToolInput: string(argsJSON),
+						Result:    resTool,
+					}
+					if err != nil {
+						// A failed or refused tool call goes back to the model as
+						// the tool's answer, so it can explain or try another way.
+						toolResult.Error = err.Error()
+						toolResults = append(toolResults, toolResult)
+						responseTools = append(responseTools, api.Message{
+							Role:    "tool",
+							Content: "error: " + err.Error(),
+						})
+						continue
+					}
+					toolResults = append(toolResults, toolResult)
+
+					// Tool call completion panel
+					if showToolsCall != nil && showToolsCall.(bool) {
+						endTool := fmt.Sprintf("✅ Tool %s finished", tc.Function.Name)
+						utils.ToolCallPanel(endTool)
+					}
+
+					// Convert tool result to string
+					var toolResultStr string
+					switch result := resTool.(type) {
+					case string:
+						toolResultStr = result
+					case map[string]interface{}:
+						// Convert map to JSON
+						resultJSON, err := json.Marshal(result)
+						if err != nil {
+							return fmt.Errorf("error converting tool result to JSON: %w", err)
+						}
+						toolResultStr = string(resultJSON)
+					default:
+						// Try to convert any other type to JSON
+						resultJSON, err := json.Marshal(result)
+						if err != nil {
+							return fmt.Errorf("error converting tool result to JSON: %w", err)
+						}
+						toolResultStr = string(resultJSON)
+					}
+
+					// Add tool response
+					responseTools = append(responseTools, api.Message{
+						Role:    "tool",
+						Content: toolResultStr,
+					})
+				} else {
+					responseTools = append(responseTools, api.Message{
+						Role:    "tool",
+						Content: "error: unknown tool " + tc.Function.Name,
+					})
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Add tool responses to request messages after tool execution
-	if len(responseTools) > 0 {
+		if len(resp_.Message.ToolCalls) == 0 {
+			break
+		}
+		// Add tool responses to request messages after tool execution
 		req.Messages = append(req.Messages, responseTools...)
+		if round+1 >= maxToolRounds {
+			// One last request without tools forces a text answer.
+			req.Tools = nil
+			err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
+				resp_ = resp
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
 	}
 
 	// Reasoning: se contexto tiver reasoning true, usa API customizada
@@ -226,6 +255,13 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		}
 	}
 
+	// Some thinking models stop right after reasoning and leave the answer
+	// empty. The reasoning then holds the answer: better to return it than
+	// an empty reply.
+	if strings.TrimSpace(resp_.Message.Content) == "" && len(resp_.Message.ToolCalls) == 0 {
+		resp_.Message.Content = strings.TrimSpace(resp_.Message.Thinking)
+	}
+
 	// Always create a response from the initial response
 	resp := resp_
 	response := &CompletionResponse{
@@ -242,31 +278,6 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 		},
 		Done:        resp.Done,
 		ToolResults: toolResults, // Include tool results
-	}
-
-	// If there were tool calls, make a second request to get the final response
-	if len(resp_.Message.ToolCalls) > 0 {
-		err = c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
-			response = &CompletionResponse{
-				Model:        resp.Model,
-				EvalTime:     int64(resp.Metrics.EvalDuration),
-				EvalCount:    resp.Metrics.EvalCount,
-				PromptTime:   int64(resp.Metrics.PromptEvalDuration),
-				PromptTokens: resp.Metrics.PromptEvalCount,
-				TotalTime:    int64(resp.Metrics.TotalDuration),
-				Message: ChatMessage{
-					Role:     resp.Message.Role,
-					Content:  resp.Message.Content,
-					Thinking: "", // Will be populated from raw response if available
-				},
-				Done:        resp.Done,
-				ToolResults: toolResults, // Preserve tool results from first call
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return response, nil
@@ -311,6 +322,8 @@ func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Mes
 		opts["num_predict"] = val
 		delete(opts, "max_tokens")
 	}
+	mergeRequestParams(opts, callOptions.RequestParams)
+	applyThink(req, opts)
 
 	//remove ToolCall from options
 	opts["ToolCall"] = nil
@@ -491,4 +504,33 @@ func (c *Client) prepareTools(toolsCall []toolkit.Tool) ([]api.Tool, map[string]
 	}
 
 	return apiTools, maptools, names
+}
+
+// mergeRequestParams copies provider-specific request parameters (num_ctx,
+// num_gpu, repeat_penalty, ...) into the Ollama options map. Without it they
+// would travel nested under "request_params", a key Ollama ignores, and a
+// setting such as the context size would never reach the server.
+func mergeRequestParams(opts map[string]interface{}, params map[string]interface{}) {
+	delete(opts, "request_params")
+	for k, v := range params {
+		opts[k] = v
+	}
+}
+
+// maxToolRounds caps how many times in a row the model may ask for tools
+// before it has to answer.
+const maxToolRounds = 32
+
+// applyThink moves a "think" request parameter (true/false) out of the
+// options map, where Ollama would ignore it, to the request field that turns
+// a thinking model's reasoning on or off.
+func applyThink(req *api.ChatRequest, opts map[string]interface{}) {
+	v, ok := opts["think"]
+	if !ok {
+		return
+	}
+	delete(opts, "think")
+	if b, ok := v.(bool); ok {
+		req.Think = &api.ThinkValue{Value: b}
+	}
 }
