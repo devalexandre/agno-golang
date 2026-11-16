@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"github.com/ollama/ollama/api"
 	"net/http"
 	"os"
 	"testing"
@@ -139,4 +140,38 @@ func TestOllama_StreamChatCompletionWithTool(t *testing.T) {
 	}
 
 	fmt.Println(response)
+}
+
+func TestMergeRequestParams(t *testing.T) {
+	opts := map[string]interface{}{
+		"temperature":    0.2,
+		"request_params": map[string]interface{}{"num_ctx": 8192},
+	}
+	mergeRequestParams(opts, map[string]interface{}{"num_ctx": 8192, "temperature": 0.5})
+	if _, ok := opts["request_params"]; ok {
+		t.Fatal("request_params must not be sent to Ollama")
+	}
+	if opts["num_ctx"] != 8192 {
+		t.Fatalf("num_ctx = %v, want 8192", opts["num_ctx"])
+	}
+	if opts["temperature"] != 0.5 {
+		t.Fatalf("request params must override: temperature = %v", opts["temperature"])
+	}
+}
+
+func TestApplyThink(t *testing.T) {
+	req := &api.ChatRequest{}
+	opts := map[string]interface{}{"think": false, "num_ctx": 8192}
+	applyThink(req, opts)
+	if _, ok := opts["think"]; ok {
+		t.Fatal("think must leave the options map")
+	}
+	if req.Think == nil || req.Think.Value != false {
+		t.Fatalf("req.Think = %+v, want false", req.Think)
+	}
+	req = &api.ChatRequest{}
+	applyThink(req, map[string]interface{}{"num_ctx": 8192})
+	if req.Think != nil {
+		t.Fatal("think must stay unset when not requested")
+	}
 }

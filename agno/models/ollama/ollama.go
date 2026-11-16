@@ -73,6 +73,16 @@ func (o *OllamaChat) GetClientOptions() *models.ClientOptions {
 	return o.opts
 }
 
+// withClientParams makes the client-level parameters (models.WithClientParams,
+// e.g. {"num_ctx": 8192}) the default request parameters of every call. Call
+// options still override them.
+func (o *OllamaChat) withClientParams(options []models.Option) []models.Option {
+	if len(o.opts.ClientParams) == 0 {
+		return options
+	}
+	return append([]models.Option{models.WithRequestParams(o.opts.ClientParams)}, options...)
+}
+
 // Invoke executes a synchronous call to the Ollama model
 func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
 	// Apply client-level options (e.g., MaxTokens) if not already set in call options
@@ -81,6 +91,7 @@ func (o *OllamaChat) Invoke(ctx context.Context, messages []models.Message, opti
 		// (call options can still override it)
 		options = append([]models.Option{models.WithMaxTokens(*o.opts.MaxTokens)}, options...)
 	}
+	options = o.withClientParams(options)
 
 	resp, err := o.client.CreateChatCompletion(ctx, messages, options...)
 	if err != nil {
@@ -144,6 +155,7 @@ func (o *OllamaChat) InvokeStream(ctx context.Context, messages []models.Message
 		// (call options can still override it)
 		options = append([]models.Option{models.WithMaxTokens(*o.opts.MaxTokens)}, options...)
 	}
+	options = o.withClientParams(options)
 
 	err := o.client.StreamChatCompletion(ctx, messages, options...)
 	if err != nil {
