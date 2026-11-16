@@ -36,7 +36,7 @@ type RedditTopPostsParams struct {
 // NewRedditTool creates a new Reddit tool.
 func NewRedditTool() *RedditTool {
 	t := &RedditTool{
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

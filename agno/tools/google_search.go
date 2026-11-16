@@ -63,7 +63,7 @@ func (t *GoogleSearchTool) Search(params GoogleSearchParams) (string, error) {
 	apiURL := fmt.Sprintf("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d",
 		t.APIKey, t.CX, url.QueryEscape(params.Query), params.Count)
 
-	resp, err := http.Get(apiURL)
+	resp, err := toolkit.NewHTTPClient(0).Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to search google: %w", err)
 	}

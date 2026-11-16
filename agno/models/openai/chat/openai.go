@@ -89,6 +89,7 @@ func (o *OpenAIChat) Invoke(ctx context.Context, messages []models.Message, opti
 		ToolCalls:        resp.Choices[0].Message.ToolCalls,
 		ToolResults:      resp.Choices[0].Message.ToolResults,
 		ReasoningContent: resp.Choices[0].Message.ReasoningContent,
+		Metrics:          resp.Usage.ToMessageMetrics(),
 	}, nil
 }
 

@@ -10,6 +10,8 @@ import (
 
 	"github.com/devalexandre/agno-golang/agno/document"
 	"github.com/devalexandre/agno-golang/agno/embedder"
+	"github.com/devalexandre/agno-golang/agno/knowledge/querytransformer"
+	"github.com/devalexandre/agno-golang/agno/knowledge/reranker"
 	"github.com/devalexandre/agno-golang/agno/storage"
 	"github.com/devalexandre/agno-golang/agno/storage/sqlite"
 	"github.com/devalexandre/agno-golang/agno/vectordb"
@@ -74,6 +76,15 @@ type BaseKnowledge struct {
 	Filters      *SearchFilters
 	Recreate     bool
 	Metadata     map[string]interface{}
+
+	// Reranker reorders search results at the knowledge level (Python
+	// Knowledge.reranker). When set, Search fetches
+	// reranker.SearchLimit(numDocuments) candidates, reranks them against the
+	// original query and trims to numDocuments. Nil keeps the old behaviour.
+	Reranker reranker.Reranker
+	// QueryTransformer rewrites the query before it reaches the vector db
+	// (e.g. querytransformer.HyDE). Nil keeps the old behaviour.
+	QueryTransformer querytransformer.QueryTransformer
 }
 
 // NewBaseKnowledge creates a new BaseKnowledge instance
@@ -551,7 +562,7 @@ func (k *BaseKnowledge) Search(ctx context.Context, query string, numDocuments i
 		return nil, fmt.Errorf("vector database not configured")
 	}
 
-	return k.VectorDB.Search(ctx, query, numDocuments, filters)
+	return k.retrieve(ctx, query, numDocuments, filters)
 }
 
 // SearchWithFilters searches the knowledge base with additional per-query filters.
@@ -578,7 +589,7 @@ func (k *BaseKnowledge) SearchWithFilters(ctx context.Context, query string, num
 		merged = nil
 	}
 
-	return k.VectorDB.Search(ctx, query, numDocuments, merged)
+	return k.retrieve(ctx, query, numDocuments, merged)
 }
 
 // Add adds documents to the knowledge base

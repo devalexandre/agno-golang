@@ -304,5 +304,5 @@ func setupQdrantContainer(ctx context.Context) (testcontainers.Container, string
 		return nil, "", 0, fmt.Errorf("failed to get mapped port: %w", err)
 	}
 
-	return container, host, mappedPort.Int(), nil
+	return container, host, int(mappedPort.Num()), nil
 }

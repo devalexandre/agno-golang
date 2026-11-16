@@ -32,13 +32,16 @@ type cacheEntry struct {
 type Toolkit struct {
 	Name        string
 	Description string
-	methods     map[string]Method
+	// Timeout bounds the primary I/O operation of the toolkit (e.g. HTTP
+	// requests via HTTPClient). Zero means DefaultHTTPTimeout.
+	Timeout time.Duration
+	methods map[string]Method
 	// Hook system
 	preHooks  []HookFunc
 	postHooks []PostHookFunc
 	// Caching
-	Cache      CacheConfig
-	cache      *sync.Map
+	Cache CacheConfig
+	cache *sync.Map
 	// Filtering
 	includedTools map[string]bool
 	excludedTools map[string]bool
@@ -56,6 +59,29 @@ type Method struct {
 	RequiresConfirmation bool
 	// StopAfterCall tells the agent to stop the tool-calling loop after this method executes.
 	StopAfterCall bool
+	// ShowResult makes the agent include the method result in the run content.
+	ShowResult bool
+	// RequiresUserInput pauses the run until the user provides the
+	// UserInputFields (all parameters when UserInputFields is empty).
+	RequiresUserInput bool
+	// UserInputFields lists the parameters provided by the user. They are
+	// hidden from the model-facing schema.
+	UserInputFields []string
+	// UserInputSchema describes the user-provided parameters (derived at registration).
+	UserInputSchema []UserInputFieldSpec
+	// UserInputBuilder builds the user-input fields from the call arguments
+	// (WithUserInputFromArgs).
+	UserInputBuilder UserInputBuilder
+	// UserFeedbackBuilder builds feedback questions from the call arguments
+	// (WithUserFeedback).
+	UserFeedbackBuilder UserFeedbackBuilder
+	// ExternalExecution pauses the run: the call is executed outside the agent
+	// and its result handed back through ContinueRun.
+	ExternalExecution bool
+	// ExternalExecutionSilent suppresses the verbose paused message for external execution.
+	ExternalExecutionSilent bool
+	// ApprovalType is ApprovalRequired (blocking) or ApprovalAudit (audit trail), or empty.
+	ApprovalType string
 	// Per-method hooks (in addition to toolkit-level hooks)
 	PreHooks  []HookFunc
 	PostHooks []PostHookFunc

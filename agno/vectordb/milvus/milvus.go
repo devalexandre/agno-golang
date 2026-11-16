@@ -1,277 +1,268 @@
+// Package milvus implements the vectordb.VectorDB interface for Milvus / Zilliz
+// Cloud using the Milvus v2 REST API (no external client dependency).
 package milvus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
 	"github.com/devalexandre/agno-golang/agno/document"
 	"github.com/devalexandre/agno-golang/agno/embedder"
 	"github.com/devalexandre/agno-golang/agno/vectordb"
-	"github.com/milvus-io/milvus-sdk-go/v2/client"
-	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 )
 
-type Milvus struct {
+// MilvusDB implements vectordb.VectorDB backed by Milvus.
+type MilvusDB struct {
 	*vectordb.BaseVectorDB
-	client         client.Client
-	collectionName string
-	dbName         string
+	client     *http.Client
+	baseURL    string
+	token      string
+	collection string
+	dimension  int
 }
 
-type MilvusConfig struct {
-	Address        string
-	Username       string
-	Password       string
-	CollectionName string
-	DBName         string
-	Embedder       embedder.Embedder
-	Distance       vectordb.Distance
+// Options configures a MilvusDB.
+type Options struct {
+	BaseURL    string // e.g. http://localhost:19530 or your Zilliz Cloud endpoint
+	Token      string // "user:password" or API key (optional for local)
+	Collection string // collection name (required)
+	Dimension  int    // vector dimension (defaults to the embedder's)
+	Embedder   embedder.Embedder
 }
 
-func NewMilvus(config MilvusConfig) (*Milvus, error) {
-	ctx := context.Background()
-	c, err := client.NewClient(ctx, client.Config{
-		Address:  config.Address,
-		Username: config.Username,
-		Password: config.Password,
-		DBName:   config.DBName,
-	})
+// New creates a new MilvusDB.
+func New(opts Options) *MilvusDB {
+	if opts.BaseURL == "" {
+		opts.BaseURL = "http://localhost:19530"
+	}
+	opts.BaseURL = strings.TrimRight(opts.BaseURL, "/")
+	if opts.Collection == "" {
+		opts.Collection = "agno_documents"
+	}
+	dim := opts.Dimension
+	if dim <= 0 && opts.Embedder != nil {
+		dim = opts.Embedder.GetDimensions()
+	}
+	return &MilvusDB{
+		BaseVectorDB: vectordb.NewBaseVectorDB(opts.Embedder, vectordb.SearchTypeVector, vectordb.DistanceCosine),
+		client:       &http.Client{},
+		baseURL:      opts.BaseURL,
+		token:        opts.Token,
+		collection:   opts.Collection,
+		dimension:    dim,
+	}
+}
+
+// post calls a Milvus v2 REST endpoint and decodes the standard {code,data} envelope.
+func (m *MilvusDB) post(ctx context.Context, path string, payload interface{}, out interface{}) error {
+	b, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to milvus: %w", err)
-	}
-
-	if config.Distance == "" {
-		config.Distance = vectordb.DistanceL2
-	}
-
-	return &Milvus{
-		BaseVectorDB:   vectordb.NewBaseVectorDB(config.Embedder, vectordb.SearchTypeVector, config.Distance),
-		client:         c,
-		collectionName: config.CollectionName,
-		dbName:         config.DBName,
-	}, nil
-}
-
-func (m *Milvus) Create(ctx context.Context) error {
-	schema := &entity.Schema{
-		CollectionName: m.collectionName,
-		AutoID:         false,
-		Fields: []*entity.Field{
-			{
-				Name:       "id",
-				DataType:   entity.FieldTypeVarChar,
-				PrimaryKey: true,
-				AutoID:     false,
-				TypeParams: map[string]string{"max_length": "36"},
-			},
-			{
-				Name:     "vector",
-				DataType: entity.FieldTypeFloatVector,
-				TypeParams: map[string]string{
-					"dim": fmt.Sprintf("%d", m.Dimensions),
-				},
-			},
-			{
-				Name:     "content",
-				DataType: entity.FieldTypeVarChar,
-				TypeParams: map[string]string{
-					"max_length": "65535",
-				},
-			},
-			{
-				Name:     "metadata",
-				DataType: entity.FieldTypeJSON,
-			},
-		},
-	}
-
-	var metricType entity.MetricType
-	switch m.Distance {
-	case vectordb.DistanceL2:
-		metricType = entity.L2
-	case vectordb.DistanceCosine:
-		metricType = entity.COSINE
-	case vectordb.DistanceIP:
-		metricType = entity.IP
-	default:
-		metricType = entity.L2
-	}
-
-	err := m.client.CreateCollection(ctx, schema, 1)
-	if err != nil {
-		return fmt.Errorf("failed to create collection: %w", err)
-	}
-
-	idx, err := entity.NewIndexIvfFlat(metricType, 1024)
-	if err != nil {
-		return fmt.Errorf("failed to create index description: %w", err)
-	}
-
-	err = m.client.CreateIndex(ctx, m.collectionName, "vector", idx, false)
-	if err != nil {
-		return fmt.Errorf("failed to create index: %w", err)
-	}
-
-	return m.client.LoadCollection(ctx, m.collectionName, false)
-}
-
-func (m *Milvus) Exists(ctx context.Context) (bool, error) {
-	return m.client.HasCollection(ctx, m.collectionName)
-}
-
-func (m *Milvus) Drop(ctx context.Context) error {
-	return m.client.DropCollection(ctx, m.collectionName)
-}
-
-func (m *Milvus) Optimize(ctx context.Context) error {
-	return m.client.Flush(ctx, m.collectionName, false)
-}
-
-func (m *Milvus) Insert(ctx context.Context, documents []*document.Document, filters map[string]interface{}) error {
-	if err := m.EmbedDocuments(documents); err != nil {
 		return err
 	}
-
-	ids := make([]string, 0, len(documents))
-	vectors := make([][]float32, 0, len(documents))
-	contents := make([]string, 0, len(documents))
-	metadatas := make([]string, 0, len(documents))
-
-	for _, doc := range documents {
-		ids = append(ids, doc.ID)
-		v32 := make([]float32, len(doc.Embeddings))
-		for i, v := range doc.Embeddings {
-			v32[i] = float32(v)
-		}
-		vectors = append(vectors, v32)
-		contents = append(contents, doc.Content)
-		metaJSON, _ := json.Marshal(doc.Metadata)
-		metadatas = append(metadatas, string(metaJSON))
-	}
-
-	idCol := entity.NewColumnVarChar("id", ids)
-	vectorCol := entity.NewColumnFloatVector("vector", m.Dimensions, vectors)
-	contentCol := entity.NewColumnVarChar("content", contents)
-	metadataCol := entity.NewColumnVarChar("metadata", metadatas)
-
-	_, err := m.client.Insert(ctx, m.collectionName, "", idCol, vectorCol, contentCol, metadataCol)
-	return err
-}
-
-func (m *Milvus) Upsert(ctx context.Context, documents []*document.Document, filters map[string]interface{}) error {
-	// Milvus upsert requires a primary key, but since we handle IDs manually, we can use it.
-	if err := m.EmbedDocuments(documents); err != nil {
+	req, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+path, bytes.NewReader(b))
+	if err != nil {
 		return err
 	}
-
-	ids := make([]string, 0, len(documents))
-	vectors := make([][]float32, 0, len(documents))
-	contents := make([]string, 0, len(documents))
-	metadatas := make([]string, 0, len(documents))
-
-	for _, doc := range documents {
-		ids = append(ids, doc.ID)
-		v32 := make([]float32, len(doc.Embeddings))
-		for i, v := range doc.Embeddings {
-			v32[i] = float32(v)
-		}
-		vectors = append(vectors, v32)
-		contents = append(contents, doc.Content)
-		metaJSON, _ := json.Marshal(doc.Metadata)
-		metadatas = append(metadatas, string(metaJSON))
+	req.Header.Set("Content-Type", "application/json")
+	if m.token != "" {
+		req.Header.Set("Authorization", "Bearer "+m.token)
 	}
-
-	idCol := entity.NewColumnVarChar("id", ids)
-	vectorCol := entity.NewColumnFloatVector("vector", m.Dimensions, vectors)
-	contentCol := entity.NewColumnVarChar("content", contents)
-	metadataCol := entity.NewColumnVarChar("metadata", metadatas)
-
-	_, err := m.client.Upsert(ctx, m.collectionName, "", idCol, vectorCol, contentCol, metadataCol)
-	return err
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("milvus: %s: %s", path, string(body))
+	}
+	// Milvus wraps errors in {"code": N, "message": "..."} even on HTTP 200.
+	var env struct {
+		Code    int             `json:"code"`
+		Message string          `json:"message"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return err
+	}
+	if env.Code != 0 {
+		return fmt.Errorf("milvus: %s: code %d: %s", path, env.Code, env.Message)
+	}
+	if out != nil && len(env.Data) > 0 {
+		return json.Unmarshal(env.Data, out)
+	}
+	return nil
 }
 
-func (m *Milvus) Search(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
-	return m.VectorSearch(ctx, query, limit, filters)
+// Create creates the collection (id, vector, content) if it does not exist.
+func (m *MilvusDB) Create(ctx context.Context) error {
+	if exists, _ := m.Exists(ctx); exists {
+		return nil
+	}
+	if m.dimension <= 0 {
+		return fmt.Errorf("milvus: dimension is required to create a collection")
+	}
+	payload := map[string]interface{}{
+		"collectionName": m.collection,
+		"dimension":      m.dimension,
+		"metricType":     "COSINE",
+		"primaryFieldName": "id",
+		"vectorFieldName":  "vector",
+		"idType":           "VarChar",
+		"params":           map[string]interface{}{"max_length": 512},
+	}
+	return m.post(ctx, "/v2/vectordb/collections/create", payload, nil)
 }
 
-func (m *Milvus) VectorSearch(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
-	vector, err := m.EmbedQuery(query)
-	if err != nil {
-		return nil, err
+// Exists reports whether the collection exists.
+func (m *MilvusDB) Exists(ctx context.Context) (bool, error) {
+	var names []string
+	if err := m.post(ctx, "/v2/vectordb/collections/list", map[string]interface{}{}, &names); err != nil {
+		return false, err
 	}
-
-	v32 := make([]float32, len(vector))
-	for i, v := range vector {
-		v32[i] = float32(v)
-	}
-
-	var metricType entity.MetricType
-	switch m.Distance {
-	case vectordb.DistanceL2:
-		metricType = entity.L2
-	case vectordb.DistanceCosine:
-		metricType = entity.COSINE
-	default:
-		metricType = entity.L2
-	}
-
-	searchParam, _ := entity.NewIndexIvfFlatSearchParam(10)
-	res, err := m.client.Search(ctx, m.collectionName, nil, "", []string{"content", "metadata"}, []entity.Vector{entity.FloatVector(v32)}, "vector", metricType, limit, searchParam)
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]*vectordb.SearchResult, 0)
-	for _, sr := range res {
-		for i := 0; i < sr.ResultCount; i++ {
-			id, _ := sr.IDs.GetAsString(i)
-			content, _ := sr.Fields.GetColumn("content").GetAsString(i)
-			// metadata handling would be more complex depending on how it's stored
-
-			results = append(results, &vectordb.SearchResult{
-				Document: &document.Document{
-					ID:      id,
-					Content: content,
-				},
-				Score: float64(sr.Scores[i]),
-			})
+	for _, n := range names {
+		if n == m.collection {
+			return true, nil
 		}
 	}
-
-	return results, nil
-}
-
-func (m *Milvus) KeywordSearch(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
-	return nil, fmt.Errorf("keyword search not implemented for milvus")
-}
-
-func (m *Milvus) HybridSearch(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
-	return nil, fmt.Errorf("hybrid search not implemented for milvus")
-}
-
-func (m *Milvus) GetCount(ctx context.Context) (int64, error) {
-	// Milvus doesn't have a direct "count" in describe, usually requires query or statistics
-	return 0, fmt.Errorf("get count not directly supported in milvus without query")
-}
-
-func (m *Milvus) DocExists(ctx context.Context, doc *document.Document) (bool, error) {
-	return m.IDExists(ctx, doc.ID)
-}
-
-func (m *Milvus) NameExists(ctx context.Context, name string) (bool, error) {
-	// In Milvus we'd query by a 'name' metadata field if it exists
 	return false, nil
 }
 
-func (m *Milvus) IDExists(ctx context.Context, id string) (bool, error) {
-	res, err := m.client.Query(ctx, m.collectionName, nil, fmt.Sprintf("id == '%s'", id), []string{"id"})
+// Drop deletes the collection.
+func (m *MilvusDB) Drop(ctx context.Context) error {
+	return m.post(ctx, "/v2/vectordb/collections/drop", map[string]interface{}{"collectionName": m.collection}, nil)
+}
+
+// Optimize is a no-op for Milvus.
+func (m *MilvusDB) Optimize(ctx context.Context) error { return nil }
+
+// Insert embeds and inserts documents.
+func (m *MilvusDB) Insert(ctx context.Context, docs []*document.Document, _ map[string]interface{}) error {
+	if err := m.EmbedDocuments(docs); err != nil {
+		return err
+	}
+	rows := make([]map[string]interface{}, 0, len(docs))
+	for _, d := range docs {
+		rows = append(rows, map[string]interface{}{
+			"id":      d.ID,
+			"vector":  d.Embeddings,
+			"content": d.Content,
+		})
+	}
+	return m.post(ctx, "/v2/vectordb/entities/insert",
+		map[string]interface{}{"collectionName": m.collection, "data": rows}, nil)
+}
+
+// Upsert embeds and upserts documents.
+func (m *MilvusDB) Upsert(ctx context.Context, docs []*document.Document, _ map[string]interface{}) error {
+	if err := m.EmbedDocuments(docs); err != nil {
+		return err
+	}
+	rows := make([]map[string]interface{}, 0, len(docs))
+	for _, d := range docs {
+		rows = append(rows, map[string]interface{}{
+			"id":      d.ID,
+			"vector":  d.Embeddings,
+			"content": d.Content,
+		})
+	}
+	return m.post(ctx, "/v2/vectordb/entities/upsert",
+		map[string]interface{}{"collectionName": m.collection, "data": rows}, nil)
+}
+
+// Search performs a vector search.
+func (m *MilvusDB) Search(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]*vectordb.SearchResult, error) {
+	return m.VectorSearch(ctx, query, limit, filters)
+}
+
+// VectorSearch runs an ANN search over the collection.
+func (m *MilvusDB) VectorSearch(ctx context.Context, query string, limit int, _ map[string]interface{}) ([]*vectordb.SearchResult, error) {
+	vec, err := m.EmbedQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]interface{}{
+		"collectionName": m.collection,
+		"data":           []interface{}{vec},
+		"limit":          limit,
+		"outputFields":   []string{"content"},
+		"annsField":      "vector",
+	}
+	var rows []struct {
+		ID       string  `json:"id"`
+		Distance float64 `json:"distance"`
+		Content  string  `json:"content"`
+	}
+	if err := m.post(ctx, "/v2/vectordb/entities/search", payload, &rows); err != nil {
+		return nil, err
+	}
+	results := make([]*vectordb.SearchResult, 0, len(rows))
+	for _, r := range rows {
+		results = append(results, &vectordb.SearchResult{
+			Document: &document.Document{ID: r.ID, Content: r.Content},
+			Score:    r.Distance, // COSINE: higher is more similar
+			Distance: r.Distance,
+		})
+	}
+	return results, nil
+}
+
+// KeywordSearch is not supported by this Milvus implementation.
+func (m *MilvusDB) KeywordSearch(ctx context.Context, query string, limit int, _ map[string]interface{}) ([]*vectordb.SearchResult, error) {
+	return nil, fmt.Errorf("milvus: keyword search not supported")
+}
+
+// HybridSearch is not supported by this Milvus implementation.
+func (m *MilvusDB) HybridSearch(ctx context.Context, query string, limit int, _ map[string]interface{}) ([]*vectordb.SearchResult, error) {
+	return nil, fmt.Errorf("milvus: hybrid search not supported")
+}
+
+// GetCount returns the number of entities in the collection.
+func (m *MilvusDB) GetCount(ctx context.Context) (int64, error) {
+	var rows []map[string]interface{}
+	err := m.post(ctx, "/v2/vectordb/entities/query", map[string]interface{}{
+		"collectionName": m.collection,
+		"filter":         "",
+		"outputFields":   []string{"count(*)"},
+	}, &rows)
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) > 0 {
+		if c, ok := rows[0]["count(*)"].(float64); ok {
+			return int64(c), nil
+		}
+	}
+	return 0, nil
+}
+
+// DocExists checks existence by the document's ID.
+func (m *MilvusDB) DocExists(ctx context.Context, doc *document.Document) (bool, error) {
+	return m.IDExists(ctx, doc.ID)
+}
+
+// NameExists is not supported.
+func (m *MilvusDB) NameExists(ctx context.Context, name string) (bool, error) {
+	return false, fmt.Errorf("milvus: NameExists not supported")
+}
+
+// IDExists checks whether an entity with the given primary key exists.
+func (m *MilvusDB) IDExists(ctx context.Context, id string) (bool, error) {
+	var rows []map[string]interface{}
+	err := m.post(ctx, "/v2/vectordb/entities/get", map[string]interface{}{
+		"collectionName": m.collection,
+		"id":             []string{id},
+		"outputFields":   []string{"id"},
+	}, &rows)
 	if err != nil {
 		return false, err
 	}
-	return res.GetColumn("id").Len() > 0, nil
+	return len(rows) > 0, nil
 }
 
-func (m *Milvus) Close() error {
-	return m.client.Close()
-}
+var _ vectordb.VectorDB = (*MilvusDB)(nil)

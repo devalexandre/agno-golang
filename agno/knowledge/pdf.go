@@ -47,8 +47,7 @@ func (p *PDFKnowledgeBase) Search(ctx context.Context, query string, numDocument
 		return nil, fmt.Errorf("vector database not configured")
 	}
 
-	return p.VectorDB.Search(ctx, query, numDocuments, nil)
-
+	return p.BaseKnowledge.retrieve(ctx, query, numDocuments, nil)
 }
 
 func (p *PDFKnowledgeBase) GetCount(ctx context.Context) (int64, error) {

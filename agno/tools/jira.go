@@ -60,7 +60,7 @@ func NewJiraTool(baseURL, email, apiToken string) *JiraTool {
 		baseURL:    baseURL,
 		email:      email,
 		apiToken:   apiToken,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

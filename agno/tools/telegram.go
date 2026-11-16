@@ -45,7 +45,7 @@ func NewTelegramTool(botToken string) *TelegramTool {
 
 	t := &TelegramTool{
 		botToken:   botToken,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

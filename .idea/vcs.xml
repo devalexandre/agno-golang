@@ -2,5 +2,8 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/agno-coder" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/agno-python" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/webdoc" vcs="Git" />
   </component>
 </project>

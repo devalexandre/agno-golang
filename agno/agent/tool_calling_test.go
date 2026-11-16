@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 // MockTool para testes
 type MockTool struct {
 	toolkit.Toolkit
-	callCount int
+	callCount atomic.Int64
 	delay     time.Duration
 }
 
@@ -21,7 +22,7 @@ type MockParams struct {
 }
 
 func (mt *MockTool) TestMethod(params MockParams) (int, error) {
-	mt.callCount++
+	mt.callCount.Add(1)
 	if mt.delay > 0 {
 		time.Sleep(mt.delay)
 	}

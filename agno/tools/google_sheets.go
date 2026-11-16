@@ -52,7 +52,7 @@ func NewGoogleSheetsTool(accessToken string) *GoogleSheetsTool {
 
 	t := &GoogleSheetsTool{
 		accessToken: accessToken,
-		httpClient:  &http.Client{},
+		httpClient:  toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

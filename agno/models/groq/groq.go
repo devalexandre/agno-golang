@@ -1,125 +1,65 @@
+// Package groq provides integration with the Groq API, which is compatible with
+// the OpenAI API format. It reuses the OpenAI-like implementation internally.
 package groq
 
 import (
-	"context"
-	"errors"
 	"os"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/openai/client"
+	"github.com/devalexandre/agno-golang/agno/models/openai/like"
 )
 
-type Groq struct {
-	client client.ClientInterface
-	opts   *models.ClientOptions
-}
+const (
+	// DefaultBaseURL is the OpenAI-compatible endpoint for Groq.
+	DefaultBaseURL = "https://api.groq.com/openai/v1"
+	// EnvAPIKey is the environment variable read when no API key is provided.
+	EnvAPIKey = "GROQ_API_KEY"
+	// DefaultModel is used when no model ID is provided.
+	DefaultModel = "llama-3.3-70b-versatile"
+)
 
-func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
-	opts := models.DefaultOptions()
+// NewGroqChat creates a new Groq chat model.
+//
+//	chat, err := groq.NewGroqChat(
+//	    models.WithID("llama-3.3-70b-versatile"),
+//	    models.WithAPIKey("your-groq-api-key"), // or set GROQ_API_KEY
+//	)
+func NewGroqChat(options ...models.OptionClient) (models.AgnoModelInterface, error) {
+	opts := &models.ClientOptions{}
 	for _, option := range options {
 		option(opts)
 	}
 
-	if opts.ID == "" {
-		opts.ID = "llama3-70b-8192"
+	model := opts.ID
+	if model == "" {
+		model = DefaultModel
+	}
+	apiKey := opts.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv(EnvAPIKey)
 	}
 
-	if opts.BaseURL == "" {
-		opts.BaseURL = "https://api.groq.com/openai/v1"
+	final := []models.OptionClient{
+		models.WithBaseURL(DefaultBaseURL),
+		models.WithID(model),
 	}
-
-	if opts.APIKey == "" {
-		opts.APIKey = os.Getenv("GROQ_API_KEY")
+	if apiKey != "" {
+		final = append(final, models.WithAPIKey(apiKey))
 	}
+	final = append(final, options...)
 
-	cli, err := client.NewClient(
-		models.WithID(opts.ID),
-		models.WithBaseURL(opts.BaseURL),
-		models.WithAPIKey(opts.APIKey),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Groq{
-		client: cli,
-		opts:   opts,
-	}, nil
+	return like.NewLikeOpenAIChat(final...)
 }
 
-func (g *Groq) GetID() string {
-	return g.opts.ID
-}
+// Popular Groq model constants for convenience.
+const (
+	ModelLlama33_70BVersatile = "llama-3.3-70b-versatile"
+	ModelLlama31_8BInstant    = "llama-3.1-8b-instant"
+	ModelMixtral8x7B          = "mixtral-8x7b-32768"
+	ModelGemma2_9B            = "gemma2-9b-it"
+)
 
-func (g *Groq) GetClientOptions() *models.ClientOptions {
-	return g.opts
-}
-
-func (g *Groq) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
-	if g.opts.MaxTokens != nil {
-		options = append([]models.Option{models.WithMaxTokens(*g.opts.MaxTokens)}, options...)
-	}
-
-	resp, err := g.client.CreateChatCompletion(ctx, messages, options...)
-	if err != nil {
-		return nil, err
-	}
-	if len(resp.Choices) == 0 {
-		return nil, errors.New("no choices in response")
-	}
-
-	return &models.MessageResponse{
-		Role:             resp.Choices[0].Message.Role,
-		Content:          resp.Choices[0].Message.Content,
-		Thinking:         resp.Choices[0].Message.Thinking,
-		ToolCalls:        resp.Choices[0].Message.ToolCalls,
-		ToolResults:      resp.Choices[0].Message.ToolResults,
-		ReasoningContent: resp.Choices[0].Message.ReasoningContent,
-	}, nil
-}
-
-func (g *Groq) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	ch := make(chan *models.MessageResponse, 1)
-	errChan := make(chan error)
-	go func() {
-		defer close(ch)
-		defer close(errChan)
-		resp, err := g.Invoke(ctx, messages, options...)
-		if err != nil {
-			ch <- &models.MessageResponse{}
-			errChan <- err
-		} else {
-			ch <- resp
-		}
-	}()
-	return ch, errChan
-}
-
-func (g *Groq) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
-	if g.opts.MaxTokens != nil {
-		options = append([]models.Option{models.WithMaxTokens(*g.opts.MaxTokens)}, options...)
-	}
-
-	return g.client.StreamChatCompletion(ctx, messages, options...)
-}
-
-func (g *Groq) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	respChan := make(chan *models.MessageResponse)
-	errChan := make(chan error, 1)
-
-	optsFunction := models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-		respChan <- &models.MessageResponse{
-			Content: string(chunk),
-		}
-		return nil
-	})
-	options = append(options, optsFunction)
-
-	err := g.InvokeStream(ctx, messages, options...)
-	if err != nil {
-		errChan <- err
-		return nil, errChan
-	}
-
-	return respChan, errChan
+// New is kept for backward compatibility; it is equivalent to NewGroqChat.
+func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
+	return NewGroqChat(options...)
 }

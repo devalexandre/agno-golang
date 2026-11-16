@@ -36,7 +36,7 @@ func GetDuckDuckGoSearchHandler(params DuckDuckGoToolInput) (string, error) {
 	u.RawQuery = q.Encode()
 
 	// Perform the request
-	resp, err := http.Get(u.String())
+	resp, err := toolkit.NewHTTPClient(0).Get(u.String())
 	if err != nil {
 		return "", fmt.Errorf("error fetching data: %v", err)
 	}

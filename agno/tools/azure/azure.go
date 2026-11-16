@@ -3,7 +3,6 @@ package azure
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"

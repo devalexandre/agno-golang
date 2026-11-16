@@ -17,7 +17,7 @@ const serpapiBaseURL = "https://serpapi.com/search.json"
 // SerpAPITool provides search engine results via the SerpAPI service.
 type SerpAPITool struct {
 	toolkit.Toolkit
-	apiKey string
+	apiKey     string
 	httpClient *http.Client
 }
 
@@ -40,7 +40,7 @@ func NewSerpAPITool(apiKey string) *SerpAPITool {
 
 	t := &SerpAPITool{
 		apiKey:     apiKey,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

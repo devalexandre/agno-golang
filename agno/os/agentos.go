@@ -44,7 +44,6 @@ type AgentOS struct {
 	// Runtime state
 	server     *http.Server
 	router     *gin.Engine
-	sessions   map[string]*Session
 	events     []Event
 	interfaces []AgentOSInterface
 	templates  *template.Template
@@ -54,6 +53,7 @@ type AgentOS struct {
 	cancel     context.CancelFunc
 	mu         sync.RWMutex // Features
 	enableMCP  bool
+	protocols  ProtocolOptions // MCP / A2A / AG-UI mounts (protocols.go)
 	telemetry  bool
 	middleware []interface{}
 
@@ -68,6 +68,25 @@ type AgentOS struct {
 
 	// WebSocket upgrader for real-time communication
 	upgrader websocket.Upgrader
+
+	// OS databases backing the session/memory/eval/metrics routes
+	osDBs     map[string]Database
+	osDBOrder []string
+	sessionMu sync.Mutex
+
+	// Authentication / authorization
+	jwt           *JWTConfig
+	scopeMappings []ScopeMapping
+	originPolicy  *OriginPolicy
+
+	// Run execution: resumable event streams and cancellation
+	runs    *runRegistry
+	wfMu    sync.Mutex
+	wfLocks map[*v2.Workflow]*sync.Mutex
+	wfSinks map[*v2.Workflow]func(*v2.WorkflowRunResponseEvent)
+
+	metricsMu          sync.Mutex
+	lastMetricsRefresh time.Time
 }
 
 // knowledgeToInterface converts []knowledge.Knowledge to []interface{}
@@ -138,12 +157,13 @@ func NewAgentOS(options AgentOSOptions) (*AgentOS, error) {
 		knowledge:          knowledgeToInterface(options.Knowledge), // Store direct knowledge bases
 		config:             config,
 		settings:           settings,
-		sessions:           make(map[string]*Session),
+		runs:               newRunRegistry(),
 		events:             make([]Event, 0),
 		interfaces:         options.Interfaces,
 		ctx:                ctx,
 		cancel:             cancel,
 		enableMCP:          options.EnableMCP,
+		protocols:          options.Protocols,
 		telemetry:          options.Telemetry,
 		middleware:         options.Middleware,
 		dbs:                make(map[string]interface{}), // Initialize databases map
@@ -156,6 +176,25 @@ func NewAgentOS(options AgentOSOptions) (*AgentOS, error) {
 				return true // Allow all origins for now
 			},
 		},
+	}
+
+	// OS databases (Python AgentOS db / dbs). Without one, an in-memory
+	// database with the default id keeps sessions, memories and evals.
+	for _, db := range append([]Database{options.DB}, options.Databases...) {
+		os.registerDatabase(db)
+	}
+	if len(os.osDBs) == 0 {
+		os.registerDatabase(NewInMemoryDB(DefaultDBID))
+	}
+
+	if options.JWT != nil {
+		os.jwt = options.JWT.withDefaults()
+		os.scopeMappings = mergeScopeMappings(DefaultScopeMappings(), os.jwt.ScopeMappings)
+	}
+	os.originPolicy = os.buildOriginPolicy()
+	os.upgrader.CheckOrigin = func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		return origin == "" || os.originPolicy.Allows(origin)
 	}
 
 	// Initialize components
@@ -223,6 +262,9 @@ func (os *AgentOS) initialize() error {
 
 	// Auto-discover knowledge instances from agents, teams, and direct OS knowledge
 	os.autoDiscoverKnowledgeInstances()
+
+	// Forward workflow step events to the API run executing the workflow
+	os.hookWorkflowEvents()
 
 	return nil
 }
@@ -475,12 +517,18 @@ func (os *AgentOS) GetApp() *gin.Engine {
 		router.Use(os.corsMiddleware())
 	}
 
+	// Authentication: JWT (+RBAC) when configured, else the security key
+	router.Use(os.authenticationMiddleware())
+
 	// Add custom middleware if provided
 	for _, middleware := range os.middleware {
 		if mw, ok := middleware.(gin.HandlerFunc); ok {
 			router.Use(mw)
 		}
 	}
+
+	// Protocol interfaces (MCP server, A2A, AG-UI) - see protocols.go
+	os.mountProtocols(router)
 
 	// Setup routes
 	os.setupRoutes(router)
@@ -528,26 +576,42 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 	router.GET("/models", os.modelsHandler)
 	router.HEAD("/models", os.modelsHandler)
 
-	// Agent and Team operations - needed by UI (compatible with Python API)
+	// Runs (Python agents/teams/workflows routers)
 	router.POST("/agents/:id/runs", os.agentRunsHandler)
-	router.POST("/agents/:id/runs/:run_id/cancel", os.cancelAgentRunHandler)
+	router.POST("/agents/:id/runs/:run_id/cancel", os.cancelRunHandler)
 	router.POST("/agents/:id/runs/:run_id/continue", os.continueAgentRunHandler)
+	router.POST("/agents/:id/runs/:run_id/resume", os.resumeRunHandler)
+	router.GET("/agents/:agent_id/runs", os.listRunsHandler)
+	router.GET("/agents/:agent_id/runs/:run_id", os.getRunHandler)
 	router.POST("/teams/:id/runs", os.teamRunsHandler)
-	router.POST("/teams/:id/runs/:run_id/cancel", os.cancelTeamRunHandler)
+	router.POST("/teams/:id/runs/:run_id/cancel", os.cancelRunHandler)
+	router.POST("/teams/:id/runs/:run_id/resume", os.resumeRunHandler)
+	router.GET("/teams/:team_id/runs", os.listRunsHandler)
+	router.GET("/teams/:team_id/runs/:run_id", os.getRunHandler)
 	router.POST("/workflows/:id/runs", os.workflowRunsHandler)
-	router.POST("/workflows/:id/runs/:run_id/cancel", os.cancelWorkflowRunHandler)
+	router.POST("/workflows/:id/runs/:run_id/cancel", os.cancelRunHandler)
+	router.POST("/workflows/:id/runs/:run_id/resume", os.resumeRunHandler)
+	router.GET("/workflows/:workflow_id/runs", os.listRunsHandler)
+	router.GET("/workflows/:workflow_id/runs/:run_id", os.getRunHandler)
 
-	// Sessions - needed by UI and Python compatibility
-	router.GET("/sessions", os.sessionsHandler)
-	router.GET("/sessions/:session_id", os.getSessionHandler) // Get individual session
-	router.POST("/sessions/:session_id/runs", os.sessionRunsHandler)
-	router.GET("/sessions/:session_id/runs", os.getSessionRunsHandler) // Get session runs
-	protected := router.Group("/")
-	protected.Use(os.authMiddleware())
-	{
-		// Version endpoint
-		protected.GET("/version", os.versionHandler)
-	}
+	// Sessions (Python routers/session)
+	router.GET("/sessions", os.listSessionsHandler)
+	router.GET("/sessions/filter-schema", os.sessionsFilterSchemaHandler)
+	router.POST("/sessions/search", os.searchSessionsHandler)
+	router.POST("/sessions", os.createSessionHandler)
+	router.GET("/sessions/:session_id", os.getSessionHandler)
+	router.GET("/sessions/:session_id/runs", os.getSessionRunsHandler)
+	router.GET("/sessions/:session_id/runs/:run_id", os.getSessionRunHandler)
+	router.DELETE("/sessions/:session_id", os.deleteSessionHandler)
+	router.DELETE("/sessions", os.deleteSessionsHandler)
+	router.POST("/sessions/:session_id/rename", os.renameSessionHandler)
+	router.PATCH("/sessions/:session_id", os.updateSessionHandler)
+
+	// Version endpoint
+	router.GET("/version", os.versionHandler)
+
+	// Diagnostics (model-free configuration and database checks)
+	router.GET("/diagnostics", os.diagnosticsHandler)
 
 	// Knowledge routes - compatible with Python API (uses /content not /documents)
 	router.GET("/knowledge/content", os.listKnowledgeContentHandler)
@@ -567,27 +631,28 @@ func (os *AgentOS) setupRoutes(router *gin.Engine) {
 	router.PATCH("/knowledge/documents/:document_id", os.updateKnowledgeContentHandler)
 	router.DELETE("/knowledge/documents/:document_id", os.deleteKnowledgeContentHandler)
 	router.DELETE("/knowledge/documents", os.deleteAllKnowledgeContentHandler)
-	router.GET("/knowledge/conversations", os.getKnowledgeConversationsHandler)
 
-	// Memory routes - compatible with Python API
-	router.POST("/memory/add", os.addMemoryHandler)
-	router.DELETE("/memory/:memory_id", os.deleteMemoryHandler)
-	router.DELETE("/memory", os.deleteAllMemoriesHandler)
-	router.GET("/memory", os.getMemoriesHandler)
-	router.GET("/memory/entities", os.getMemoryEntitiesHandler)
-	router.GET("/memory/conversations", os.getMemoryConversationsHandler)
-	router.PATCH("/memory/conversations/:conversation_id", os.updateMemoryConversationHandler)
-	router.GET("/memory/run_ids/:run_id", os.getMemoriesByRunIDHandler)
+	// Memory (Python routers/memory)
+	router.POST("/memories", os.createMemoryHandler)
+	router.GET("/memories", os.listMemoriesHandler)
+	router.GET("/memories/:memory_id", os.getMemoryHandler)
+	router.PATCH("/memories/:memory_id", os.updateMemoryHandler)
+	router.DELETE("/memories/:memory_id", os.deleteMemoryHandler)
+	router.DELETE("/memories", os.deleteMemoriesHandler)
+	router.GET("/memory_topics", os.memoryTopicsHandler)
+	router.GET("/user_memory_stats", os.userMemoryStatsHandler)
 
-	// Metrics routes - compatible with Python API
+	// Metrics (Python routers/metrics)
 	router.GET("/metrics", os.getMetricsHandler)
-	router.POST("/metrics", os.createMetricsHandler)
+	router.POST("/metrics/refresh", os.refreshMetricsHandler)
+	router.GET("/metrics/refresh/status", os.metricsRefreshStatusHandler)
 
-	// Evals routes - compatible with Python API
-	router.GET("/evals", os.listEvalsHandler)
-	router.POST("/evals", os.createEvalHandler)
-	router.GET("/evals/:eval_id", os.getEvalHandler)
-	router.POST("/evals/:eval_id/run", os.runEvalHandler)
+	// Evals (Python routers/evals)
+	router.GET("/eval-runs", os.listEvalRunsHandler)
+	router.POST("/eval-runs", os.createEvalRunHandler)
+	router.GET("/eval-runs/:eval_run_id", os.getEvalRunHandler)
+	router.PATCH("/eval-runs/:eval_run_id", os.updateEvalRunHandler)
+	router.DELETE("/eval-runs", os.deleteEvalRunsHandler)
 
 	// WebSocket endpoints
 	router.GET("/ws", os.websocketHandler)

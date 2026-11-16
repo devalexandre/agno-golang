@@ -53,7 +53,7 @@ func NewGmailTool(accessToken string) *GmailTool {
 
 	t := &GmailTool{
 		accessToken: accessToken,
-		httpClient:  &http.Client{},
+		httpClient:  toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

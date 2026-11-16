@@ -47,6 +47,8 @@ type RunOptions struct {
 	DebugMode *bool
 	// SmartMemoryManager configuration for this run
 	SmartMemoryManager *SmartMemoryManagerOptions
+	// RunID sets the ID of this run (used by Agent.CancelRun). Generated when nil.
+	RunID *string
 }
 
 // WithStream enables streaming response

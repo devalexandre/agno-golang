@@ -159,6 +159,7 @@ func (tk *Toolkit) RegisterWithOptions(methodName, description string, receiver 
 	for _, opt := range opts {
 		opt(&method)
 	}
+	finalizeMethod(fullMethodName, &method)
 	tk.methods[fullMethodName] = method
 }
 

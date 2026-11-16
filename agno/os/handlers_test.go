@@ -15,15 +15,57 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/devalexandre/agno-golang/agno/agent"
+	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/team"
 	v2 "github.com/devalexandre/agno-golang/agno/workflow/v2"
 )
+
+// stubModel is a no-network model so the endpoint tests do not need a provider.
+type stubModel struct{}
+
+func (stubModel) GetID() string { return "stub-model" }
+
+// lastUserContent echoes the latest user message so tests can assert on it.
+func lastUserContent(msgs []models.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == models.TypeUserRole {
+			return msgs[i].Content
+		}
+	}
+	return "ok"
+}
+
+func (stubModel) Invoke(ctx context.Context, msgs []models.Message, _ ...models.Option) (*models.MessageResponse, error) {
+	return &models.MessageResponse{Role: "assistant", Content: lastUserContent(msgs)}, nil
+}
+func (m stubModel) AInvoke(ctx context.Context, msgs []models.Message, opts ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+	ch, errCh := make(chan *models.MessageResponse, 1), make(chan error, 1)
+	r, _ := m.Invoke(ctx, msgs, opts...)
+	ch <- r
+	close(ch)
+	close(errCh)
+	return ch, errCh
+}
+func (stubModel) InvokeStream(ctx context.Context, msgs []models.Message, opts ...models.Option) error {
+	call := &models.CallOptions{}
+	for _, o := range opts {
+		o(call)
+	}
+	if call.StreamingFunc != nil {
+		return call.StreamingFunc(ctx, []byte(lastUserContent(msgs)))
+	}
+	return nil
+}
+func (m stubModel) AInvokeStream(ctx context.Context, msgs []models.Message, opts ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
+	return m.AInvoke(ctx, msgs, opts...)
+}
 
 // setupTestAgentOS creates a test AgentOS instance
 func setupTestAgentOS() (*AgentOS, error) {
 	// Create test agents
 	testAgent, err := agent.NewAgent(agent.AgentConfig{
 		Context: context.Background(),
+		Model:   stubModel{},
 		Name:    "test-agent",
 		Role:    "Test Agent for validation",
 	})
@@ -32,10 +74,13 @@ func setupTestAgentOS() (*AgentOS, error) {
 	}
 
 	// Create test teams
+	// The team runs for real (no canned responses): give it a no-network model and a member.
 	testTeam := team.NewTeam(team.TeamConfig{
 		Context: context.Background(),
 		Name:    "test-team",
 		Role:    "Test Team for validation",
+		Model:   stubModel{},
+		Members: []*agent.Agent{testAgent},
 	})
 
 	// Create test workflows
@@ -388,19 +433,20 @@ func TestSessionsEndpoint(t *testing.T) {
 
 	router := os.GetApp()
 
-	// Test list sessions (initially empty)
+	// List sessions: Python returns a paginated response (initially empty)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/sessions", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
 
-	var sessions []interface{}
-	err = json.Unmarshal(w.Body.Bytes(), &sessions)
+	var list map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &list)
 	require.NoError(t, err)
-	assert.Len(t, sessions, 0)
+	assert.Len(t, list["data"], 0)
+	assert.Contains(t, list, "meta")
 
-	// Test create session
+	// Create session (Python returns the session detail schema with 201)
 	sessionData := map[string]interface{}{
 		"user_id":  "test-user",
 		"agent_id": "test-agent",
@@ -409,42 +455,39 @@ func TestSessionsEndpoint(t *testing.T) {
 
 	sessionJSON, _ := json.Marshal(sessionData)
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/sessions", bytes.NewBuffer(sessionJSON))
+	req, _ = http.NewRequest("POST", "/sessions?type=agent", bytes.NewBuffer(sessionJSON))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 201, w.Code)
 
-	var createResponse map[string]interface{}
-	err = json.Unmarshal(w.Body.Bytes(), &createResponse)
+	var session map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &session)
 	require.NoError(t, err)
 
-	session := createResponse["session"].(map[string]interface{})
-	sessionID := session["id"].(string)
+	sessionID := session["session_id"].(string)
 	assert.NotEmpty(t, sessionID)
 	assert.Equal(t, "test-user", session["user_id"])
 	assert.Equal(t, "test-agent", session["agent_id"])
 
-	// Test get session
+	// Get session
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/sessions/%s", sessionID), nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
 
-	var getResponse map[string]interface{}
-	err = json.Unmarshal(w.Body.Bytes(), &getResponse)
+	var retrieved map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &retrieved)
 	require.NoError(t, err)
+	assert.Equal(t, sessionID, retrieved["session_id"])
 
-	retrievedSession := getResponse["session"].(map[string]interface{})
-	assert.Equal(t, sessionID, retrievedSession["id"])
-
-	// Test delete session
+	// Delete session (204 like Python)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", fmt.Sprintf("/sessions/%s", sessionID), nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, 200, w.Code)
+	assert.Equal(t, 204, w.Code)
 
 	// Verify session is deleted
 	w = httptest.NewRecorder()
@@ -547,22 +590,14 @@ func TestKnowledgeVectorSearch(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, 200, w.Code)
+	// The search used to return a canned result. It now searches the knowledge
+	// base selected by db_id; none is configured here, so (as in Python) 404.
+	assert.Equal(t, 404, w.Code)
 
 	var response map[string]interface{}
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-
-	// Check paginated response structure
-	assert.Contains(t, response, "data")
-	assert.Contains(t, response, "meta")
-
-	// Check meta contains pagination info
-	meta := response["meta"].(map[string]interface{})
-	assert.Contains(t, meta, "page")
-	assert.Contains(t, meta, "limit")
-	assert.Contains(t, meta, "total_pages")
-	assert.Contains(t, meta, "total_count")
+	assert.Contains(t, response, "detail")
 }
 
 // TestMemoryEndpoints tests memory management endpoints
@@ -700,7 +735,8 @@ func TestMetricsEndpoints(t *testing.T) {
 	req, _ = http.NewRequest("POST", "/metrics/refresh", nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, 204, w.Code)
+	// Python returns 200 with the recalculated daily metrics
+	assert.Equal(t, 200, w.Code)
 
 	// Test with date filters
 	w = httptest.NewRecorder()
@@ -770,8 +806,10 @@ func TestCORSHeaders(t *testing.T) {
 	req.Header.Set("Origin", "https://malicious.com")
 	router.ServeHTTP(w, req)
 
+	// Python (Starlette CORSMiddleware) sends no Access-Control-Allow-Origin
+	// for a disallowed origin; the request itself still succeeds.
 	assert.Equal(t, 200, w.Code)
-	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin")) // Fallback
+	assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
 }
 
 // TestAgentOSHeaders tests AgentOS identification headers
@@ -823,7 +861,7 @@ func TestAgentRunsEndpoint(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
-	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
 
 	// Verify streaming response contains expected events
 	body := w.Body.String()
@@ -878,7 +916,7 @@ func TestTeamRunsEndpoint(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
-	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
 
 	// Verify streaming response contains expected events
 	body := w.Body.String()
@@ -908,15 +946,12 @@ func TestPaginationAndFiltering(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/knowledge/content?db_id=agno-storage&page=1&limit=5", nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, 200, w.Code)
+	// No knowledge base is configured: Python's get_knowledge_instance_by_db_id answers 404
+	// (same as TestKnowledgeContentEndpoints).
+	assert.Equal(t, 404, w.Code)
 
 	var response map[string]interface{}
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	require.NoError(t, err)
-
-	meta := response["meta"].(map[string]interface{})
-	assert.Equal(t, float64(1), meta["page"])
-	assert.Equal(t, float64(5), meta["limit"])
+	var meta map[string]interface{}
 
 	// Test memory pagination
 	w = httptest.NewRecorder()

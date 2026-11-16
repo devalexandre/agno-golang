@@ -117,6 +117,11 @@ type AgentOSSettings struct {
 	EnableTLS bool   `json:"enable_tls" yaml:"enable_tls" default:"false"`
 	CertFile  string `json:"cert_file,omitempty" yaml:"cert_file,omitempty"`
 	KeyFile   string `json:"key_file,omitempty" yaml:"key_file,omitempty"`
+	// CORSAllowedOrigins are browser origins allowed in addition to the Agno
+	// defaults ("*" allows any origin). CORSOriginPatterns are regexes
+	// matched against the full origin.
+	CORSAllowedOrigins []string `json:"cors_allowed_origins,omitempty" yaml:"cors_allowed_origins,omitempty"`
+	CORSOriginPatterns []string `json:"cors_origin_patterns,omitempty" yaml:"cors_origin_patterns,omitempty"`
 }
 
 // AgentOSOptions represents all options for creating an AgentOS instance
@@ -136,6 +141,16 @@ type AgentOSOptions struct {
 	Telemetry    bool                  `json:"telemetry" yaml:"telemetry" default:"false"`
 	Middleware   []interface{}         `json:"middleware,omitempty" yaml:"middleware,omitempty"`
 	CustomRoutes []interface{}         `json:"custom_routes,omitempty" yaml:"custom_routes,omitempty"`
+	// DB backs the session, memory, eval and metrics routes (Python db=).
+	// Defaults to NewInMemoryDB(DefaultDBID). Databases adds more, selected
+	// per request with ?db_id=.
+	DB        Database   `json:"-" yaml:"-"`
+	Databases []Database `json:"-" yaml:"-"`
+	// JWT enables JWT authentication (and RBAC when JWT.Authorization) in
+	// place of the static security key.
+	JWT *JWTConfig `json:"-" yaml:"-"`
+	// Protocols mounts the MCP server, A2A and AG-UI interfaces (see protocols.go).
+	Protocols ProtocolOptions `json:"-" yaml:"-"`
 }
 
 // Event represents an event in the AgentOS system

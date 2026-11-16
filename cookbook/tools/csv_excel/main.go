@@ -25,7 +25,9 @@ func main() {
 	}
 
 	// 2. Initialize the Shell tool
-	shellTool := tools.NewShellTool()
+	// Shell mode (pipes, redirects, sh -c) is opt-in since the hardening port;
+	// only enable it for trusted, supervised use.
+	shellTool := tools.NewShellTool(tools.WithShellMode())
 
 	// 3. Create the Data Processing Agent
 	ag, err := agent.NewAgent(agent.AgentConfig{

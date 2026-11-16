@@ -4,3 +4,10 @@ examples
 *.py
 __pycache__
 agno-python
+webdoc
+ROADMAP_GAP_ANALYSIS.md
+**ROADMAP_GAP_ANALYSIS.md
+RELEASE.md
+**NOTES**
+scripts
+tmp

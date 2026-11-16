@@ -212,9 +212,8 @@ func TestAgentOS_CreateSessionHandler(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// Note: This test will fail with bad request because we didn't set the body correctly
-	// but it tests the handler setup
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	// The body is optional, as in Python (CreateSessionRequest has only optional fields)
+	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
 func TestChatConfig_Validation(t *testing.T) {

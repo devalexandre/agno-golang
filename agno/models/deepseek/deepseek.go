@@ -1,125 +1,64 @@
+// Package deepseek provides integration with the DeepSeek API, which is
+// compatible with the OpenAI API format. It reuses the OpenAI-like
+// implementation internally.
 package deepseek
 
 import (
-	"context"
-	"errors"
 	"os"
 
 	"github.com/devalexandre/agno-golang/agno/models"
-	"github.com/devalexandre/agno-golang/agno/models/openai/client"
+	"github.com/devalexandre/agno-golang/agno/models/openai/like"
 )
 
-type DeepSeek struct {
-	client client.ClientInterface
-	opts   *models.ClientOptions
-}
+const (
+	// DefaultBaseURL is the OpenAI-compatible endpoint for DeepSeek.
+	DefaultBaseURL = "https://api.deepseek.com/v1"
+	// EnvAPIKey is the environment variable read when no API key is provided.
+	EnvAPIKey = "DEEPSEEK_API_KEY"
+	// DefaultModel is used when no model ID is provided.
+	DefaultModel = "deepseek-chat"
+)
 
-func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
-	opts := models.DefaultOptions()
+// NewDeepSeekChat creates a new DeepSeek chat model.
+//
+//	chat, err := deepseek.NewDeepSeekChat(
+//	    models.WithID("deepseek-chat"),
+//	    models.WithAPIKey("your-deepseek-api-key"), // or set DEEPSEEK_API_KEY
+//	)
+func NewDeepSeekChat(options ...models.OptionClient) (models.AgnoModelInterface, error) {
+	opts := &models.ClientOptions{}
 	for _, option := range options {
 		option(opts)
 	}
 
-	if opts.ID == "" {
-		opts.ID = "deepseek-chat"
+	model := opts.ID
+	if model == "" {
+		model = DefaultModel
+	}
+	apiKey := opts.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv(EnvAPIKey)
 	}
 
-	if opts.BaseURL == "" {
-		opts.BaseURL = "https://api.deepseek.com"
+	final := []models.OptionClient{
+		models.WithBaseURL(DefaultBaseURL),
+		models.WithID(model),
 	}
-
-	if opts.APIKey == "" {
-		opts.APIKey = os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey != "" {
+		final = append(final, models.WithAPIKey(apiKey))
 	}
+	final = append(final, options...)
 
-	cli, err := client.NewClient(
-		models.WithID(opts.ID),
-		models.WithBaseURL(opts.BaseURL),
-		models.WithAPIKey(opts.APIKey),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &DeepSeek{
-		client: cli,
-		opts:   opts,
-	}, nil
+	return like.NewLikeOpenAIChat(final...)
 }
 
-func (d *DeepSeek) GetID() string {
-	return d.opts.ID
-}
+// Popular DeepSeek model constants for convenience.
+const (
+	ModelDeepSeekChat     = "deepseek-chat"
+	ModelDeepSeekReasoner = "deepseek-reasoner"
+)
 
-func (d *DeepSeek) GetClientOptions() *models.ClientOptions {
-	return d.opts
-}
-
-func (d *DeepSeek) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
-	if d.opts.MaxTokens != nil {
-		options = append([]models.Option{models.WithMaxTokens(*d.opts.MaxTokens)}, options...)
-	}
-
-	resp, err := d.client.CreateChatCompletion(ctx, messages, options...)
-	if err != nil {
-		return nil, err
-	}
-	if len(resp.Choices) == 0 {
-		return nil, errors.New("no choices in response")
-	}
-
-	return &models.MessageResponse{
-		Role:             resp.Choices[0].Message.Role,
-		Content:          resp.Choices[0].Message.Content,
-		Thinking:         resp.Choices[0].Message.Thinking,
-		ToolCalls:        resp.Choices[0].Message.ToolCalls,
-		ToolResults:      resp.Choices[0].Message.ToolResults,
-		ReasoningContent: resp.Choices[0].Message.ReasoningContent,
-	}, nil
-}
-
-func (d *DeepSeek) AInvoke(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	ch := make(chan *models.MessageResponse, 1)
-	errChan := make(chan error)
-	go func() {
-		defer close(ch)
-		defer close(errChan)
-		resp, err := d.Invoke(ctx, messages, options...)
-		if err != nil {
-			ch <- &models.MessageResponse{}
-			errChan <- err
-		} else {
-			ch <- resp
-		}
-	}()
-	return ch, errChan
-}
-
-func (d *DeepSeek) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
-	if d.opts.MaxTokens != nil {
-		options = append([]models.Option{models.WithMaxTokens(*d.opts.MaxTokens)}, options...)
-	}
-
-	return d.client.StreamChatCompletion(ctx, messages, options...)
-}
-
-func (d *DeepSeek) AInvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) (<-chan *models.MessageResponse, <-chan error) {
-	respChan := make(chan *models.MessageResponse)
-	errChan := make(chan error, 1)
-
-	optsFunction := models.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-		respChan <- &models.MessageResponse{
-			Content: string(chunk),
-		}
-		return nil
-	})
-	options = append(options, optsFunction)
-
-	err := d.InvokeStream(ctx, messages, options...)
-	if err != nil {
-		errChan <- err
-		return nil, errChan
-	}
-
-	return respChan, errChan
+// New is kept for backward compatibility; it is equivalent to NewDeepSeekChat.
+func New(options ...models.OptionClient) (models.AgnoModelInterface, error) {
+	return NewDeepSeekChat(options...)
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/devalexandre/agno-golang/agno/models"
 )
 
 // LoopCondition represents a function that determines whether the loop should continue
@@ -116,6 +118,8 @@ func (l *Loop) Execute(ctx context.Context, input *StepInput) (*StepOutput, erro
 		Audio:               input.Audio,
 		PreviousStepOutputs: make(map[string]*StepOutput),
 	}
+	stepInput.inheritRuntime(input)
+	var producedFiles []models.File
 
 	// Copy previous step outputs
 	if input.PreviousStepOutputs != nil {
@@ -145,7 +149,10 @@ func (l *Loop) Execute(ctx context.Context, input *StepInput) (*StepOutput, erro
 		}
 
 		// Execute steps for this iteration
-		iterationOutput, err := l.executeIteration(ctx, stepInput, l.currentIteration)
+		iterationOutput, iterationFiles, err := l.executeIteration(ctx, stepInput, l.currentIteration)
+		// Files produced before a failing step still flow on, like content does.
+		stepInput.Files = append(stepInput.Files, iterationFiles...)
+		producedFiles = append(producedFiles, iterationFiles...)
 		if err != nil {
 			if l.BreakOnError {
 				return nil, fmt.Errorf("loop '%s' failed at iteration %d: %w", l.Name, l.currentIteration, err)
@@ -180,6 +187,7 @@ func (l *Loop) Execute(ctx context.Context, input *StepInput) (*StepOutput, erro
 			"iterations":  l.currentIteration,
 			"duration_ms": endTime.Sub(startTime).Milliseconds(),
 		},
+		Files: producedFiles,
 	}
 
 	if l.CollectOutputs {
@@ -196,8 +204,10 @@ func (l *Loop) Execute(ctx context.Context, input *StepInput) (*StepOutput, erro
 }
 
 // executeIteration executes all steps for a single iteration
-func (l *Loop) executeIteration(ctx context.Context, input *StepInput, iteration int) (*StepOutput, error) {
+// It returns the last output together with every file produced in the iteration.
+func (l *Loop) executeIteration(ctx context.Context, input *StepInput, iteration int) (*StepOutput, []models.File, error) {
 	var lastOutput *StepOutput
+	var producedFiles []models.File
 
 	// 🔥 CRIAMOS UM NOVO input para preservar o Message original
 	iterInput := &StepInput{
@@ -209,6 +219,7 @@ func (l *Loop) executeIteration(ctx context.Context, input *StepInput, iteration
 		PreviousStepContent: input.PreviousStepContent,
 		PreviousStepOutputs: map[string]*StepOutput{},
 	}
+	iterInput.inheritRuntime(input)
 
 	// 🔁 Copia os outputs anteriores
 	for k, v := range input.PreviousStepOutputs {
@@ -218,7 +229,7 @@ func (l *Loop) executeIteration(ctx context.Context, input *StepInput, iteration
 	for i, item := range l.Steps {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, producedFiles, ctx.Err()
 		default:
 		}
 
@@ -246,14 +257,16 @@ func (l *Loop) executeIteration(ctx context.Context, input *StepInput, iteration
 		case *Router:
 			output, err = v.Execute(ctx, iterInput)
 		default:
-			return nil, fmt.Errorf("unsupported step type at index %d in loop '%s': %T", i, l.Name, v)
+			return nil, producedFiles, fmt.Errorf("unsupported step type at index %d in loop '%s': %T", i, l.Name, v)
 		}
 
 		if err != nil {
-			return nil, err
+			return nil, producedFiles, err
 		}
 
 		if output != nil {
+			iterInput.Files = appendFiles(iterInput.Files, output)
+			producedFiles = appendFiles(producedFiles, output)
 			stepName := fmt.Sprintf("%s_iteration_%d_step_%d", l.Name, iteration, i)
 			if output.StepName != "" {
 				stepName = fmt.Sprintf("%s_iteration_%d", output.StepName, iteration)
@@ -263,7 +276,7 @@ func (l *Loop) executeIteration(ctx context.Context, input *StepInput, iteration
 		}
 	}
 
-	return lastOutput, nil
+	return lastOutput, producedFiles, nil
 }
 
 // Common loop conditions

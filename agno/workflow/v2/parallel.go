@@ -190,6 +190,7 @@ func (p *Parallel) Execute(ctx context.Context, input *StepInput) (*StepOutput, 
 				Audio:               input.Audio,
 				PreviousStepOutputs: make(map[string]*StepOutput),
 			}
+			stepInput.inheritRuntime(input)
 
 			// Copy previous step outputs
 			if input.PreviousStepOutputs != nil {
@@ -271,6 +272,11 @@ func (p *Parallel) Execute(ctx context.Context, input *StepInput) (*StepOutput, 
 			"failure_count":   failureCount,
 			"max_concurrency": p.MaxConcurrency,
 		},
+	}
+
+	// Files produced by any member flow on to the next step, in declaration order.
+	for i, item := range p.Steps {
+		output.Files = appendFiles(output.Files, p.outputs[p.getStepName(item, i)])
 	}
 
 	if p.CombineOutputs {

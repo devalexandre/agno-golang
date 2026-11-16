@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/devalexandre/agno-golang/agno/metrics"
 	"github.com/devalexandre/agno-golang/agno/models"
 	"github.com/devalexandre/agno-golang/agno/tools"
 )
@@ -58,6 +59,34 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	CachedTokens     int `json:"cached_tokens,omitempty"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
+	AudioInputTokens int `json:"audio_input_tokens,omitempty"`
+}
+
+// Add sums other into u (used to accumulate a tool loop's model calls).
+func (u *Usage) Add(other Usage) {
+	u.PromptTokens += other.PromptTokens
+	u.CompletionTokens += other.CompletionTokens
+	u.TotalTokens += other.TotalTokens
+	u.CachedTokens += other.CachedTokens
+	u.ReasoningTokens += other.ReasoningTokens
+	u.AudioInputTokens += other.AudioInputTokens
+}
+
+// ToMessageMetrics converts the usage to typed metrics (nil when empty).
+func (u Usage) ToMessageMetrics() *metrics.MessageMetrics {
+	if u.TotalTokens == 0 && u.PromptTokens == 0 && u.CompletionTokens == 0 {
+		return nil
+	}
+	return &metrics.MessageMetrics{Tokens: metrics.Tokens{
+		InputTokens:      u.PromptTokens,
+		OutputTokens:     u.CompletionTokens,
+		TotalTokens:      u.TotalTokens,
+		CacheReadTokens:  u.CachedTokens,
+		ReasoningTokens:  u.ReasoningTokens,
+		AudioInputTokens: u.AudioInputTokens,
+	}}
 }
 
 type CompletionResponse struct {
@@ -68,7 +97,6 @@ type CompletionResponse struct {
 	Choices []Choices `json:"choices"`
 	Usage   Usage     `json:"usage"`
 }
-
 
 // ClientInterface defines the interface for communication with the OpenAI API.
 type ClientInterface interface {

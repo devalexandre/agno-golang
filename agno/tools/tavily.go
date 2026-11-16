@@ -23,11 +23,11 @@ type TavilyTool struct {
 
 // TavilySearchParams defines the parameters for the Search method.
 type TavilySearchParams struct {
-	Query        string `json:"query" description:"The search query to execute." required:"true"`
-	MaxResults   int    `json:"max_results,omitempty" description:"Maximum number of results (1-20). Defaults to toolkit setting."`
-	SearchDepth  string `json:"search_depth,omitempty" description:"Search depth: basic, advanced. Default: basic."`
-	IncludeAnswer bool  `json:"include_answer,omitempty" description:"Whether to include an AI-generated answer summary."`
-	Topic        string `json:"topic,omitempty" description:"Topic filter: general, news, finance. Default: general."`
+	Query         string `json:"query" description:"The search query to execute." required:"true"`
+	MaxResults    int    `json:"max_results,omitempty" description:"Maximum number of results (1-20). Defaults to toolkit setting."`
+	SearchDepth   string `json:"search_depth,omitempty" description:"Search depth: basic, advanced. Default: basic."`
+	IncludeAnswer bool   `json:"include_answer,omitempty" description:"Whether to include an AI-generated answer summary."`
+	Topic         string `json:"topic,omitempty" description:"Topic filter: general, news, finance. Default: general."`
 }
 
 // TavilyExtractParams defines the parameters for the Extract method.
@@ -48,7 +48,7 @@ func NewTavilyTool(apiKey string, maxResults int) *TavilyTool {
 	t := &TavilyTool{
 		apiKey:     apiKey,
 		maxResults: maxResults,
-		httpClient: &http.Client{},
+		httpClient: toolkit.NewHTTPClient(0),
 	}
 
 	tk := toolkit.NewToolkit()

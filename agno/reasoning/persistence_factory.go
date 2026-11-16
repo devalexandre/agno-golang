@@ -1,7 +1,10 @@
 package reasoning
 
 import (
+	"database/sql"
 	"fmt"
+
+	_ "modernc.org/sqlite" // pure-Go SQLite driver ("sqlite")
 )
 
 // DatabaseType define o tipo de banco de dados suportado
@@ -114,23 +117,17 @@ func newSQLitePersistence(config *DatabaseConfig) (ReasoningPersistence, error) 
 		return nil, fmt.Errorf("database path is required for SQLite")
 	}
 
-	// Importar database/sql e sqlite3 driver
-	// import _ "modernc.org/sqlite"
-	// import "database/sql"
-
-	// db, err := sql.Open("sqlite3", config.Database)
-	// if err != nil {
-	//     return nil, fmt.Errorf("failed to open SQLite database: %w", err)
-	// }
-
-	// persistence, err := NewSQLiteReasoningPersistence(db)
-	// if err != nil {
-	//     return nil, fmt.Errorf("failed to create SQLite persistence: %w", err)
-	// }
-
-	// return persistence, nil
-
-	return nil, fmt.Errorf("SQLite persistence requires modernc.org/sqlite driver")
+	// modernc.org/sqlite (pure Go, registered as "sqlite").
+	db, err := sql.Open("sqlite", config.Database)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
+	}
+	persistence, err := NewSQLiteReasoningPersistence(db)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create SQLite persistence: %w", err)
+	}
+	return persistence, nil
 }
 
 // newPostgreSQLPersistence cria uma nova instância de PostgreSQL persistence usando agno/db

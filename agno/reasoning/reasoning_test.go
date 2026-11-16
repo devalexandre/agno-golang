@@ -106,7 +106,7 @@ func TestFormatReasoningStep(t *testing.T) {
 
 	formatted := reasoning.FormatReasoningStep(step)
 	expected := "## Test Step\nThis is a test\nAction: Test action\nConfidence: 0.90\nNext: continue\n"
-	
+
 	if formatted != expected {
 		t.Errorf("FormatReasoningStep() = %q, want %q", formatted, expected)
 	}
