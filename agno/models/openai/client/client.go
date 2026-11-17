@@ -58,7 +58,10 @@ func NewClient(options ...models.OptionClient) (*Client, error) {
 // CreateChatCompletion creates a chat completion request using the official client.
 func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) (*CompletionResponse, error) {
 	// Process options to get tools and other parameters
-	callOptions := models.DefaultCallOptions()
+	// Only what the caller sets is sent: Claude 5 models (served here by
+	// gateways and routers too) reject temperature and top_p, and OpenAI's
+	// reasoning models accept only the default temperature.
+	callOptions := &models.CallOptions{}
 	for _, option := range options {
 		option(callOptions)
 	}
@@ -437,7 +440,10 @@ func extractReasoningFields(raw string) (thinking string, reasoningContent strin
 // StreamChatCompletion performs a streaming chat completion request.
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {
 	// Process options
-	callOptions := models.DefaultCallOptions()
+	// Only what the caller sets is sent: Claude 5 models (served here by
+	// gateways and routers too) reject temperature and top_p, and OpenAI's
+	// reasoning models accept only the default temperature.
+	callOptions := &models.CallOptions{}
 	for _, option := range options {
 		option(callOptions)
 	}

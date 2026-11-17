@@ -118,7 +118,10 @@ func (b *Bedrock) buildInput(messages []models.Message, callOpts *models.CallOpt
 
 // Invoke sends a Converse request and returns the assistant's text.
 func (b *Bedrock) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
-	callOpts := models.DefaultCallOptions()
+	// Only what the caller sets is sent: Claude 5 models (served here by
+	// gateways and routers too) reject temperature and top_p, and OpenAI's
+	// reasoning models accept only the default temperature.
+	callOpts := &models.CallOptions{}
 	for _, o := range options {
 		o(callOpts)
 	}
@@ -166,7 +169,10 @@ func (b *Bedrock) AInvoke(ctx context.Context, messages []models.Message, option
 
 // InvokeStream streams the response text to the configured StreamingFunc.
 func (b *Bedrock) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
-	callOpts := models.DefaultCallOptions()
+	// Only what the caller sets is sent: Claude 5 models (served here by
+	// gateways and routers too) reject temperature and top_p, and OpenAI's
+	// reasoning models accept only the default temperature.
+	callOpts := &models.CallOptions{}
 	for _, o := range options {
 		o(callOpts)
 	}
