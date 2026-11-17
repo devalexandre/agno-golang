@@ -54,7 +54,9 @@ func (b *Bedrock) GetClientOptions() *models.ClientOptions {
 }
 
 func (b *Bedrock) Invoke(ctx context.Context, messages []models.Message, options ...models.Option) (*models.MessageResponse, error) {
-	callOpts := models.DefaultCallOptions()
+	// Only what the caller sets: Claude models from the 5 family reject
+	// temperature and top_p, and Bedrock has its own defaults.
+	callOpts := &models.CallOptions{}
 	for _, opt := range options {
 		opt(callOpts)
 	}
@@ -145,7 +147,9 @@ func (b *Bedrock) AInvoke(ctx context.Context, messages []models.Message, option
 }
 
 func (b *Bedrock) InvokeStream(ctx context.Context, messages []models.Message, options ...models.Option) error {
-	callOpts := models.DefaultCallOptions()
+	// Only what the caller sets: Claude models from the 5 family reject
+	// temperature and top_p, and Bedrock has its own defaults.
+	callOpts := &models.CallOptions{}
 	for _, opt := range options {
 		opt(callOpts)
 	}

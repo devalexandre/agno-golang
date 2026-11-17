@@ -149,7 +149,12 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 	debugmod := ctx.Value(models.DebugKey)
 	showToolsCall := ctx.Value(models.ShowToolsCallKey)
 
-	callOptions := models.DefaultCallOptions()
+	// Start empty, not from models.DefaultCallOptions(): its temperature and
+	// top_p would go out with every request, and Claude models from the 5
+	// family on reject sampling parameters ("`temperature` is deprecated for
+	// this model"). Only what the caller sets is sent; the API has its own
+	// defaults.
+	callOptions := &models.CallOptions{}
 	for _, opt := range options {
 		opt(callOptions)
 	}
@@ -214,7 +219,12 @@ func (c *Client) CreateChatCompletion(ctx context.Context, messages []models.Mes
 // When tools are configured, the tool-use loop runs non-streaming and the final
 // text is emitted to the StreamingFunc.
 func (c *Client) StreamChatCompletion(ctx context.Context, messages []models.Message, options ...models.Option) error {
-	callOptions := models.DefaultCallOptions()
+	// Start empty, not from models.DefaultCallOptions(): its temperature and
+	// top_p would go out with every request, and Claude models from the 5
+	// family on reject sampling parameters ("`temperature` is deprecated for
+	// this model"). Only what the caller sets is sent; the API has its own
+	// defaults.
+	callOptions := &models.CallOptions{}
 	for _, opt := range options {
 		opt(callOptions)
 	}
